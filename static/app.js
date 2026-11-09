@@ -13,7 +13,34 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchInitialData();
   setupSimulationListeners();
   initLiveSyncButton();
+  initGsapEntrances();
 });
+
+function initGsapEntrances() {
+  if (typeof gsap === "undefined") return;
+  gsap.from(".top-nav", { opacity: 0, y: -16, duration: 0.6, ease: "power2.out" });
+  gsap.from(".ticker-item", { opacity: 0, y: -10, stagger: 0.04, duration: 0.6, delay: 0.15, ease: "power2.out" });
+  gsap.from(".grid-box", { opacity: 0, y: 18, stagger: 0.08, duration: 0.7, delay: 0.25, ease: "power2.out" });
+}
+
+function animateNumber(el, targetVal, prefix="", suffix="", decimals=2, duration=0.8) {
+  if (!el) return;
+  if (typeof gsap === "undefined") {
+    el.innerText = `${prefix}${targetVal.toFixed(decimals)}${suffix}`;
+    return;
+  }
+  const rawCurrent = el.innerText.replace(/[^0-9.-]/g, "");
+  const current = parseFloat(rawCurrent) || 0;
+  const obj = { val: current };
+  gsap.to(obj, {
+    val: targetVal,
+    duration: duration,
+    ease: "power2.out",
+    onUpdate: () => {
+      el.innerText = `${prefix}${obj.val.toFixed(decimals)}${suffix}`;
+    }
+  });
+}
 
 function initClock() {
   const clockEl = document.getElementById("live-clock");
@@ -301,12 +328,10 @@ async function renderMonteCarloChart(horizon, z) {
   const pNegEl = document.getElementById("mc-p-neg");
   const medEl = document.getElementById("mc-median-price");
   const varEl = document.getElementById("mc-var-95");
-
-  if (pPosEl) pPosEl.innerText = mc.metrics.p_positive_return_pct + "%";
-  if (pNegEl) pNegEl.innerText = mc.metrics.p_negative_return_pct + "%";
-  if (medEl) medEl.innerText = "$" + mc.metrics.median_terminal_price.toFixed(2);
-  if (varEl) varEl.innerText = (mc.metrics.var_95_pct > 0 ? "+" : "") + mc.metrics.var_95_pct.toFixed(2) + "%";
-
+  animateNumber(pPosEl, mc.metrics.p_positive_return_pct, "", "%", 2);
+  animateNumber(pNegEl, mc.metrics.p_negative_return_pct, "", "%", 2);
+  animateNumber(medEl, mc.metrics.median_terminal_price, "$", "", 2);
+  animateNumber(varEl, mc.metrics.var_95_pct, (mc.metrics.var_95_pct > 0 ? "+" : ""), "%", 2);
   const w = container.clientWidth || 700;
   const h = 260;
   const padL = 50;
@@ -369,7 +394,7 @@ async function renderMonteCarloChart(horizon, z) {
   });
 
   let svg = `
-    <svg class="telemetry-svg" viewBox="0 0 ${w} ${h}">
+    <svg class="telemetry-svg" id="mc-svg" viewBox="0 0 ${w} ${h}">
       ${gridSvg}
       ${baseLine}
       <path d="${path90}" fill="#181818" opacity="0.65"/>
@@ -381,6 +406,9 @@ async function renderMonteCarloChart(horizon, z) {
     </svg>
   `;
   container.innerHTML = svg;
+  if (typeof gsap !== "undefined") {
+    gsap.fromTo("#mc-svg path, #mc-svg line", { opacity: 0.15 }, { opacity: 1, duration: 0.5, ease: "power2.out" });
+  }
 }
 
 async function renderPDFChart() {
@@ -451,6 +479,9 @@ async function renderPDFChart() {
     </svg>
   `;
   container.innerHTML = svg;
+  if (typeof gsap !== "undefined") {
+    gsap.fromTo("#pdf-svg path", { opacity: 0.2, scaleY: 0.3, transformOrigin: "bottom" }, { opacity: 1, scaleY: 1, stagger: 0.1, duration: 0.7, ease: "power2.out" });
+  }
 
   const svgEl = document.getElementById("pdf-svg");
   if (svgEl && hudEl) {
@@ -552,6 +583,9 @@ async function renderComponentChart() {
     </svg>
   `;
   container.innerHTML = svg;
+  if (typeof gsap !== "undefined") {
+    gsap.fromTo("#comp-svg path", { opacity: 0, strokeDashoffset: 600, strokeDasharray: 600 }, { opacity: 1, strokeDashoffset: 0, stagger: 0.1, duration: 1.0, ease: "power2.out" });
+  }
 
   const svgEl = document.getElementById("comp-svg");
   const crosshair = document.getElementById("comp-crosshair");
@@ -659,7 +693,7 @@ function renderScatterChart(events, models) {
     const barLen = (item.ratio / maxVR) * vrWidth;
     vrSvg += `
       <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="8" font-family="monospace">${item.label}</text>
-      <rect x="${vrStartX + 52}" y="${barY}" width="${barLen.toFixed(1)}" height="13" fill="${item.color}" opacity="0.9"/>
+      <rect class="vr-bar-rect" x="${vrStartX + 52}" y="${barY}" width="${barLen.toFixed(1)}" height="13" fill="${item.color}" opacity="0.9"/>
       <text x="${vrStartX + 58 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="800" font-family="monospace">${item.ratio.toFixed(2)}x</text>
     `;
   });
@@ -680,6 +714,10 @@ function renderScatterChart(events, models) {
     </svg>
   `;
   container.innerHTML = svg;
+  if (typeof gsap !== "undefined") {
+    gsap.fromTo(".scatter-dot", { scale: 0, transformOrigin: "center" }, { scale: 1, stagger: 0.012, duration: 0.5, ease: "back.out(2)" });
+    gsap.fromTo(".vr-bar-rect", { scaleX: 0, transformOrigin: "left" }, { scaleX: 1, stagger: 0.08, duration: 0.7, ease: "power2.out" });
+  }
 
   if (hudEl) {
     const dots = container.querySelectorAll(".scatter-dot");
@@ -772,13 +810,12 @@ function updateTickerPrices(prices) {
     const label = it.querySelector(".ticker-label")?.innerText || "";
     const valEl = it.querySelector(".ticker-val");
     if (!valEl) return;
-
     if (label.includes("XAUUSD") && prices["GC=F"]) {
-      valEl.innerText = "$" + prices["GC=F"].toFixed(2);
+      animateNumber(valEl, prices["GC=F"], "$", "", 2);
     } else if (label.includes("DOLLAR INDEX") && prices["DX-Y.NYB"]) {
-      valEl.innerText = prices["DX-Y.NYB"].toFixed(2);
+      animateNumber(valEl, prices["DX-Y.NYB"], "", "", 2);
     } else if (label.includes("10-YEAR YIELD") && prices["^TNX"]) {
-      valEl.innerText = prices["^TNX"].toFixed(2) + "%";
+      animateNumber(valEl, prices["^TNX"], "", "%", 2);
     }
   });
 }
