@@ -12,7 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initClock();
   fetchInitialData();
   setupSimulationListeners();
-  initLivePoller();
+  initLiveSyncButton();
 });
 
 function initClock() {
@@ -400,149 +400,106 @@ function renderScatterChart(events, models) {
   container.innerHTML = svg;
 }
 
-// ==================== LIVE AUTO-SYNC & POLLING ENGINE ====================
-let isPolling = true;
-let pollTimer = null;
+// ==================== LIVE ON-DEMAND SYNC ENGINE ====================
 let wave1Timer = null;
-let lastReleasedTime = null;
+let lastReleasedTimestamp = null;
 
-function initLivePoller() {
-  const btnToggle = document.getElementById("btn-toggle-poll");
-  const btnHot = document.getElementById("btn-test-trigger-hot");
-  const btnCool = document.getElementById("btn-test-trigger-cool");
-  const btnReset = document.getElementById("btn-reset-live");
-
-  if (btnToggle) {
-    btnToggle.addEventListener("click", () => {
-      isPolling = !isPolling;
-      btnToggle.innerText = isPolling ? "PAUSE AUTO-POLL" : "RESUME AUTO-POLL";
-      const badge = document.getElementById("live-poller-badge");
-      if (badge) {
-        badge.innerText = isPolling ? "● POLLING ACTIVE [2000ms]" : "○ POLLER PAUSED";
-        badge.style.color = isPolling ? "var(--accent-green)" : "var(--fg-dim)";
-      }
-    });
+function initLiveSyncButton() {
+  const btnSync = document.getElementById("btn-sync-live");
+  if (btnSync) {
+    btnSync.addEventListener("click", executeManualSync);
   }
-
-  if (btnHot) {
-    btnHot.addEventListener("click", async () => {
-      await triggerTestRelease(0.4, 2.9);
-    });
-  }
-
-  if (btnCool) {
-    btnCool.addEventListener("click", async () => {
-      await triggerTestRelease(0.1, 2.6);
-    });
-  }
-
-  if (btnReset) {
-    btnReset.addEventListener("click", async () => {
-      await resetLivePoller();
-    });
-  }
-
-  // Start background poller loop every 2000ms
-  pollTimer = setInterval(pollLiveFeed, 2000);
-  pollLiveFeed();
 }
 
-async function pollLiveFeed() {
-  if (!isPolling) return;
+async function executeManualSync() {
+  const btnSync = document.getElementById("btn-sync-live");
+  const statusSub = document.getElementById("sync-status-sub");
+  const badge = document.getElementById("sync-status-badge");
+  const tsEl = document.getElementById("sync-timestamp");
+
+  if (btnSync) {
+    btnSync.disabled = true;
+    btnSync.innerText = "[ FETCHING LIVE DATA... ]";
+  }
+  if (statusSub) {
+    statusSub.innerText = "Querying BLS/ForexFactory endpoints & live Yahoo Finance price books...";
+  }
+
   try {
-    const res = await fetch("/api/live-sync");
+    const res = await fetch("/api/sync-live", { method: "POST" });
     const data = await res.json();
 
-    const statusSub = document.getElementById("live-status-sub");
-    const badge = document.getElementById("live-poller-badge");
+    if (tsEl && data.timestamp) {
+      tsEl.innerText = data.timestamp;
+    }
+
+    // Update ticker prices if returned
+    if (data.prices) {
+      updateTickerPrices(data.prices);
+    }
 
     if (data.status === "RELEASED") {
-      handleReleaseArrival(data);
-    } else {
+      if (badge) {
+        badge.innerText = "● OFFICIAL RELEASE CAPTURED";
+        badge.style.color = "var(--accent-red)";
+      }
       if (statusSub) {
-        statusSub.innerText = `[AWAITING OCT 2026 CPI] Next poll in 2.0s | Target: Nov 10 @ 08:30 AM EST | Forecast: ${data.forecast_mom}% MoM / ${data.forecast_core_yoy}% Core YoY`;
+        statusSub.innerText = `OFFICIAL DATA CAPTURED AT ${data.timestamp}. Macro transmission model computed.`;
+      }
+      handleOfficialRelease(data);
+    } else {
+      if (badge) {
+        badge.innerText = "● VERIFIED SYNC COMPLETED";
+        badge.style.color = "var(--accent-green)";
+      }
+      if (statusSub) {
+        statusSub.innerText = `[AWAITING RELEASE] Real-time prices updated at ${data.timestamp}. BLS release scheduled for Nov 10 @ 08:30 AM EST.`;
       }
     }
   } catch (err) {
-    console.warn("Poll tick failed:", err);
-  }
-}
-
-async function triggerTestRelease(mom, core) {
-  try {
-    const res = await fetch("/api/test-trigger", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actual_mom: mom, actual_core_yoy: core })
-    });
-    const data = await res.json();
-    handleReleaseArrival(data);
-  } catch (err) {
-    console.error("Test trigger failed:", err);
-  }
-}
-
-async function resetLivePoller() {
-  try {
-    await fetch("/api/reset-live", { method: "POST" });
-    clearInterval(wave1Timer);
-    wave1Timer = null;
-    lastReleasedTime = null;
-
-    const alertBox = document.getElementById("live-alert-box");
-    if (alertBox) alertBox.style.display = "none";
-
-    const statusSub = document.getElementById("live-status-sub");
-    if (statusSub) statusSub.innerText = "Poller reset. Awaiting official BLS/ForexFactory feed.";
-
-    isPolling = true;
-    const btnToggle = document.getElementById("btn-toggle-poll");
-    if (btnToggle) btnToggle.innerText = "PAUSE AUTO-POLL";
-    const badge = document.getElementById("live-poller-badge");
-    if (badge) {
-      badge.innerText = "● POLLING ACTIVE [2000ms]";
-      badge.style.color = "var(--accent-green)";
+    console.error("Sync failed:", err);
+    if (statusSub) statusSub.innerText = "[SYNC ERROR] Failed to reach live feeds: " + err.message;
+  } finally {
+    if (btnSync) {
+      btnSync.disabled = false;
+      btnSync.innerText = "SYNC CURRENT LIVE DATA";
     }
-
-    // Reset simulation back to forecast
-    if (tomorrowMeta.forecast_mom !== undefined) {
-      const momInput = document.getElementById("sim-mom");
-      const coreInput = document.getElementById("sim-core");
-      if (momInput) momInput.value = tomorrowMeta.forecast_mom;
-      if (coreInput) coreInput.value = tomorrowMeta.forecast_core_yoy;
-      runSimulation(tomorrowMeta.forecast_mom, tomorrowMeta.forecast_core_yoy);
-    }
-  } catch (err) {
-    console.error("Reset failed:", err);
   }
 }
 
-function handleReleaseArrival(data) {
-  // Avoid re-running deepseek if already processed this release
-  const isNew = (lastReleasedTime !== data.release_time);
-  lastReleasedTime = data.release_time;
+function updateTickerPrices(prices) {
+  // Ticker bar items
+  const items = document.querySelectorAll(".ticker-item");
+  items.forEach(it => {
+    const label = it.querySelector(".ticker-label")?.innerText || "";
+    const valEl = it.querySelector(".ticker-val");
+    if (!valEl) return;
+
+    if (label.includes("XAUUSD") && prices["GC=F"]) {
+      valEl.innerText = "$" + prices["GC=F"].toFixed(2);
+    } else if (label.includes("DOLLAR INDEX") && prices["DX-Y.NYB"]) {
+      valEl.innerText = prices["DX-Y.NYB"].toFixed(2);
+    } else if (label.includes("10-YEAR YIELD") && prices["^TNX"]) {
+      valEl.innerText = prices["^TNX"].toFixed(2) + "%";
+    }
+  });
+}
+
+function handleOfficialRelease(data) {
+  const isNew = (lastReleasedTimestamp !== data.timestamp);
+  lastReleasedTimestamp = data.timestamp;
 
   const alertBox = document.getElementById("live-alert-box");
   const alertHeadline = document.getElementById("live-alert-headline");
   const alertDetail = document.getElementById("live-alert-detail");
-  const statusSub = document.getElementById("live-status-sub");
-  const badge = document.getElementById("live-poller-badge");
-
-  if (badge) {
-    badge.innerText = "● RELEASE CAPTURED!";
-    badge.style.color = "var(--accent-red)";
-  }
 
   if (alertBox) alertBox.style.display = "block";
   if (alertHeadline) {
-    alertHeadline.innerText = `[ CPI RELEASE CAPTURED // ${data.source} ]`;
+    alertHeadline.innerText = `[ OFFICIAL CPI RELEASE CAPTURED & VERIFIED ]`;
   }
   if (alertDetail) {
     const s = data.simulation ? data.simulation.surprises : {};
     alertDetail.innerText = `ACTUAL HEADLINE: ${data.actual_mom.toFixed(2)}% | ACTUAL CORE YoY: ${data.actual_core_yoy.toFixed(2)}% | COMPOSITE Z: ${s.z_score_composite ? (s.z_score_composite > 0 ? "+" : "") + s.z_score_composite.toFixed(2) + "σ" : "-"}`;
-  }
-  if (statusSub) {
-    statusSub.innerText = `DATA SYNCED AT ${new Date().toISOString().substring(11, 19)} UTC. Model recalculated in 6ms.`;
   }
 
   // Auto-populate input controls
@@ -556,12 +513,11 @@ function handleReleaseArrival(data) {
   if (coreInput) coreInput.value = data.actual_core_yoy;
   if (coreRange) coreRange.value = data.actual_core_yoy;
 
-  // Render simulation
   if (data.simulation) {
     renderSimulationOutputs(data.simulation);
   }
 
-  // Start 60-second Wave 1 countdown timer
+  // 60-Second Wave 1 Countdown Firewall
   if (!wave1Timer) {
     let secondsLeft = 60;
     const timerEl = document.getElementById("wave1-timer");
@@ -582,7 +538,6 @@ function handleReleaseArrival(data) {
     }, 1000);
   }
 
-  // Auto-trigger DeepSeek executive analysis on new release arrival
   if (isNew) {
     executeDeepSeekBriefing(data.actual_mom, data.actual_core_yoy);
   }

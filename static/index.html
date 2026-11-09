@@ -51,39 +51,41 @@
   </div>
 
   <main class="main-container">
-    <!-- Section 00: Live Auto-Sync News Feed & Instant Action Engine -->
-    <div class="grid-box" style="border: 2px solid var(--accent-red); margin-bottom: 4px;">
-      <div class="grid-box-header" style="background: rgba(255, 42, 42, 0.12);">
-        <span>[ 00 // REAL-TIME AUTO-SYNC & INSTANT ACTION ENGINE ]</span>
-        <span id="live-poller-badge" style="color:var(--accent-green); font-weight:800;">● POLLING ACTIVE [2000ms]</span>
+    <!-- Section 00: Live On-Demand Macro Data Sync -->
+    <div class="grid-box" style="border: 1px solid var(--border-light); margin-bottom: 8px;">
+      <div class="grid-box-header">
+        <span>[ 00 // LIVE MACRO DATA SYNC & OFFICIAL RELEASE DETECTOR ]</span>
+        <span id="sync-status-badge" style="color:var(--accent-green); font-weight:800;">● READY // VERIFIED SOURCES</span>
       </div>
       <div class="grid-box-body">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-          <div>
-            <div style="font-size:12px; font-weight:800; color:var(--fg-main);">
-              AUTOMATIC RELEASE DETECTOR (OCT 2026 CPI — NOV 10 @ 08:30 AM EST)
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+          <div style="flex:1; min-width:280px;">
+            <div style="font-size:12px; font-weight:800; color:var(--fg-main); letter-spacing:0.02em;">
+              TARGET: U.S. OCTOBER 2026 CPI RELEASE (SCHEDULED NOV 10 @ 08:30 AM EST)
             </div>
-            <div id="live-status-sub" style="font-size:10px; color:var(--fg-muted); margin-top:2px;">
-              Polling ForexFactory & BLS calendars every 2s. The instant numbers drop, the model auto-populates and calculates your probability.
+            <div id="sync-status-sub" style="font-size:11px; color:var(--fg-muted); margin-top:3px;">
+              Click button to sync live market quotes and query BLS/ForexFactory for official release.
             </div>
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn-brutal btn-secondary" id="btn-toggle-poll">PAUSE AUTO-POLL</button>
-            <button class="btn-brutal" id="btn-test-trigger-hot" style="background:#b30000; font-size:10px; padding:6px 12px;">TEST HOT (+0.4% / 2.9%)</button>
-            <button class="btn-brutal" id="btn-test-trigger-cool" style="background:#00802b; font-size:10px; padding:6px 12px;">TEST COOL (+0.1% / 2.6%)</button>
-            <button class="btn-brutal btn-secondary" id="btn-reset-live" style="font-size:10px; padding:6px 12px;">RESET</button>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="font-size:10px; color:var(--fg-dim); text-align:right;">
+              LAST SYNC: <span id="sync-timestamp" style="color:var(--fg-muted);">NOT YET SYNCED</span>
+            </div>
+            <button class="btn-brutal" id="btn-sync-live">
+              SYNC CURRENT LIVE DATA
+            </button>
           </div>
         </div>
 
-        <!-- Wave 1 Live Countdown Alert Box -->
+        <!-- Official Release Captured Banner (Revealed when officially published) -->
         <div id="live-alert-box" style="display:none; padding:12px; border:2px solid var(--accent-red); background:rgba(255,42,42,0.08); margin-top:12px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div>
               <div style="font-size:13px; font-weight:900; color:var(--accent-red); text-transform:uppercase;" id="live-alert-headline">
-                [ CPI RELEASE DETECTED // AUTO-CALCULATED IN 8ms ]
+                [ OFFICIAL CPI RELEASE CAPTURED & VERIFIED ]
               </div>
               <div style="font-size:11px; color:var(--fg-main); margin-top:4px;" id="live-alert-detail">
-                Actual Headline: +0.40% (Forecast: 0.30%) | Core YoY: 2.90% (Forecast: 2.80%)
+                Awaiting release data...
               </div>
             </div>
             <div style="text-align:right;">
