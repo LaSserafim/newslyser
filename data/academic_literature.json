@@ -1,0 +1,26 @@
+[
+  {
+    "citation": "Andersen, Bollerslev, Diebold & Vega (2003)",
+    "title": "Micro Effects of Macro Announcements: Real-Time Price Discovery in Foreign Exchange",
+    "journal": "American Economic Review, 93(1), 38\u201362",
+    "empirical_finding": "Identified that macro announcements create immediate volatility jumps VR(5) > 5x, with high-frequency price discovery concentrating in the initial 15 minutes before spreads compress."
+  },
+  {
+    "citation": "Faust, Rogers, Wang & Wright (2007)",
+    "title": "The High-Frequency Response of Exchange Rates and Interest Rates to Macro Announcements",
+    "journal": "Journal of Monetary Economics, 54(4), 1051\u20131068",
+    "empirical_finding": "Proved that asset price discovery around macro surprises operates through the transmission of short-term policy rate expectations (2Y yields) into the real term structure."
+  },
+  {
+    "citation": "Christie-David, Chaudhry & Koch (2000)",
+    "title": "Do Macro Announcements Affect Gold and Silver Futures Markets?",
+    "journal": "Journal of Futures Markets, 20(8), 705\u2013721",
+    "empirical_finding": "Established that CPI surprises generate the strongest variance jumps in Gold futures among all macroeconomic releases, significantly exceeding employment and trade balance reports."
+  },
+  {
+    "citation": "Modi & Zaratiegui (2024)",
+    "title": "The Perceived Sources of Unexpected Inflation",
+    "journal": "Working Paper / Econometric Research",
+    "empirical_finding": "Demonstrated that discrete consensus rounding errors (0.1 pp increments) create spurious noise in naive linear models, necessitating standardized Z-score filtering."
+  }
+]

@@ -10,5 +10,7 @@
   "prev_core_mom": 0.3,
   "cleveland_fed_nowcast_mom": 0.28,
   "cleveland_fed_nowcast_core_mom": 0.22,
-  "survey_dispersion_sd": 0.075
+  "survey_dispersion_sd": 0.075,
+  "wti_oil_oct_change_pct": 12.11,
+  "t10y_breakeven_pct": 2.23
 }

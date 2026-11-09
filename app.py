@@ -168,6 +168,18 @@ def get_pre_news_model():
     _, tomorrow, _ = load_data()
     return quant_model.calculate_pre_news_bayesian_model(tomorrow)
 
+@app.get("/api/yoy-timeline")
+def get_yoy_timeline():
+    with open(os.path.join(DATA_DIR, "cpi_yoy_timeline.json")) as f:
+        data = json.load(f)
+    return data
+
+@app.get("/api/academic-literature")
+def get_academic_literature():
+    with open(os.path.join(DATA_DIR, "academic_literature.json")) as f:
+        data = json.load(f)
+    return data
+
 
 class SimRequest(BaseModel):
     actual_mom: float

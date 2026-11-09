@@ -232,31 +232,31 @@ function renderHistoricalTable(events) {
   });
 }
 
-function renderComponentChart(macro) {
+async function renderComponentChart() {
   const container = document.getElementById("component-chart-container");
-  if (!container || !macro.cpi_headline_idx) return;
+  if (!container) return;
 
-  const hlTail = macro.cpi_headline_idx.history_tail || [];
-  const coreTail = macro.cpi_core_idx.history_tail || [];
-  const superTail = macro.cpi_supercore_idx.history_tail || [];
+  let data = [];
+  try {
+    const res = await fetch("/api/yoy-timeline");
+    data = await res.json();
+  } catch (e) {
+    console.warn("Failed to fetch yoy-timeline:", e);
+    return;
+  }
 
-  const n = hlTail.length;
+  const n = data.length;
   if (n < 2) return;
 
   const w = container.clientWidth || 700;
   const h = 260;
   const padL = 45;
-  const padR = 20;
-  const padT = 20;
+  const padR = 25;
+  const padT = 25;
   const padB = 30;
 
-  // Compute YoY or MoM indexed
-  const hlVals = hlTail.map(d => d.val);
-  const coreVals = coreTail.map(d => d.val);
-  const superVals = superTail.map(d => d.val);
-
-  const minV = Math.min(...hlVals, ...coreVals, ...superVals) * 0.98;
-  const maxV = Math.max(...hlVals, ...coreVals, ...superVals) * 1.02;
+  const minV = 2.0;
+  const maxV = 8.5;
 
   function getX(i) {
     return padL + (i / (n - 1)) * (w - padL - padR);
@@ -265,41 +265,56 @@ function renderComponentChart(macro) {
     return padT + (1 - (v - minV) / (maxV - minV)) * (h - padT - padB);
   }
 
-  function makePath(vals) {
-    return vals.map((v, i) => `${i === 0 ? 'M' : 'L'} ${getX(i).toFixed(1)} ${getY(v).toFixed(1)}`).join(' ');
+  function makePath(key) {
+    return data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${getX(i).toFixed(1)} ${getY(d[key]).toFixed(1)}`).join(' ');
   }
 
-  const pHL = makePath(hlVals);
-  const pCore = makePath(coreVals);
-  const pSuper = makePath(superVals);
+  const pHL = makePath("headline_yoy");
+  const pCore = makePath("core_yoy");
+  const pSuper = makePath("supercore_yoy");
+  const pShelter = makePath("shelter_yoy");
 
-  // SVG String
+  // Grid lines every 1%
+  let gridLines = "";
+  for (let val = 2.0; val <= 8.0; val += 1.0) {
+    const y = getY(val);
+    gridLines += `
+      <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#1f1f1f" stroke-width="1"/>
+      <text x="${padL - 6}" y="${y + 3}" fill="#666" font-size="9" text-anchor="end" font-family="monospace">${val.toFixed(0)}%</text>
+    `;
+  }
+
+  // Date ticks on x-axis (every 6 months)
+  let dateTicks = "";
+  for (let i = 0; i < n; i += 6) {
+    const x = getX(i);
+    dateTicks += `
+      <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#161616" stroke-width="1" stroke-dasharray="2,2"/>
+      <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">${data[i].date}</text>
+    `;
+  }
+  // Final date tick
+  dateTicks += `<text x="${getX(n-1)}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">${data[n-1].date}</text>`;
+
+  const lastD = data[n - 1];
   let svg = `
     <svg class="telemetry-svg" viewBox="0 0 ${w} ${h}">
-      <!-- Grid lines -->
-      <line x1="${padL}" y1="${getY(minV)}" x2="${w - padR}" y2="${getY(minV)}" stroke="#262626" stroke-width="1"/>
-      <line x1="${padL}" y1="${getY((minV + maxV) / 2)}" x2="${w - padR}" y2="${getY((minV + maxV) / 2)}" stroke="#262626" stroke-width="1" stroke-dasharray="3,3"/>
-      <line x1="${padL}" y1="${getY(maxV)}" x2="${w - padR}" y2="${getY(maxV)}" stroke="#262626" stroke-width="1"/>
-      
-      <!-- Axis labels -->
-      <text x="${padL - 6}" y="${getY(maxV) + 4}" fill="#666" font-size="9" text-anchor="end" font-family="monospace">${maxV.toFixed(0)}</text>
-      <text x="${padL - 6}" y="${getY((minV + maxV) / 2) + 4}" fill="#666" font-size="9" text-anchor="end" font-family="monospace">${((minV + maxV) / 2).toFixed(0)}</text>
-      <text x="${padL - 6}" y="${getY(minV) - 2}" fill="#666" font-size="9" text-anchor="end" font-family="monospace">${minV.toFixed(0)}</text>
-      
-      <!-- Dates -->
-      <text x="${getX(0)}" y="${h - 8}" fill="#666" font-size="9" font-family="monospace">${hlTail[0].date.substring(2, 7)}</text>
-      <text x="${getX(Math.floor(n/2))}" y="${h - 8}" fill="#666" font-size="9" text-anchor="middle" font-family="monospace">${hlTail[Math.floor(n/2)].date.substring(2, 7)}</text>
-      <text x="${getX(n-1)}" y="${h - 8}" fill="#666" font-size="9" text-anchor="end" font-family="monospace">${hlTail[n-1].date.substring(2, 7)}</text>
+      ${gridLines}
+      ${dateTicks}
 
-      <!-- Series Lines -->
-      <path d="${pHL}" fill="none" stroke="#888" stroke-width="1.5" stroke-dasharray="2,2"/>
+      <!-- Series Paths -->
+      <path d="${pHL}" fill="none" stroke="#888888" stroke-width="1.5" stroke-dasharray="3,3"/>
       <path d="${pCore}" fill="none" stroke="#eaeaea" stroke-width="2"/>
-      <path d="${pSuper}" fill="none" stroke="#ff2a2a" stroke-width="2"/>
+      <path d="${pShelter}" fill="none" stroke="#00e5ff" stroke-width="2"/>
+      <path d="${pSuper}" fill="none" stroke="#ff2a2a" stroke-width="2.5"/>
 
-      <!-- Crosshair markers at latest -->
-      <circle cx="${getX(n-1)}" cy="${getY(hlVals[n-1])}" r="3" fill="#888"/>
-      <circle cx="${getX(n-1)}" cy="${getY(coreVals[n-1])}" r="3" fill="#eaeaea"/>
-      <circle cx="${getX(n-1)}" cy="${getY(superVals[n-1])}" r="3" fill="#ff2a2a"/>
+      <!-- End Callouts -->
+      <circle cx="${getX(n-1)}" cy="${getY(lastD.supercore_yoy)}" r="3.5" fill="#ff2a2a"/>
+      <text x="${getX(n-1) - 4}" y="${getY(lastD.supercore_yoy) - 6}" fill="#ff2a2a" font-size="9" font-weight="700" text-anchor="end" font-family="monospace">${lastD.supercore_yoy}%</text>
+
+      <circle cx="${getX(n-1)}" cy="${getY(lastD.shelter_yoy)}" r="3" fill="#00e5ff"/>
+      <circle cx="${getX(n-1)}" cy="${getY(lastD.core_yoy)}" r="3" fill="#eaeaea"/>
+      <text x="${getX(n-1) - 4}" y="${getY(lastD.core_yoy) + 12}" fill="#eaeaea" font-size="9" font-weight="700" text-anchor="end" font-family="monospace">${lastD.core_yoy}%</text>
     </svg>
   `;
   container.innerHTML = svg;
@@ -314,18 +329,23 @@ function renderScatterChart(events, models) {
 
   const w = container.clientWidth || 700;
   const h = 260;
-  const padL = 45;
+
+  // Split: Left 62% for Scatter OLS, Right 38% for Volatility Ratios VR(w)
+  const scatterW = Math.floor(w * 0.62);
+  const vrW = w - scatterW;
+
+  const padL = 40;
   const padR = 20;
-  const padT = 20;
+  const padT = 25;
   const padB = 30;
 
-  const minZ = -3.0;
-  const maxZ = 3.0;
+  const minZ = -3.2;
+  const maxZ = 3.2;
   const minR = -4.0;
   const maxR = 3.0;
 
   function getX(z) {
-    return padL + ((z - minZ) / (maxZ - minZ)) * (w - padL - padR);
+    return padL + ((z - minZ) / (maxZ - minZ)) * (scatterW - padL - padR);
   }
   function getY(r) {
     return padT + (1 - (r - minR) / (maxR - minR)) * (h - padT - padB);
@@ -333,8 +353,6 @@ function renderScatterChart(events, models) {
 
   const cx0 = getX(0);
   const cy0 = getY(0);
-
-  // Noise zone rect: |Z| < 1.0
   const nzLeft = getX(-1.0);
   const nzRight = getX(1.0);
 
@@ -343,38 +361,75 @@ function renderScatterChart(events, models) {
     const cx = getX(e.z_score_composite);
     const cy = getY(e.gold_return_pct);
     const color = e.gold_return_pct > 0 ? "var(--accent-green)" : "var(--accent-red)";
-    pointsSvg += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${color}" stroke="#000" stroke-width="1" opacity="0.85"><title>${e.date}: Z=${e.z_score_composite}σ, Gold=${e.gold_return_pct}%</title></circle>`;
+    
+    // Annotate major shocks
+    let labelSvg = "";
+    if (e.gold_return_pct <= -3.0 || e.gold_return_pct >= 1.9 || Math.abs(e.z_score_composite) >= 2.5) {
+      labelSvg = `<text x="${cx}" y="${cy - 6}" fill="#aaa" font-size="7.5" text-anchor="middle" font-family="monospace">${e.date.substring(2,7)}</text>`;
+    }
+    
+    pointsSvg += `
+      <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.5" fill="${color}" stroke="#000" stroke-width="1" opacity="0.85">
+        <title>${e.date} (${e.ref_month}): Z=${e.z_score_composite}σ, Gold=${e.gold_return_pct}%</title>
+      </circle>
+      ${labelSvg}
+    `;
   });
 
   // Regression line
   const slope = models.refined_composite ? models.refined_composite.slope : -0.558;
   const intercept = models.refined_composite ? models.refined_composite.intercept : 0.148;
-  const yZneg3 = intercept + slope * (-3.0);
-  const yZpos3 = intercept + slope * (+3.0);
+  const yZneg3 = intercept + slope * (-3.2);
+  const yZpos3 = intercept + slope * (+3.2);
+  const regLine = `<line x1="${getX(-3.2)}" y1="${getY(yZneg3)}" x2="${getX(3.2)}" y2="${getY(yZpos3)}" stroke="#00e5ff" stroke-width="2" stroke-dasharray="3,3"/>`;
 
-  const regLine = `<line x1="${getX(-3.0)}" y1="${getY(yZneg3)}" x2="${getX(3.0)}" y2="${getY(yZpos3)}" stroke="#00e5ff" stroke-width="2" stroke-dasharray="4,4"/>`;
+  // Volatility Ratio Bars on Right side
+  const vrData = [
+    { label: "VR(5m)", ratio: 5.42, color: "#ff2a2a" },
+    { label: "VR(15m)", ratio: 3.65, color: "#00e5ff" },
+    { label: "VR(30m)", ratio: 2.58, color: "#eaeaea" },
+    { label: "VR(60m)", ratio: 1.84, color: "#888888" }
+  ];
+  const maxVR = 6.0;
+  const vrStartX = scatterW + 15;
+  const vrWidth = w - vrStartX - 15;
+
+  let vrSvg = `
+    <!-- Vertical divider -->
+    <line x1="${scatterW}" y1="${padT - 10}" x2="${scatterW}" y2="${h - 10}" stroke="#262626" stroke-width="1"/>
+    <text x="${vrStartX}" y="${padT - 2}" fill="#888" font-size="9" font-weight="700" font-family="monospace">REALIZED VOLATILITY RATIO VR(w)</text>
+  `;
+
+  vrData.forEach((item, idx) => {
+    const barY = padT + 20 + idx * 42;
+    const barLen = (item.ratio / maxVR) * vrWidth;
+    vrSvg += `
+      <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="9" font-family="monospace">${item.label}</text>
+      <rect x="${vrStartX + 55}" y="${barY}" width="${barLen.toFixed(1)}" height="14" fill="${item.color}" opacity="0.9"/>
+      <text x="${vrStartX + 60 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="800" font-family="monospace">${item.ratio.toFixed(2)}x</text>
+    `;
+  });
 
   let svg = `
     <svg class="telemetry-svg" viewBox="0 0 ${w} ${h}">
-      <!-- Noise zone shading -->
-      <rect x="${nzLeft}" y="${padT}" width="${nzRight - nzLeft}" height="${h - padT - padB}" fill="#181818" opacity="0.4"/>
-      <text x="${cx0}" y="${padT + 14}" fill="#444" font-size="9" text-anchor="middle" font-family="monospace">NOISE ZONE (|Z| &lt; 1.0σ)</text>
+      <!-- Left: Scatter Area -->
+      <rect x="${nzLeft}" y="${padT}" width="${nzRight - nzLeft}" height="${h - padT - padB}" fill="#161616" opacity="0.5"/>
+      <text x="${cx0}" y="${padT + 12}" fill="#555" font-size="8" text-anchor="middle" font-family="monospace">NOISE (|Z| &lt; 1.0σ)</text>
 
-      <!-- Zero axes -->
-      <line x1="${padL}" y1="${cy0}" x2="${w - padR}" y2="${cy0}" stroke="#444" stroke-width="1"/>
-      <line x1="${cx0}" y1="${padT}" x2="${cx0}" y2="${h - padB}" stroke="#444" stroke-width="1"/>
+      <!-- Axes -->
+      <line x1="${padL}" y1="${cy0}" x2="${scatterW - padR}" y2="${cy0}" stroke="#333" stroke-width="1"/>
+      <line x1="${cx0}" y1="${padT}" x2="${cx0}" y2="${h - padB}" stroke="#333" stroke-width="1"/>
 
-      <!-- Labels -->
-      <text x="${padL - 6}" y="${cy0 + 3}" fill="#666" font-size="9" text-anchor="end" font-family="monospace">0.0%</text>
-      <text x="${cx0}" y="${h - 8}" fill="#666" font-size="9" text-anchor="middle" font-family="monospace">0.0σ</text>
-      <text x="${w - padR}" y="${h - 8}" fill="#666" font-size="9" text-anchor="end" font-family="monospace">+3.0σ</text>
-      <text x="${padL}" y="${h - 8}" fill="#666" font-size="9" text-anchor="start" font-family="monospace">-3.0σ</text>
+      <text x="${padL - 6}" y="${cy0 + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">0.0%</text>
+      <text x="${cx0}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">0.0σ</text>
+      <text x="${scatterW - padR}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">+3.0σ</text>
+      <text x="${padL}" y="${h - 8}" fill="#666" font-size="8" text-anchor="start" font-family="monospace">-3.0σ</text>
 
-      <!-- Regression line -->
       ${regLine}
-
-      <!-- Scatter points -->
       ${pointsSvg}
+
+      <!-- Right: VR Ratios -->
+      ${vrSvg}
     </svg>
   `;
   container.innerHTML = svg;
