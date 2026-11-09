@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEWSLYSER // CPI QUANTITATIVE ENGINE</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800;900&family=Inter:wght@700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Top Operational Nav -->
+  <header class="top-nav">
+    <div class="brand-title">
+      NEWSLYSER <span>//</span> CPI QUANTITATIVE ENGINE <span style="font-size:10px; color:var(--fg-dim); font-weight:400; margin-left:8px;">[REV 2.4.0]</span>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center;">
+      <div id="live-clock" style="font-size:11px; color:var(--fg-muted);">--:--:-- UTC</div>
+      <div class="sys-badge">● SYSTEM ONLINE // HC3 CALIBRATED</div>
+    </div>
+  </header>
+
+  <!-- Live Macro Baseline Ticker -->
+  <div class="ticker-bar">
+    <div class="ticker-item">
+      <span class="ticker-label">XAUUSD GOLD (GC=F)</span>
+      <span class="ticker-val">$4,128.30</span>
+    </div>
+    <div class="ticker-item">
+      <span class="ticker-label">U.S. DOLLAR INDEX (DXY)</span>
+      <span class="ticker-val">101.87</span>
+    </div>
+    <div class="ticker-item">
+      <span class="ticker-label">U.S. 2-YEAR YIELD</span>
+      <span class="ticker-val">4.46%</span>
+    </div>
+    <div class="ticker-item">
+      <span class="ticker-label">U.S. 10-YEAR YIELD</span>
+      <span class="ticker-val">4.86%</span>
+    </div>
+    <div class="ticker-item">
+      <span class="ticker-label">10Y TIPS (REAL YIELD)</span>
+      <span class="ticker-val">2.60%</span>
+    </div>
+    <div class="ticker-item">
+      <span class="ticker-label">EVENT HORIZON</span>
+      <span class="ticker-val" style="color:var(--accent-red);">TOMORROW 08:30 ET</span>
+    </div>
+  </div>
+
+  <main class="main-container">
+
+    <!-- Section 1: Tomorrow Event Matrix & Interactive Simulator -->
+    <div class="grid-box">
+      <div class="grid-box-header">
+        <span>[ 01 // TOMORROW'S CPI EVENT HORIZON & LIVE SIMULATOR ]</span>
+        <span class="header-accent">TARGET: OCT 2026 CPI RELEASE</span>
+      </div>
+      <div class="grid-box-body">
+        
+        <!-- Consensus Telemetry Row -->
+        <div class="three-col-grid" style="margin-bottom:16px;">
+          <div class="stat-card">
+            <div class="stat-label">RELEASE TIMING & REFERENCE</div>
+            <div class="stat-value" id="tom-date" style="font-size:15px;">2026-11-10</div>
+            <div class="stat-sub" id="tom-time">08:30 AM EST (13:30 UTC / 20:30 WIB)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">HEADLINE CPI (MoM) CONSENSUS</div>
+            <div class="stat-value" id="tom-forecast-mom" style="color:var(--accent-cyan);">0.3%</div>
+            <div class="stat-sub">PREVIOUS: <span id="tom-prev-mom">0.6%</span> | NOWCAST: <span id="tom-nowcast-mom">0.28%</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">CORE CPI (YoY) CONSENSUS</div>
+            <div class="stat-value" id="tom-forecast-core" style="color:var(--accent-cyan);">2.8%</div>
+            <div class="stat-sub">PREVIOUS: <span id="tom-prev-core">2.6%</span> | NOWCAST: <span id="tom-nowcast-core">0.22% MoM</span></div>
+          </div>
+        </div>
+
+        <!-- Interactive Simulator & Real-Time Output -->
+        <div class="two-col-grid">
+          
+          <!-- Controls Panel -->
+          <div style="border:1px solid var(--border-color); padding:14px; background:var(--bg-main);">
+            <div style="font-size:11px; font-weight:800; text-transform:uppercase; margin-bottom:12px; color:var(--fg-main); border-bottom:1px solid var(--border-color); padding-bottom:6px;">
+              [ PARAMETRIC INPUTS // HYPOTHETICAL / LIVE SCENARIO ]
+            </div>
+
+            <div class="sim-form-group">
+              <label>ACTUAL HEADLINE CPI MoM (%)</label>
+              <div class="input-row">
+                <input type="range" id="sim-mom-range" min="-0.2" max="1.0" step="0.1" value="0.3">
+                <input type="number" id="sim-mom" step="0.1" value="0.3">
+              </div>
+            </div>
+
+            <div class="sim-form-group">
+              <label>ACTUAL CORE CPI YoY (%)</label>
+              <div class="input-row">
+                <input type="range" id="sim-core-range" min="2.0" max="3.6" step="0.1" value="2.8">
+                <input type="number" id="sim-core" step="0.1" value="2.8">
+              </div>
+            </div>
+
+            <div style="margin-top:16px;">
+              <button class="btn-brutal" id="btn-deepseek" style="width:100%;">
+                RUN DEEPSEEK MACRO BRIEFING
+              </button>
+            </div>
+            <div style="font-size:10px; color:var(--fg-dim); margin-top:8px;">
+              * Triggers real-time quantitative reasoning via DeepSeek V3 API against transmission vectors.
+            </div>
+          </div>
+
+          <!-- Quantitative Readout Panel -->
+          <div style="border:1px solid var(--border-color); padding:14px; background:var(--bg-main);">
+            <div style="font-size:11px; font-weight:800; text-transform:uppercase; margin-bottom:12px; color:var(--fg-main); border-bottom:1px solid var(--border-color); padding-bottom:6px;">
+              [ TRANSMISSION READOUT // EXPECTED MARKET SHOCK ]
+            </div>
+
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:10px;">
+              <div class="stat-card">
+                <div class="stat-label">HEADLINE SURPRISE</div>
+                <div class="stat-value" id="out-hl-surprise" style="font-size:14px;">0.00 pp</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">CORE SURPRISE</div>
+                <div class="stat-value" id="out-core-surprise" style="font-size:14px;">0.00 pp</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">COMPOSITE Z-SCORE</div>
+                <div class="stat-value" id="out-z-comp" style="font-size:14px;">0.00 σ</div>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px;">
+              <div class="stat-card">
+                <div class="stat-label">EXP. GOLD RETURN</div>
+                <div class="stat-value" id="out-gold-ret" style="font-size:15px;">0.00%</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">EXP. DXY RETURN</div>
+                <div class="stat-value" id="out-dxy-ret" style="font-size:15px;">0.00%</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">2Y YIELD SHOCK</div>
+                <div class="stat-value" id="out-2y-bps" style="font-size:15px;">0.0 bps</div>
+              </div>
+            </div>
+
+            <!-- Signal Output -->
+            <div id="signal-box" class="signal-box signal-neutral">
+              <div class="signal-title" id="signal-title">NEUTRAL / NO TRADE (NOISE ZONE)</div>
+              <div class="signal-desc" id="signal-desc">Awaiting input parameters to calculate transmission vector.</div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- DeepSeek Institutional Terminal Window -->
+        <div style="margin-top:16px;">
+          <div class="terminal-header">
+            <span>[ TERMINAL // DEEPSEEK V3 INSTITUTIONAL MACRO REASONER ]</span>
+          </div>
+          <div class="terminal-window" id="deepseek-terminal">
+>>> SYSTEM READY.
+>>> AWAITING SIMULATION PARAMETERS OR CLICK "RUN DEEPSEEK MACRO BRIEFING".
+>>> THE REASONING ENGINE ANALYZES UNROUNDED DATA, SUPERCORE EX-SHELTER DYNAMICS, REAL YIELDS TRANSMISSION, AND 3-WAVE EXECUTION RULES.
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Section 2: Real Telemetry Graphs (Pure SVG Vector) -->
+    <div class="two-col-grid">
+      
+      <!-- Graph 1: Component Breakdown -->
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ 02 // CPI INFLATION COMPONENT DYNAMICS ]</span>
+          <span style="color:var(--fg-muted);">FRED / BLS INDICES</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="display:flex; gap:16px; font-size:10px; margin-bottom:10px; color:var(--fg-muted);">
+            <span><strong style="color:#ff2a2a;">—</strong> SUPERCORE (SERVICES EX-ENERGY)</span>
+            <span><strong style="color:#eaeaea;">—</strong> CORE CPI INDEX</span>
+            <span><strong style="color:#888;">---</strong> HEADLINE CPI</span>
+          </div>
+          <div class="chart-container" id="component-chart-container">
+            <!-- Dynamic SVG injected via app.js -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Graph 2: Event Study Reaction Curve -->
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ 03 // SURPRISE Z-SCORE VS. GOLD RETURN (%) ]</span>
+          <span style="color:var(--accent-cyan);">EVENT HORIZON REGRESSION</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="display:flex; gap:16px; font-size:10px; margin-bottom:10px; color:var(--fg-muted);">
+            <span><strong style="color:var(--accent-green);">●</strong> POSITIVE RETURN</span>
+            <span><strong style="color:var(--accent-red);">●</strong> NEGATIVE RETURN</span>
+            <span><strong style="color:#00e5ff;">---</strong> OLS REGRESSION LINE (β = -0.558)</span>
+          </div>
+          <div class="chart-container" id="scatter-chart-container">
+            <!-- Dynamic SVG injected via app.js -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Section 3: Econometric Model Comparison (The 49% Fix) -->
+    <div class="grid-box">
+      <div class="grid-box-header">
+        <span>[ 04 // ECONOMETRIC SPECIFICATION & FAILURE ANALYSIS ]</span>
+        <span class="header-accent">WHY NAIVE LINEAR MODELS HIT ~49% COIN-FLIP ACCURACY</span>
+      </div>
+      <div class="grid-box-body">
+        
+        <div class="two-col-grid" style="margin-bottom:16px;">
+          
+          <div class="stat-card" style="border-left:3px solid var(--accent-red);">
+            <div class="stat-label">TIKTOK NAIVE OLS BASELINE (FAIL)</div>
+            <div style="font-size:12px; font-family:monospace; margin-bottom:8px;" id="base-formula">XAU_Return = α + β * Headline_Surprise</div>
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-top:8px;">
+              <div>R²: <strong id="base-r2">0.1650</strong></div>
+              <div>SLOPE (β): <strong id="base-slope">-5.408</strong></div>
+              <div>ACCURACY: <strong id="base-acc" style="color:var(--accent-red);">49.2%</strong></div>
+            </div>
+            <div style="font-size:10px; color:var(--fg-muted); margin-top:8px;">
+              * Flawed due to consensus rounding errors, ignoring Supercore vs. Shelter lag, and treating noise prints as trends.
+            </div>
+          </div>
+
+          <div class="stat-card" style="border-left:3px solid var(--accent-green);">
+            <div class="stat-label">REFINED TWO-STAGE COMPOSITE MODEL (PROVEN)</div>
+            <div style="font-size:12px; font-family:monospace; margin-bottom:8px;" id="ref-formula">XAU_Return = α + β * (0.60*Z_Core + 0.40*Z_Headline)</div>
+            <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-top:8px;">
+              <div>R²: <strong id="ref-r2">0.2139</strong></div>
+              <div>SLOPE: <strong id="ref-slope">-0.558</strong></div>
+              <div>P-VAL: <strong id="ref-p">&lt; 0.0001</strong></div>
+              <div>CORR: <strong id="ref-corr">-0.514</strong></div>
+              <div>SHOCK ACC: <strong id="shock-acc" style="color:var(--accent-green);">70.0%</strong></div>
+              <div>NOISE ACC: <strong id="noise-acc" style="color:var(--fg-muted);">68.2%</strong></div>
+            </div>
+              * White HC3 heteroskedasticity-robust. Filtered through 10Y TIPS real yields and 2Y yield transmission.
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 3-Wave Execution Protocol Table -->
+        <div style="font-size:11px; font-weight:800; text-transform:uppercase; margin-bottom:8px; color:var(--fg-main);">
+          [ 3-WAVE EXECUTION PROTOCOL // MICROSTRUCTURE FIREWALL ]
+        </div>
+        <table class="brutal-table" style="margin-bottom:14px;">
+          <thead>
+            <tr>
+              <th>WAVE</th>
+              <th>WINDOW</th>
+              <th>MARKET MECHANISM</th>
+              <th>SPREAD DYNAMICS</th>
+              <th>TACTICAL DIRECTIVE</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong style="color:var(--accent-red);">WAVE 1</strong></td>
+              <td>T0 to T+60s</td>
+              <td>Machine-readable wire algorithmic parsing; non-linear stop hunts.</td>
+              <td>Spreads widen 10x–25x ($2.00–$5.00 on Gold).</td>
+              <td><strong>NO MARKET ORDERS.</strong> Slippage guarantees negative expectancy.</td>
+            </tr>
+            <tr>
+              <td><strong style="color:var(--accent-cyan);">WAVE 2</strong></td>
+              <td>T+2m to T+15m</td>
+              <td>Institutional component digestion (Core vs Supercore vs Shelter lag).</td>
+              <td>Spreads compress back to 30–50 cents.</td>
+              <td><strong>VALIDATION WINDOW.</strong> Cross-check 2Y Yields & DXY. Fade knee-jerk headline fakeouts.</td>
+            </tr>
+            <tr>
+              <td><strong style="color:var(--accent-green);">WAVE 3</strong></td>
+              <td>T+15m to T+60m</td>
+              <td>Post-Announcement Drift (PEAD); macro portfolio rebalancing.</td>
+              <td>Normal liquidity restored.</td>
+              <td><strong>EXECUTION WINDOW.</strong> Enter on VWAP pullbacks in the verified macro transmission direction.</td>
+            </tr>
+          </tbody>
+        </table>
+
+      </div>
+    </div>
+
+    <!-- Section 4: Historical Empirical Master Ledger (34 Releases) -->
+    <div class="grid-box">
+      <div class="grid-box-header">
+        <span>[ 05 // HISTORICAL EVENT HORIZON MASTER LEDGER (2024–2026) ]</span>
+        <span style="color:var(--fg-muted);">AUTHENTIC VERIFIED DATA</span>
+      </div>
+      <div class="grid-box-body">
+        <div class="data-table-wrap">
+          <table class="brutal-table">
+            <thead>
+              <tr>
+                <th>RELEASE DATE</th>
+                <th>REF MONTH</th>
+                <th>ACTUAL MoM</th>
+                <th>FCST MoM</th>
+                <th>SURPRISE</th>
+                <th>CORE YoY</th>
+                <th>FCST CORE</th>
+                <th>COMPOSITE Z</th>
+                <th>GOLD OPEN</th>
+                <th>GOLD RET (%)</th>
+                <th>RANGE (%)</th>
+                <th>DXY RET (%)</th>
+                <th>REGIME</th>
+              </tr>
+            </thead>
+            <tbody id="hist-tbody">
+              <!-- Injected by app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Industrial Footer -->
+  <footer>
+    <div>NEWSLYSER // QUANTITATIVE MACRO DIVISION © 2026. ALL RIGHTS RESERVED.</div>
+    <div>STRICT EMPIRICAL STANDARDS // WHITE HC3 COVARIANCE // ZERO-SLOP INTERFACE</div>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

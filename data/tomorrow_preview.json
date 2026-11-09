@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-10",
+  "time": "08:30 AM EST (13:30 UTC / 20:30 WIB)",
+  "ref_month": "October 2026",
+  "forecast_mom": 0.3,
+  "prev_mom": 0.6,
+  "forecast_core_yoy": 2.8,
+  "prev_core_yoy": 2.6,
+  "forecast_core_mom": 0.2,
+  "prev_core_mom": 0.3,
+  "cleveland_fed_nowcast_mom": 0.28,
+  "cleveland_fed_nowcast_core_mom": 0.22,
+  "survey_dispersion_sd": 0.075
+}
