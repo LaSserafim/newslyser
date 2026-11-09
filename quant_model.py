@@ -322,3 +322,106 @@ def simulate_tomorrow_scenario(actual_mom, actual_core_yoy, tomorrow_meta):
             "risk_level": risk_level
         }
     }
+def run_monte_carlo(current_price=4136.60, z_shock=0.0, horizon_days=5, n_paths=2000):
+    """
+    Monte Carlo Jump-Diffusion & Geometric Brownian Motion engine.
+    Calibrated to authentic historical event-day Gold volatility (sigma_event = 1.85%)
+    and subsequent continuous daily volatility (sigma_daily = 1.15%).
+    Directly addresses TikTok Slide 13 (Monte Carlo 1-day & 5-day probabilities).
+    """
+    np.random.seed(42) # Reproducible, deterministic paths
+    steps = max(1, int(horizon_days))
+    paths = np.zeros((n_paths, steps + 1))
+    paths[:, 0] = current_price
+
+    # Day 1: Announcement shock component
+    jump_mean = -0.558 * z_shock / 100.0
+    jump_sigma = 1.85 / 100.0
+    day1_ret = np.random.normal(jump_mean, jump_sigma, n_paths)
+    paths[:, 1] = paths[:, 0] * np.exp(day1_ret)
+
+    # Days 2 to N: Continuous Geometric Brownian Motion
+    drift = 0.0002
+    daily_vol = 1.15 / 100.0
+    for t in range(2, steps + 1):
+        z = np.random.normal(0, 1, n_paths)
+        paths[:, t] = paths[:, t - 1] * np.exp((drift - 0.5 * daily_vol ** 2) + daily_vol * z)
+
+    terminal_rets = (paths[:, -1] - paths[:, 0]) / paths[:, 0] * 100.0
+    p_pos = float(np.mean(terminal_rets > 0) * 100.0)
+    p_neg = float(np.mean(terminal_rets < 0) * 100.0)
+
+    # Calculate percentiles across timesteps
+    p5 = np.percentile(paths, 5, axis=0)
+    p25 = np.percentile(paths, 25, axis=0)
+    p50 = np.percentile(paths, 50, axis=0) # Median trajectory
+    p75 = np.percentile(paths, 75, axis=0)
+    p95 = np.percentile(paths, 95, axis=0)
+
+    # 8 representative sample traces
+    sample_indices = np.linspace(0, n_paths - 1, 8, dtype=int)
+    sample_traces = [paths[i].tolist() for i in sample_indices]
+
+    # Value-at-Risk (95% VaR and CVaR)
+    var_95 = float(np.percentile(terminal_rets, 5))
+    cvar_95 = float(np.mean(terminal_rets[terminal_rets <= var_95]))
+
+    return {
+        "horizon_days": steps,
+        "z_shock": z_shock,
+        "n_paths": n_paths,
+        "current_price": current_price,
+        "timesteps": [f"Day {i}" for i in range(steps + 1)],
+        "percentiles": {
+            "p5": [round(float(v), 2) for v in p5],
+            "p25": [round(float(v), 2) for v in p25],
+            "p50": [round(float(v), 2) for v in p50],
+            "p75": [round(float(v), 2) for v in p75],
+            "p95": [round(float(v), 2) for v in p95]
+        },
+        "sample_traces": [[round(float(v), 2) for v in trace] for trace in sample_traces],
+        "metrics": {
+            "p_positive_return_pct": round(p_pos, 2),
+            "p_negative_return_pct": round(p_neg, 2),
+            "expected_terminal_price": round(float(np.mean(paths[:, -1])), 2),
+            "median_terminal_price": round(float(p50[-1]), 2),
+            "var_95_pct": round(var_95, 2),
+            "cvar_95_pct": round(cvar_95, 2)
+        }
+    }
+
+def calculate_probability_density_function(n_points=120):
+    """
+    Calculates Gaussian Probability Density Function (PDF)
+    f(x) = (1 / (sigma * sqrt(2*pi))) * exp(-(x - mu)^2 / (2 * sigma^2))
+    Directly addresses TikTok Slide 01.
+    Compares Historical Prior (mu=0, sigma=0.08) against Energy-Conditioned Posterior (mu=+0.08, sigma=0.09).
+    """
+    x_vals = np.linspace(-0.35, +0.35, n_points)
+    
+    mu_prior, sigma_prior = 0.00, 0.08
+    mu_post, sigma_post = 0.08, 0.09 # Conditioned on +12.11% WTI energy shock
+
+    def gaussian_pdf(x, mu, sigma):
+        return (1.0 / (sigma * math.sqrt(2 * math.pi))) * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+
+    pdf_prior = gaussian_pdf(x_vals, mu_prior, sigma_prior)
+    pdf_post = gaussian_pdf(x_vals, mu_post, sigma_post)
+
+    points = []
+    for x, p_pr, p_po in zip(x_vals, pdf_prior, pdf_post):
+        zone = "DOVISH_MISS" if x <= -0.10 else ("HAWKISH_BEAT" if x >= 0.10 else "NOISE_ZONE")
+        points.append({
+            "x": round(float(x), 3),
+            "prior_pdf": round(float(p_pr), 3),
+            "posterior_pdf": round(float(p_po), 3),
+            "zone": zone
+        })
+
+    return {
+        "parameters": {
+            "prior": {"mu": mu_prior, "sigma": sigma_prior, "label": "Historical Base Rate Prior"},
+            "posterior": {"mu": mu_post, "sigma": sigma_post, "label": "Geopolitical Energy Posterior (+12.11% WTI)"}
+        },
+        "points": points
+    }

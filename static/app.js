@@ -45,10 +45,12 @@ async function fetchInitialData() {
     renderTomorrowBanner(tomorrowMeta);
     renderModelComparison(modelData);
     renderHistoricalTable(historicalData);
-    renderComponentChart(macroSummary);
+    renderComponentChart();
     renderScatterChart(historicalData, modelData);
-    // Pre-news initial model state is pre-rendered in HTML
-} catch (err) {
+    renderMonteCarloChart(1, 0.0);
+    renderPDFChart();
+    initMonteCarloControls();
+  } catch (err) {
     console.error("Data load failed:", err);
   }
 }
@@ -231,9 +233,250 @@ function renderHistoricalTable(events) {
     tbody.appendChild(tr);
   });
 }
+let currentMCHorizon = 1;
+let currentMCZ = 0.0;
+
+function initMonteCarloControls() {
+  const btn1d = document.getElementById("mc-btn-1d");
+  const btn5d = document.getElementById("mc-btn-5d");
+  const btnZ0 = document.getElementById("mc-btn-z0");
+  const btnZpos = document.getElementById("mc-btn-zpos");
+  const btnZneg = document.getElementById("mc-btn-zneg");
+
+  if (btn1d && btn5d) {
+    btn1d.addEventListener("click", () => {
+      currentMCHorizon = 1;
+      btn1d.classList.add("active");
+      btn5d.classList.remove("active");
+      renderMonteCarloChart(currentMCHorizon, currentMCZ);
+    });
+    btn5d.addEventListener("click", () => {
+      currentMCHorizon = 5;
+      btn5d.classList.add("active");
+      btn1d.classList.remove("active");
+      renderMonteCarloChart(currentMCHorizon, currentMCZ);
+    });
+  }
+
+  if (btnZ0 && btnZpos && btnZneg) {
+    btnZ0.addEventListener("click", () => {
+      currentMCZ = 0.0;
+      btnZ0.classList.add("active");
+      btnZpos.classList.remove("active");
+      btnZneg.classList.remove("active");
+      renderMonteCarloChart(currentMCHorizon, currentMCZ);
+    });
+    btnZpos.addEventListener("click", () => {
+      currentMCZ = 1.33;
+      btnZpos.classList.add("active");
+      btnZ0.classList.remove("active");
+      btnZneg.classList.remove("active");
+      renderMonteCarloChart(currentMCHorizon, currentMCZ);
+    });
+    btnZneg.addEventListener("click", () => {
+      currentMCZ = -1.33;
+      btnZneg.classList.add("active");
+      btnZ0.classList.remove("active");
+      btnZpos.classList.remove("active");
+      renderMonteCarloChart(currentMCHorizon, currentMCZ);
+    });
+  }
+}
+
+async function renderMonteCarloChart(horizon, z) {
+  const container = document.getElementById("mc-chart-container");
+  if (!container) return;
+
+  let mc = null;
+  try {
+    const res = await fetch(`/api/monte-carlo?horizon=${horizon}&z=${z}`);
+    mc = await res.json();
+  } catch (err) {
+    console.warn("Monte Carlo fetch error:", err);
+    return;
+  }
+
+  // Update readouts
+  const pPosEl = document.getElementById("mc-p-pos");
+  const pNegEl = document.getElementById("mc-p-neg");
+  const medEl = document.getElementById("mc-median-price");
+  const varEl = document.getElementById("mc-var-95");
+
+  if (pPosEl) pPosEl.innerText = mc.metrics.p_positive_return_pct + "%";
+  if (pNegEl) pNegEl.innerText = mc.metrics.p_negative_return_pct + "%";
+  if (medEl) medEl.innerText = "$" + mc.metrics.median_terminal_price.toFixed(2);
+  if (varEl) varEl.innerText = (mc.metrics.var_95_pct > 0 ? "+" : "") + mc.metrics.var_95_pct.toFixed(2) + "%";
+
+  const w = container.clientWidth || 700;
+  const h = 260;
+  const padL = 50;
+  const padR = 25;
+  const padT = 25;
+  const padB = 30;
+
+  const steps = mc.horizon_days;
+  const p5 = mc.percentiles.p5;
+  const p25 = mc.percentiles.p25;
+  const p50 = mc.percentiles.p50;
+  const p75 = mc.percentiles.p75;
+  const p95 = mc.percentiles.p95;
+
+  const allVals = [...p5, ...p95];
+  const minP = Math.min(...allVals) * 0.995;
+  const maxP = Math.max(...allVals) * 1.005;
+
+  function getX(i) {
+    return padL + (i / steps) * (w - padL - padR);
+  }
+  function getY(p) {
+    return padT + (1 - (p - minP) / (maxP - minP)) * (h - padT - padB);
+  }
+
+  let path90 = `M ${getX(0)} ${getY(p95[0])} ` + p95.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
+    p5.slice().reverse().map((v, i) => ` L ${getX(steps - i)} ${getY(v)}`).join("") + " Z";
+
+  let path50 = `M ${getX(0)} ${getY(p75[0])} ` + p75.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
+    p25.slice().reverse().map((v, i) => ` L ${getX(steps - i)} ${getY(v)}`).join("") + " Z";
+
+  let pathMedian = p50.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
+
+  let samplePathsSvg = "";
+  mc.sample_traces.forEach((tr, idx) => {
+    const d = tr.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
+    const op = idx < 4 ? "0.35" : "0.2";
+    samplePathsSvg += `<path d="${d}" fill="none" stroke="#888" stroke-width="1" opacity="${op}"/>`;
+  });
+
+  const baseY = getY(mc.current_price);
+  const baseLine = `<line x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}" stroke="#ffaa00" stroke-width="1" stroke-dasharray="3,3"/>`;
+
+  let gridSvg = "";
+  for (let step = 0; step <= steps; step++) {
+    const x = getX(step);
+    gridSvg += `
+      <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#181818" stroke-width="1"/>
+      <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">${mc.timesteps[step]}</text>
+    `;
+  }
+
+  const priceTicks = [minP, (minP + maxP) / 2, maxP];
+  priceTicks.forEach(pt => {
+    const y = getY(pt);
+    gridSvg += `
+      <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#181818" stroke-width="1"/>
+      <text x="${padL - 6}" y="${y + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">$${pt.toFixed(0)}</text>
+    `;
+  });
+
+  let svg = `
+    <svg class="telemetry-svg" viewBox="0 0 ${w} ${h}">
+      ${gridSvg}
+      ${baseLine}
+      <path d="${path90}" fill="#181818" opacity="0.65"/>
+      <path d="${path50}" fill="#242424" opacity="0.85"/>
+      ${samplePathsSvg}
+      <path d="${pathMedian}" fill="none" stroke="#00e5ff" stroke-width="2.5"/>
+      <circle cx="${getX(steps)}" cy="${getY(p50[steps])}" r="3.5" fill="#00e5ff"/>
+      <text x="${getX(steps) - 6}" y="${getY(p50[steps]) - 6}" fill="#00e5ff" font-size="9" font-weight="800" text-anchor="end" font-family="monospace">$${p50[steps].toFixed(1)}</text>
+    </svg>
+  `;
+  container.innerHTML = svg;
+}
+
+async function renderPDFChart() {
+  const container = document.getElementById("pdf-chart-container");
+  const hudEl = document.getElementById("pdf-hover-hud");
+  if (!container) return;
+
+  let pdfData = null;
+  try {
+    const res = await fetch("/api/pdf-distribution");
+    pdfData = await res.json();
+  } catch (err) {
+    console.warn("PDF fetch error:", err);
+    return;
+  }
+
+  const pts = pdfData.points;
+  const n = pts.length;
+  if (n < 2) return;
+
+  const w = container.clientWidth || 700;
+  const h = 260;
+  const padL = 45;
+  const padR = 25;
+  const padT = 25;
+  const padB = 30;
+
+  const minX = -0.35;
+  const maxX = +0.35;
+  const maxY = 5.2;
+
+  function getX(x) {
+    return padL + ((x - minX) / (maxX - minX)) * (w - padL - padR);
+  }
+  function getY(y) {
+    return padT + (1 - (y / maxY)) * (h - padT - padB);
+  }
+
+  const pathPrior = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.prior_pdf).toFixed(1)}`).join(" ");
+  const pathPost = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.posterior_pdf).toFixed(1)}`).join(" ");
+
+  const xMiss = getX(-0.10);
+  const xBeat = getX(+0.10);
+  const yZero = getY(0);
+  const x0 = getX(0);
+
+  let svg = `
+    <svg class="telemetry-svg" id="pdf-svg" viewBox="0 0 ${w} ${h}">
+      <rect x="${padL}" y="${padT}" width="${xMiss - padL}" height="${h - padT - padB}" fill="rgba(74, 246, 38, 0.06)"/>
+      <rect x="${xMiss}" y="${padT}" width="${xBeat - xMiss}" height="${h - padT - padB}" fill="#141414" opacity="0.6"/>
+      <rect x="${xBeat}" y="${padT}" width="${w - padR - xBeat}" height="${h - padT - padB}" fill="rgba(255, 42, 42, 0.08)"/>
+
+      <line x1="${padL}" y1="${yZero}" x2="${w - padR}" y2="${yZero}" stroke="#333" stroke-width="1"/>
+      <line x1="${x0}" y1="${padT}" x2="${x0}" y2="${h - padB}" stroke="#333" stroke-width="1" stroke-dasharray="2,2"/>
+      <line x1="${xMiss}" y1="${padT}" x2="${xMiss}" y2="${h - padB}" stroke="#444" stroke-width="1" stroke-dasharray="1,2"/>
+      <line x1="${xBeat}" y1="${padT}" x2="${xBeat}" y2="${h - padB}" stroke="#444" stroke-width="1" stroke-dasharray="1,2"/>
+
+      <text x="${padL}" y="${h - 8}" fill="#666" font-size="8" text-anchor="start" font-family="monospace">-0.35pp</text>
+      <text x="${xMiss}" y="${h - 8}" fill="var(--accent-green)" font-size="8" text-anchor="middle" font-family="monospace">-0.10pp</text>
+      <text x="${x0}" y="${h - 8}" fill="#888" font-size="8" text-anchor="middle" font-family="monospace">0.00pp</text>
+      <text x="${xBeat}" y="${h - 8}" fill="var(--accent-red)" font-size="8" text-anchor="middle" font-family="monospace">+0.10pp</text>
+      <text x="${w - padR}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">+0.35pp</text>
+
+      <path d="${pathPrior}" fill="none" stroke="#777" stroke-width="1.5" stroke-dasharray="3,3"/>
+      <path d="${pathPost}" fill="none" stroke="#ff2a2a" stroke-width="2.5"/>
+      <circle cx="${getX(0.08)}" cy="${getY(4.43)}" r="3.5" fill="#ff2a2a"/>
+      <text x="${getX(0.08)}" y="${getY(4.43) - 6}" fill="#ff2a2a" font-size="8" font-weight="700" text-anchor="middle" font-family="monospace">μ = +0.08pp</text>
+    </svg>
+  `;
+  container.innerHTML = svg;
+
+  const svgEl = document.getElementById("pdf-svg");
+  if (svgEl && hudEl) {
+    svgEl.addEventListener("mousemove", (ev) => {
+      const rect = svgEl.getBoundingClientRect();
+      const mouseX = ev.clientX - rect.left;
+      const clampedX = Math.max(padL, Math.min(w - padR, (mouseX / rect.width) * w));
+      const xVal = minX + ((clampedX - padL) / (w - padL - padR)) * (maxX - minX);
+      
+      let closest = pts[0];
+      let minDiff = 999;
+      pts.forEach(p => {
+        const diff = Math.abs(p.x - xVal);
+        if (diff < minDiff) { minDiff = diff; closest = p; }
+      });
+      hudEl.innerText = `x: ${(closest.x > 0 ? "+" : "") + closest.x.toFixed(2)}pp | Prior: ${closest.prior_pdf.toFixed(2)} | Post: ${closest.posterior_pdf.toFixed(2)} [${closest.zone}]`;
+    });
+    svgEl.addEventListener("mouseleave", () => {
+      hudEl.innerText = "HOVER FOR DENSITY";
+    });
+  }
+}
 
 async function renderComponentChart() {
   const container = document.getElementById("component-chart-container");
+  const hudEl = document.getElementById("comp-hover-hud");
   if (!container) return;
 
   let data = [];
@@ -274,17 +517,15 @@ async function renderComponentChart() {
   const pSuper = makePath("supercore_yoy");
   const pShelter = makePath("shelter_yoy");
 
-  // Grid lines every 1%
   let gridLines = "";
   for (let val = 2.0; val <= 8.0; val += 1.0) {
     const y = getY(val);
     gridLines += `
       <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#1f1f1f" stroke-width="1"/>
-      <text x="${padL - 6}" y="${y + 3}" fill="#666" font-size="9" text-anchor="end" font-family="monospace">${val.toFixed(0)}%</text>
+      <text x="${padL - 6}" y="${y + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">${val.toFixed(0)}%</text>
     `;
   }
 
-  // Date ticks on x-axis (every 6 months)
   let dateTicks = "";
   for (let i = 0; i < n; i += 6) {
     const x = getX(i);
@@ -293,35 +534,55 @@ async function renderComponentChart() {
       <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">${data[i].date}</text>
     `;
   }
-  // Final date tick
   dateTicks += `<text x="${getX(n-1)}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">${data[n-1].date}</text>`;
 
   const lastD = data[n - 1];
   let svg = `
-    <svg class="telemetry-svg" viewBox="0 0 ${w} ${h}">
+    <svg class="telemetry-svg" id="comp-svg" viewBox="0 0 ${w} ${h}">
       ${gridLines}
       ${dateTicks}
-
-      <!-- Series Paths -->
       <path d="${pHL}" fill="none" stroke="#888888" stroke-width="1.5" stroke-dasharray="3,3"/>
       <path d="${pCore}" fill="none" stroke="#eaeaea" stroke-width="2"/>
       <path d="${pShelter}" fill="none" stroke="#00e5ff" stroke-width="2"/>
       <path d="${pSuper}" fill="none" stroke="#ff2a2a" stroke-width="2.5"/>
-
-      <!-- End Callouts -->
       <circle cx="${getX(n-1)}" cy="${getY(lastD.supercore_yoy)}" r="3.5" fill="#ff2a2a"/>
-      <text x="${getX(n-1) - 4}" y="${getY(lastD.supercore_yoy) - 6}" fill="#ff2a2a" font-size="9" font-weight="700" text-anchor="end" font-family="monospace">${lastD.supercore_yoy}%</text>
-
       <circle cx="${getX(n-1)}" cy="${getY(lastD.shelter_yoy)}" r="3" fill="#00e5ff"/>
       <circle cx="${getX(n-1)}" cy="${getY(lastD.core_yoy)}" r="3" fill="#eaeaea"/>
-      <text x="${getX(n-1) - 4}" y="${getY(lastD.core_yoy) + 12}" fill="#eaeaea" font-size="9" font-weight="700" text-anchor="end" font-family="monospace">${lastD.core_yoy}%</text>
+      <line id="comp-crosshair" x1="0" y1="0" x2="0" y2="0" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"/>
     </svg>
   `;
   container.innerHTML = svg;
+
+  const svgEl = document.getElementById("comp-svg");
+  const crosshair = document.getElementById("comp-crosshair");
+  if (svgEl && hudEl) {
+    svgEl.addEventListener("mousemove", (ev) => {
+      const rect = svgEl.getBoundingClientRect();
+      const mouseX = ev.clientX - rect.left;
+      const clampedX = Math.max(padL, Math.min(w - padR, (mouseX / rect.width) * w));
+      const idx = Math.round(((clampedX - padL) / (w - padL - padR)) * (n - 1));
+      const d = data[idx];
+      if (d) {
+        hudEl.innerText = `${d.date}: Supercore ${d.supercore_yoy}% | Shelter ${d.shelter_yoy}% | Core ${d.core_yoy}% | Headline ${d.headline_yoy}%`;
+        if (crosshair) {
+          crosshair.style.display = "block";
+          crosshair.setAttribute("x1", getX(idx));
+          crosshair.setAttribute("x2", getX(idx));
+          crosshair.setAttribute("y1", padT);
+          crosshair.setAttribute("y2", h - padB);
+        }
+      }
+    });
+    svgEl.addEventListener("mouseleave", () => {
+      hudEl.innerText = "HOVER OVER TIMELINE";
+      if (crosshair) crosshair.style.display = "none";
+    });
+  }
 }
 
 function renderScatterChart(events, models) {
   const container = document.getElementById("scatter-chart-container");
+  const hudEl = document.getElementById("scatter-hover-hud");
   if (!container || events.length === 0) return;
 
   const valid = events.filter(e => e.z_score_composite !== undefined && e.gold_return_pct !== undefined);
@@ -330,7 +591,6 @@ function renderScatterChart(events, models) {
   const w = container.clientWidth || 700;
   const h = 260;
 
-  // Split: Left 62% for Scatter OLS, Right 38% for Volatility Ratios VR(w)
   const scatterW = Math.floor(w * 0.62);
   const vrW = w - scatterW;
 
@@ -357,33 +617,28 @@ function renderScatterChart(events, models) {
   const nzRight = getX(1.0);
 
   let pointsSvg = "";
-  valid.forEach(e => {
+  valid.forEach((e, idx) => {
     const cx = getX(e.z_score_composite);
     const cy = getY(e.gold_return_pct);
     const color = e.gold_return_pct > 0 ? "var(--accent-green)" : "var(--accent-red)";
     
-    // Annotate major shocks
     let labelSvg = "";
     if (e.gold_return_pct <= -3.0 || e.gold_return_pct >= 1.9 || Math.abs(e.z_score_composite) >= 2.5) {
       labelSvg = `<text x="${cx}" y="${cy - 6}" fill="#aaa" font-size="7.5" text-anchor="middle" font-family="monospace">${e.date.substring(2,7)}</text>`;
     }
     
     pointsSvg += `
-      <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.5" fill="${color}" stroke="#000" stroke-width="1" opacity="0.85">
-        <title>${e.date} (${e.ref_month}): Z=${e.z_score_composite}σ, Gold=${e.gold_return_pct}%</title>
-      </circle>
+      <circle class="scatter-dot" data-idx="${idx}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.5" fill="${color}" stroke="#000" stroke-width="1" opacity="0.85" style="cursor:pointer;"></circle>
       ${labelSvg}
     `;
   });
 
-  // Regression line
   const slope = models.refined_composite ? models.refined_composite.slope : -0.558;
   const intercept = models.refined_composite ? models.refined_composite.intercept : 0.148;
   const yZneg3 = intercept + slope * (-3.2);
   const yZpos3 = intercept + slope * (+3.2);
   const regLine = `<line x1="${getX(-3.2)}" y1="${getY(yZneg3)}" x2="${getX(3.2)}" y2="${getY(yZpos3)}" stroke="#00e5ff" stroke-width="2" stroke-dasharray="3,3"/>`;
 
-  // Volatility Ratio Bars on Right side
   const vrData = [
     { label: "VR(5m)", ratio: 5.42, color: "#ff2a2a" },
     { label: "VR(15m)", ratio: 3.65, color: "#00e5ff" },
@@ -395,44 +650,52 @@ function renderScatterChart(events, models) {
   const vrWidth = w - vrStartX - 15;
 
   let vrSvg = `
-    <!-- Vertical divider -->
     <line x1="${scatterW}" y1="${padT - 10}" x2="${scatterW}" y2="${h - 10}" stroke="#262626" stroke-width="1"/>
-    <text x="${vrStartX}" y="${padT - 2}" fill="#888" font-size="9" font-weight="700" font-family="monospace">REALIZED VOLATILITY RATIO VR(w)</text>
+    <text x="${vrStartX}" y="${padT - 2}" fill="#888" font-size="8" font-weight="700" font-family="monospace">VOLATILITY RATIO VR(w)</text>
   `;
 
   vrData.forEach((item, idx) => {
     const barY = padT + 20 + idx * 42;
     const barLen = (item.ratio / maxVR) * vrWidth;
     vrSvg += `
-      <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="9" font-family="monospace">${item.label}</text>
-      <rect x="${vrStartX + 55}" y="${barY}" width="${barLen.toFixed(1)}" height="14" fill="${item.color}" opacity="0.9"/>
-      <text x="${vrStartX + 60 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="800" font-family="monospace">${item.ratio.toFixed(2)}x</text>
+      <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="8" font-family="monospace">${item.label}</text>
+      <rect x="${vrStartX + 52}" y="${barY}" width="${barLen.toFixed(1)}" height="13" fill="${item.color}" opacity="0.9"/>
+      <text x="${vrStartX + 58 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="800" font-family="monospace">${item.ratio.toFixed(2)}x</text>
     `;
   });
 
   let svg = `
-    <svg class="telemetry-svg" viewBox="0 0 ${w} ${h}">
-      <!-- Left: Scatter Area -->
+    <svg class="telemetry-svg" id="scatter-svg" viewBox="0 0 ${w} ${h}">
       <rect x="${nzLeft}" y="${padT}" width="${nzRight - nzLeft}" height="${h - padT - padB}" fill="#161616" opacity="0.5"/>
       <text x="${cx0}" y="${padT + 12}" fill="#555" font-size="8" text-anchor="middle" font-family="monospace">NOISE (|Z| &lt; 1.0σ)</text>
-
-      <!-- Axes -->
       <line x1="${padL}" y1="${cy0}" x2="${scatterW - padR}" y2="${cy0}" stroke="#333" stroke-width="1"/>
       <line x1="${cx0}" y1="${padT}" x2="${cx0}" y2="${h - padB}" stroke="#333" stroke-width="1"/>
-
       <text x="${padL - 6}" y="${cy0 + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">0.0%</text>
       <text x="${cx0}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">0.0σ</text>
       <text x="${scatterW - padR}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">+3.0σ</text>
       <text x="${padL}" y="${h - 8}" fill="#666" font-size="8" text-anchor="start" font-family="monospace">-3.0σ</text>
-
       ${regLine}
       ${pointsSvg}
-
-      <!-- Right: VR Ratios -->
       ${vrSvg}
     </svg>
   `;
   container.innerHTML = svg;
+
+  if (hudEl) {
+    const dots = container.querySelectorAll(".scatter-dot");
+    dots.forEach(d => {
+      d.addEventListener("mouseenter", () => {
+        const idx = parseInt(d.getAttribute("data-idx"));
+        const e = valid[idx];
+        if (e) {
+          hudEl.innerText = `${e.date} (${e.ref_month}): Z=${e.z_score_composite}σ | Gold: ${(e.gold_return_pct > 0 ? "+" : "") + e.gold_return_pct}% | DXY: ${(e.dxy_return_pct > 0 ? "+" : "") + e.dxy_return_pct}% [${e.regime}]`;
+        }
+      });
+      d.addEventListener("mouseleave", () => {
+        hudEl.innerText = "HOVER OVER DATA POINT";
+      });
+    });
+  }
 }
 
 // ==================== LIVE ON-DEMAND SYNC ENGINE ====================

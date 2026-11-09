@@ -179,6 +179,14 @@ def get_academic_literature():
     with open(os.path.join(DATA_DIR, "academic_literature.json")) as f:
         data = json.load(f)
     return data
+@app.get("/api/monte-carlo")
+def get_monte_carlo(horizon: int = 5, z: float = 0.0):
+    return quant_model.run_monte_carlo(horizon_days=horizon, z_shock=z)
+
+@app.get("/api/pdf-distribution")
+def get_pdf_distribution():
+    return quant_model.calculate_probability_density_function()
+
 
 
 class SimRequest(BaseModel):
