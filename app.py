@@ -15,6 +15,8 @@ import quant_model
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
 def get_api_key():
     key = os.environ.get("DEEPSEEK_API_KEY")
     if not key:
@@ -28,6 +30,7 @@ def get_api_key():
     return key or ""
 
 DEEPSEEK_API_KEY = get_api_key()
+app = FastAPI(title="NEWSLYSER // CPI Quantitative Terminal", version="2.4.0")
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
