@@ -310,36 +310,46 @@ function initMonteCarloControls() {
   }
 }
 
+let mcDataCache = null;
+let componentDataFull = [];
+let compSeriesVisibility = { supercore: true, shelter: true, core: true, headline: true };
+let compRangeSelection = "all";
+let scatterRegimeFilter = "all";
+
 async function renderMonteCarloChart(horizon, z) {
   const container = document.getElementById("mc-chart-container");
+  const hudEl = document.getElementById("mc-hover-hud");
   if (!container) return;
 
   let mc = null;
   try {
     const res = await fetch(`/api/monte-carlo?horizon=${horizon}&z=${z}`);
     mc = await res.json();
+    mcDataCache = mc;
   } catch (err) {
     console.warn("Monte Carlo fetch error:", err);
     return;
   }
 
-  // Update readouts
+  // Smooth counter updates via GSAP
   const pPosEl = document.getElementById("mc-p-pos");
   const pNegEl = document.getElementById("mc-p-neg");
   const medEl = document.getElementById("mc-median-price");
   const varEl = document.getElementById("mc-var-95");
+
   animateNumber(pPosEl, mc.metrics.p_positive_return_pct, "", "%", 2);
   animateNumber(pNegEl, mc.metrics.p_negative_return_pct, "", "%", 2);
   animateNumber(medEl, mc.metrics.median_terminal_price, "$", "", 2);
   animateNumber(varEl, mc.metrics.var_95_pct, (mc.metrics.var_95_pct > 0 ? "+" : ""), "%", 2);
+
   const w = container.clientWidth || 700;
-  const h = 260;
-  const padL = 50;
+  const h = 320;
+  const padL = 52;
   const padR = 25;
   const padT = 25;
-  const padB = 30;
+  const padB = 32;
 
-  const steps = mc.horizon_days;
+  const steps = mc.steps || 24;
   const p5 = mc.percentiles.p5;
   const p25 = mc.percentiles.p25;
   const p50 = mc.percentiles.p50;
@@ -357,6 +367,7 @@ async function renderMonteCarloChart(horizon, z) {
     return padT + (1 - (p - minP) / (maxP - minP)) * (h - padT - padB);
   }
 
+  // 90% and 50% percentile envelopes
   let path90 = `M ${getX(0)} ${getY(p95[0])} ` + p95.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
     p5.slice().reverse().map((v, i) => ` L ${getX(steps - i)} ${getY(v)}`).join("") + " Z";
 
@@ -365,22 +376,37 @@ async function renderMonteCarloChart(horizon, z) {
 
   let pathMedian = p50.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
 
+  // Sample path traces
   let samplePathsSvg = "";
   mc.sample_traces.forEach((tr, idx) => {
     const d = tr.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
-    const op = idx < 4 ? "0.35" : "0.2";
-    samplePathsSvg += `<path d="${d}" fill="none" stroke="#888" stroke-width="1" opacity="${op}"/>`;
+    const op = idx < 3 ? "0.35" : (idx < 6 ? "0.22" : "0.12");
+    samplePathsSvg += `<path d="${d}" fill="none" stroke="#999" stroke-width="1" opacity="${op}"/>`;
   });
 
+  // T0 Anchor Baseline Indicator
   const baseY = getY(mc.current_price);
-  const baseLine = `<line x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}" stroke="#ffaa00" stroke-width="1" stroke-dasharray="3,3"/>`;
+  const baseLine = `
+    <line x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}" stroke="#ffaa00" stroke-width="1.2" stroke-dasharray="3,3"/>
+    <text x="${padL + 6}" y="${baseY - 4}" fill="#ffaa00" font-size="8" font-family="monospace">T0 ANCHOR: $${mc.current_price.toFixed(1)}</text>
+  `;
 
+  // Upper / Lower Band Indicators at Terminal
+  const upperY = getY(p75[steps]);
+  const lowerY = getY(p25[steps]);
+  const indicatorLines = `
+    <text x="${getX(steps) - 6}" y="${upperY - 4}" fill="#00e5ff" font-size="8" text-anchor="end" font-family="monospace">+1σ: $${p75[steps].toFixed(0)}</text>
+    <text x="${getX(steps) - 6}" y="${lowerY + 11}" fill="#ff2a2a" font-size="8" text-anchor="end" font-family="monospace">-1σ: $${p25[steps].toFixed(0)}</text>
+  `;
+
+  // Grid lines
   let gridSvg = "";
-  for (let step = 0; step <= steps; step++) {
+  const stepStride = steps > 10 ? 4 : 1;
+  for (let step = 0; step <= steps; step += stepStride) {
     const x = getX(step);
     gridSvg += `
-      <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#181818" stroke-width="1"/>
-      <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">${mc.timesteps[step]}</text>
+      <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#141414" stroke-width="1"/>
+      <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">${mc.timesteps[step] || ""}</text>
     `;
   }
 
@@ -388,7 +414,7 @@ async function renderMonteCarloChart(horizon, z) {
   priceTicks.forEach(pt => {
     const y = getY(pt);
     gridSvg += `
-      <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#181818" stroke-width="1"/>
+      <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#141414" stroke-width="1"/>
       <text x="${padL - 6}" y="${y + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">$${pt.toFixed(0)}</text>
     `;
   });
@@ -397,17 +423,57 @@ async function renderMonteCarloChart(horizon, z) {
     <svg class="telemetry-svg" id="mc-svg" viewBox="0 0 ${w} ${h}">
       ${gridSvg}
       ${baseLine}
-      <path d="${path90}" fill="#181818" opacity="0.65"/>
-      <path d="${path50}" fill="#242424" opacity="0.85"/>
+      <!-- 90% Confidence Envelope -->
+      <path d="${path90}" fill="#161616" opacity="0.6"/>
+      <!-- 50% Interquartile Core Band -->
+      <path d="${path50}" fill="#222222" opacity="0.85"/>
+      <!-- Stochastic Path Traces -->
       ${samplePathsSvg}
+      <!-- Median Trajectory -->
       <path d="${pathMedian}" fill="none" stroke="#00e5ff" stroke-width="2.5"/>
       <circle cx="${getX(steps)}" cy="${getY(p50[steps])}" r="3.5" fill="#00e5ff"/>
-      <text x="${getX(steps) - 6}" y="${getY(p50[steps]) - 6}" fill="#00e5ff" font-size="9" font-weight="800" text-anchor="end" font-family="monospace">$${p50[steps].toFixed(1)}</text>
+      <text x="${getX(steps) - 6}" y="${getY(p50[steps]) - 6}" fill="#00e5ff" font-size="9" font-weight="900" text-anchor="end" font-family="monospace">MEDIAN: $${p50[steps].toFixed(1)}</text>
+      ${indicatorLines}
+      <!-- Interactive Hover Crosshair -->
+      <line id="mc-crosshair" x1="0" y1="0" x2="0" y2="0" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"/>
     </svg>
   `;
   container.innerHTML = svg;
+
   if (typeof gsap !== "undefined") {
-    gsap.fromTo("#mc-svg path, #mc-svg line", { opacity: 0.15 }, { opacity: 1, duration: 0.5, ease: "power2.out" });
+    gsap.fromTo("#mc-svg path, #mc-svg line", { opacity: 0.2 }, { opacity: 1, duration: 0.5, ease: "power2.out" });
+  }
+
+  // Interactive Hover Inspection
+  const svgEl = document.getElementById("mc-svg");
+  const crosshair = document.getElementById("mc-crosshair");
+  if (svgEl && hudEl) {
+    svgEl.addEventListener("mousemove", (ev) => {
+      const rect = svgEl.getBoundingClientRect();
+      const mouseX = ev.clientX - rect.left;
+      const clampedX = Math.max(padL, Math.min(w - padR, (mouseX / rect.width) * w));
+      const stepIdx = Math.round(((clampedX - padL) / (w - padL - padR)) * steps);
+      const safeIdx = Math.max(0, Math.min(steps, stepIdx));
+
+      const medP = p50[safeIdx];
+      const upP = p95[safeIdx];
+      const lowP = p5[safeIdx];
+      const retPct = ((medP - mc.current_price) / mc.current_price * 100).toFixed(2);
+
+      hudEl.innerText = `${mc.timesteps[safeIdx]} | Median: $${medP.toFixed(1)} (+2σ: $${upP.toFixed(1)} / -2σ: $${lowP.toFixed(1)}) | Ret: ${retPct > 0 ? "+" : ""}${retPct}%`;
+
+      if (crosshair) {
+        crosshair.style.display = "block";
+        crosshair.setAttribute("x1", getX(safeIdx));
+        crosshair.setAttribute("x2", getX(safeIdx));
+        crosshair.setAttribute("y1", padT);
+        crosshair.setAttribute("y2", h - padB);
+      }
+    });
+    svgEl.addEventListener("mouseleave", () => {
+      hudEl.innerText = "HOVER TIMESTEP FOR ENVELOPE";
+      if (crosshair) crosshair.style.display = "none";
+    });
   }
 }
 
@@ -430,11 +496,11 @@ async function renderPDFChart() {
   if (n < 2) return;
 
   const w = container.clientWidth || 700;
-  const h = 260;
+  const h = 320;
   const padL = 45;
   const padR = 25;
-  const padT = 25;
-  const padB = 30;
+  const padT = 30;
+  const padB = 32;
 
   const minX = -0.35;
   const maxX = +0.35;
@@ -454,36 +520,59 @@ async function renderPDFChart() {
   const xBeat = getX(+0.10);
   const yZero = getY(0);
   const x0 = getX(0);
+  const xNowcast = getX(-0.02);
+  const xPeak = getX(0.08);
+
+  // Indicator milestone lines & labels
+  const indicatorsSvg = `
+    <!-- T0 Consensus Marker -->
+    <line x1="${x0}" y1="${padT + 12}" x2="${x0}" y2="${yZero}" stroke="#888" stroke-width="1" stroke-dasharray="2,2"/>
+    <text x="${x0}" y="${padT + 10}" fill="#888" font-size="7.5" text-anchor="middle" font-family="monospace">T0: 0.00pp</text>
+
+    <!-- Nowcast Marker -->
+    <line x1="${xNowcast}" y1="${padT + 22}" x2="${xNowcast}" y2="${yZero}" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2"/>
+    <text x="${xNowcast}" y="${padT + 20}" fill="#00e5ff" font-size="7.5" text-anchor="end" font-family="monospace">NOWCAST -0.02pp</text>
+
+    <!-- Energy Posterior Peak Marker -->
+    <line x1="${xPeak}" y1="${padT + 12}" x2="${xPeak}" y2="${yZero}" stroke="#ff2a2a" stroke-width="1.5"/>
+    <text x="${xPeak}" y="${padT + 10}" fill="#ff2a2a" font-size="8" font-weight="900" text-anchor="middle" font-family="monospace">PEAK +0.08pp</text>
+  `;
 
   let svg = `
     <svg class="telemetry-svg" id="pdf-svg" viewBox="0 0 ${w} ${h}">
-      <rect x="${padL}" y="${padT}" width="${xMiss - padL}" height="${h - padT - padB}" fill="rgba(74, 246, 38, 0.06)"/>
+      <!-- Shaded Zones -->
+      <rect x="${padL}" y="${padT}" width="${xMiss - padL}" height="${h - padT - padB}" fill="rgba(74, 246, 38, 0.07)"/>
       <rect x="${xMiss}" y="${padT}" width="${xBeat - xMiss}" height="${h - padT - padB}" fill="#141414" opacity="0.6"/>
       <rect x="${xBeat}" y="${padT}" width="${w - padR - xBeat}" height="${h - padT - padB}" fill="rgba(255, 42, 42, 0.08)"/>
 
       <line x1="${padL}" y1="${yZero}" x2="${w - padR}" y2="${yZero}" stroke="#333" stroke-width="1"/>
-      <line x1="${x0}" y1="${padT}" x2="${x0}" y2="${h - padB}" stroke="#333" stroke-width="1" stroke-dasharray="2,2"/>
       <line x1="${xMiss}" y1="${padT}" x2="${xMiss}" y2="${h - padB}" stroke="#444" stroke-width="1" stroke-dasharray="1,2"/>
       <line x1="${xBeat}" y1="${padT}" x2="${xBeat}" y2="${h - padB}" stroke="#444" stroke-width="1" stroke-dasharray="1,2"/>
 
+      ${indicatorsSvg}
+
       <text x="${padL}" y="${h - 8}" fill="#666" font-size="8" text-anchor="start" font-family="monospace">-0.35pp</text>
-      <text x="${xMiss}" y="${h - 8}" fill="var(--accent-green)" font-size="8" text-anchor="middle" font-family="monospace">-0.10pp</text>
+      <text x="${xMiss}" y="${h - 8}" fill="var(--accent-green)" font-size="8" text-anchor="middle" font-family="monospace">-0.10pp (MISS)</text>
       <text x="${x0}" y="${h - 8}" fill="#888" font-size="8" text-anchor="middle" font-family="monospace">0.00pp</text>
-      <text x="${xBeat}" y="${h - 8}" fill="var(--accent-red)" font-size="8" text-anchor="middle" font-family="monospace">+0.10pp</text>
+      <text x="${xBeat}" y="${h - 8}" fill="var(--accent-red)" font-size="8" text-anchor="middle" font-family="monospace">+0.10pp (BEAT)</text>
       <text x="${w - padR}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">+0.35pp</text>
 
       <path d="${pathPrior}" fill="none" stroke="#777" stroke-width="1.5" stroke-dasharray="3,3"/>
       <path d="${pathPost}" fill="none" stroke="#ff2a2a" stroke-width="2.5"/>
-      <circle cx="${getX(0.08)}" cy="${getY(4.43)}" r="3.5" fill="#ff2a2a"/>
-      <text x="${getX(0.08)}" y="${getY(4.43) - 6}" fill="#ff2a2a" font-size="8" font-weight="700" text-anchor="middle" font-family="monospace">μ = +0.08pp</text>
+      <circle cx="${xPeak}" cy="${getY(4.43)}" r="4" fill="#ff2a2a"/>
+
+      <!-- Interactive Scanning Needle -->
+      <line id="pdf-needle" x1="0" y1="0" x2="0" y2="0" stroke="#00e5ff" stroke-width="1.5" stroke-dasharray="2,2" style="display:none;"/>
     </svg>
   `;
   container.innerHTML = svg;
+
   if (typeof gsap !== "undefined") {
     gsap.fromTo("#pdf-svg path", { opacity: 0.2, scaleY: 0.3, transformOrigin: "bottom" }, { opacity: 1, scaleY: 1, stagger: 0.1, duration: 0.7, ease: "power2.out" });
   }
 
   const svgEl = document.getElementById("pdf-svg");
+  const needle = document.getElementById("pdf-needle");
   if (svgEl && hudEl) {
     svgEl.addEventListener("mousemove", (ev) => {
       const rect = svgEl.getBoundingClientRect();
@@ -497,10 +586,21 @@ async function renderPDFChart() {
         const diff = Math.abs(p.x - xVal);
         if (diff < minDiff) { minDiff = diff; closest = p; }
       });
-      hudEl.innerText = `x: ${(closest.x > 0 ? "+" : "") + closest.x.toFixed(2)}pp | Prior: ${closest.prior_pdf.toFixed(2)} | Post: ${closest.posterior_pdf.toFixed(2)} [${closest.zone}]`;
+
+      const zScore = (closest.x / 0.075).toFixed(2);
+      hudEl.innerText = `x: ${(closest.x > 0 ? "+" : "") + closest.x.toFixed(2)}pp (Z = ${zScore}σ) | Prior: ${closest.prior_pdf.toFixed(2)} | Post: ${closest.posterior_pdf.toFixed(2)} [${closest.zone}]`;
+
+      if (needle) {
+        needle.style.display = "block";
+        needle.setAttribute("x1", clampedX);
+        needle.setAttribute("x2", clampedX);
+        needle.setAttribute("y1", padT);
+        needle.setAttribute("y2", yZero);
+      }
     });
     svgEl.addEventListener("mouseleave", () => {
-      hudEl.innerText = "HOVER FOR DENSITY";
+      hudEl.innerText = "HOVER BELL CURVE";
+      if (needle) needle.style.display = "none";
     });
   }
 }
@@ -510,26 +610,32 @@ async function renderComponentChart() {
   const hudEl = document.getElementById("comp-hover-hud");
   if (!container) return;
 
-  let data = [];
-  try {
-    const res = await fetch("/api/yoy-timeline");
-    data = await res.json();
-  } catch (e) {
-    console.warn("Failed to fetch yoy-timeline:", e);
-    return;
+  if (componentDataFull.length === 0) {
+    try {
+      const res = await fetch("/api/yoy-timeline");
+      componentDataFull = await res.json();
+    } catch (e) {
+      console.warn("Failed to fetch yoy-timeline:", e);
+      return;
+    }
   }
+
+  // Filter by range
+  let data = [...componentDataFull];
+  if (compRangeSelection === "24") data = data.slice(-24);
+  else if (compRangeSelection === "12") data = data.slice(-12);
 
   const n = data.length;
   if (n < 2) return;
 
   const w = container.clientWidth || 700;
-  const h = 260;
+  const h = 320;
   const padL = 45;
   const padR = 25;
   const padT = 25;
-  const padB = 30;
+  const padB = 32;
 
-  const minV = 2.0;
+  const minV = 1.5;
   const maxV = 8.5;
 
   function getX(i) {
@@ -548,20 +654,29 @@ async function renderComponentChart() {
   const pSuper = makePath("supercore_yoy");
   const pShelter = makePath("shelter_yoy");
 
+  // Grid lines
   let gridLines = "";
   for (let val = 2.0; val <= 8.0; val += 1.0) {
     const y = getY(val);
     gridLines += `
-      <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#1f1f1f" stroke-width="1"/>
+      <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#161616" stroke-width="1"/>
       <text x="${padL - 6}" y="${y + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">${val.toFixed(0)}%</text>
     `;
   }
 
+  // Federal Reserve 2.0% Inflation Target Line Indicator
+  const yTarget = getY(2.0);
+  const targetLineSvg = `
+    <line x1="${padL}" y1="${yTarget}" x2="${w - padR}" y2="${yTarget}" stroke="#4af626" stroke-width="1" stroke-dasharray="3,3" opacity="0.8"/>
+    <text x="${padL + 6}" y="${yTarget - 4}" fill="#4af626" font-size="7.5" font-family="monospace">FED 2.0% TARGET</text>
+  `;
+
   let dateTicks = "";
-  for (let i = 0; i < n; i += 6) {
+  const stepTicks = Math.max(1, Math.floor(n / 6));
+  for (let i = 0; i < n; i += stepTicks) {
     const x = getX(i);
     dateTicks += `
-      <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#161616" stroke-width="1" stroke-dasharray="2,2"/>
+      <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#141414" stroke-width="1"/>
       <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">${data[i].date}</text>
     `;
   }
@@ -571,21 +686,29 @@ async function renderComponentChart() {
   let svg = `
     <svg class="telemetry-svg" id="comp-svg" viewBox="0 0 ${w} ${h}">
       ${gridLines}
+      ${targetLineSvg}
       ${dateTicks}
-      <path d="${pHL}" fill="none" stroke="#888888" stroke-width="1.5" stroke-dasharray="3,3"/>
-      <path d="${pCore}" fill="none" stroke="#eaeaea" stroke-width="2"/>
-      <path d="${pShelter}" fill="none" stroke="#00e5ff" stroke-width="2"/>
-      <path d="${pSuper}" fill="none" stroke="#ff2a2a" stroke-width="2.5"/>
-      <circle cx="${getX(n-1)}" cy="${getY(lastD.supercore_yoy)}" r="3.5" fill="#ff2a2a"/>
-      <circle cx="${getX(n-1)}" cy="${getY(lastD.shelter_yoy)}" r="3" fill="#00e5ff"/>
-      <circle cx="${getX(n-1)}" cy="${getY(lastD.core_yoy)}" r="3" fill="#eaeaea"/>
+      <!-- Series paths with visibility toggle -->
+      <path id="path-headline" d="${pHL}" fill="none" stroke="#888888" stroke-width="1.5" stroke-dasharray="3,3" style="display:${compSeriesVisibility.headline ? 'block':'none'};"/>
+      <path id="path-core" d="${pCore}" fill="none" stroke="#eaeaea" stroke-width="2" style="display:${compSeriesVisibility.core ? 'block':'none'};"/>
+      <path id="path-shelter" d="${pShelter}" fill="none" stroke="#00e5ff" stroke-width="2" style="display:${compSeriesVisibility.shelter ? 'block':'none'};"/>
+      <path id="path-supercore" d="${pSuper}" fill="none" stroke="#ff2a2a" stroke-width="2.5" style="display:${compSeriesVisibility.supercore ? 'block':'none'};"/>
+
+      <!-- End Callouts -->
+      ${compSeriesVisibility.supercore ? `<circle cx="${getX(n-1)}" cy="${getY(lastD.supercore_yoy)}" r="3.5" fill="#ff2a2a"/>` : ''}
+      ${compSeriesVisibility.shelter ? `<circle cx="${getX(n-1)}" cy="${getY(lastD.shelter_yoy)}" r="3" fill="#00e5ff"/>` : ''}
+      ${compSeriesVisibility.core ? `<circle cx="${getX(n-1)}" cy="${getY(lastD.core_yoy)}" r="3" fill="#eaeaea"/>` : ''}
+
       <line id="comp-crosshair" x1="0" y1="0" x2="0" y2="0" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"/>
     </svg>
   `;
   container.innerHTML = svg;
+
   if (typeof gsap !== "undefined") {
     gsap.fromTo("#comp-svg path", { opacity: 0, strokeDashoffset: 600, strokeDasharray: 600 }, { opacity: 1, strokeDashoffset: 0, stagger: 0.1, duration: 1.0, ease: "power2.out" });
   }
+
+  initComponentControls();
 
   const svgEl = document.getElementById("comp-svg");
   const crosshair = document.getElementById("comp-crosshair");
@@ -614,24 +737,108 @@ async function renderComponentChart() {
   }
 }
 
+function initComponentControls() {
+  // Series toggle buttons
+  const pillSuper = document.getElementById("pill-supercore");
+  const pillShelter = document.getElementById("pill-shelter");
+  const pillCore = document.getElementById("pill-core");
+  const pillHL = document.getElementById("pill-headline");
+
+  if (pillSuper && !pillSuper.__wired) {
+    pillSuper.__wired = true;
+    pillSuper.addEventListener("click", () => {
+      compSeriesVisibility.supercore = !compSeriesVisibility.supercore;
+      pillSuper.classList.toggle("active", compSeriesVisibility.supercore);
+      pillSuper.style.opacity = compSeriesVisibility.supercore ? "1" : "0.3";
+      renderComponentChart();
+    });
+  }
+  if (pillShelter && !pillShelter.__wired) {
+    pillShelter.__wired = true;
+    pillShelter.addEventListener("click", () => {
+      compSeriesVisibility.shelter = !compSeriesVisibility.shelter;
+      pillShelter.classList.toggle("active", compSeriesVisibility.shelter);
+      pillShelter.style.opacity = compSeriesVisibility.shelter ? "1" : "0.3";
+      renderComponentChart();
+    });
+  }
+  if (pillCore && !pillCore.__wired) {
+    pillCore.__wired = true;
+    pillCore.addEventListener("click", () => {
+      compSeriesVisibility.core = !compSeriesVisibility.core;
+      pillCore.classList.toggle("active", compSeriesVisibility.core);
+      pillCore.style.opacity = compSeriesVisibility.core ? "1" : "0.3";
+      renderComponentChart();
+    });
+  }
+  if (pillHL && !pillHL.__wired) {
+    pillHL.__wired = true;
+    pillHL.addEventListener("click", () => {
+      compSeriesVisibility.headline = !compSeriesVisibility.headline;
+      pillHL.classList.toggle("active", compSeriesVisibility.headline);
+      pillHL.style.opacity = compSeriesVisibility.headline ? "1" : "0.3";
+      renderComponentChart();
+    });
+  }
+
+  // Range selection buttons
+  const rAll = document.getElementById("range-all");
+  const r24 = document.getElementById("range-24m");
+  const r12 = document.getElementById("range-12m");
+
+  if (rAll && !rAll.__wired) {
+    rAll.__wired = true;
+    rAll.addEventListener("click", () => {
+      compRangeSelection = "all";
+      rAll.classList.add("active");
+      if (r24) r24.classList.remove("active");
+      if (r12) r12.classList.remove("active");
+      renderComponentChart();
+    });
+  }
+  if (r24 && !r24.__wired) {
+    r24.__wired = true;
+    r24.addEventListener("click", () => {
+      compRangeSelection = "24";
+      r24.classList.add("active");
+      if (rAll) rAll.classList.remove("active");
+      if (r12) r12.classList.remove("active");
+      renderComponentChart();
+    });
+  }
+  if (r12 && !r12.__wired) {
+    r12.__wired = true;
+    r12.addEventListener("click", () => {
+      compRangeSelection = "12";
+      r12.classList.add("active");
+      if (rAll) rAll.classList.remove("active");
+      if (r24) r24.classList.remove("active");
+      renderComponentChart();
+    });
+  }
+}
+
 function renderScatterChart(events, models) {
   const container = document.getElementById("scatter-chart-container");
   const hudEl = document.getElementById("scatter-hover-hud");
   if (!container || events.length === 0) return;
 
-  const valid = events.filter(e => e.z_score_composite !== undefined && e.gold_return_pct !== undefined);
+  let valid = events.filter(e => e.z_score_composite !== undefined && e.gold_return_pct !== undefined);
+  if (scatterRegimeFilter === "shock") valid = valid.filter(e => e.regime !== "NOISE_ZONE");
+  else if (scatterRegimeFilter === "noise") valid = valid.filter(e => e.regime === "NOISE_ZONE");
+
   if (valid.length === 0) return;
 
   const w = container.clientWidth || 700;
-  const h = 260;
+  const h = 320;
 
-  const scatterW = Math.floor(w * 0.62);
+  const scatterW = Math.floor(w * 0.58);
   const vrW = w - scatterW;
 
   const padL = 40;
   const padR = 20;
   const padT = 25;
-  const padB = 30;
+  const padB = 32;
 
   const minZ = -3.2;
   const maxZ = 3.2;
@@ -658,11 +865,11 @@ function renderScatterChart(events, models) {
     
     let labelSvg = "";
     if (e.gold_return_pct <= -3.0 || e.gold_return_pct >= 1.9 || Math.abs(e.z_score_composite) >= 2.5) {
-      labelSvg = `<text x="${cx}" y="${cy - 6}" fill="#aaa" font-size="7.5" text-anchor="middle" font-family="monospace">${e.date.substring(2,7)}</text>`;
+      labelSvg = `<text x="${cx}" y="${cy - 7}" fill="#aaa" font-size="7.5" font-weight="700" text-anchor="middle" font-family="monospace">${e.date.substring(2,7)}</text>`;
     }
     
     pointsSvg += `
-      <circle class="scatter-dot" data-idx="${idx}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.5" fill="${color}" stroke="#000" stroke-width="1" opacity="0.85" style="cursor:pointer;"></circle>
+      <circle class="scatter-dot" data-idx="${idx}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.5" fill="${color}" stroke="#000" stroke-width="1.2" opacity="0.88" style="cursor:pointer;"></circle>
       ${labelSvg}
     `;
   });
@@ -673,6 +880,7 @@ function renderScatterChart(events, models) {
   const yZpos3 = intercept + slope * (+3.2);
   const regLine = `<line x1="${getX(-3.2)}" y1="${getY(yZneg3)}" x2="${getX(3.2)}" y2="${getY(yZpos3)}" stroke="#00e5ff" stroke-width="2" stroke-dasharray="3,3"/>`;
 
+  // Volatility Ratio Bars on Right side with ample width to prevent clipping
   const vrData = [
     { label: "VR(5m)", ratio: 5.42, color: "#ff2a2a" },
     { label: "VR(15m)", ratio: 3.65, color: "#00e5ff" },
@@ -680,21 +888,21 @@ function renderScatterChart(events, models) {
     { label: "VR(60m)", ratio: 1.84, color: "#888888" }
   ];
   const maxVR = 6.0;
-  const vrStartX = scatterW + 15;
-  const vrWidth = w - vrStartX - 15;
+  const vrStartX = scatterW + 20;
+  const vrWidth = Math.max(80, w - vrStartX - 45); // Guaranteed right margin
 
   let vrSvg = `
-    <line x1="${scatterW}" y1="${padT - 10}" x2="${scatterW}" y2="${h - 10}" stroke="#262626" stroke-width="1"/>
-    <text x="${vrStartX}" y="${padT - 2}" fill="#888" font-size="8" font-weight="700" font-family="monospace">VOLATILITY RATIO VR(w)</text>
+    <line x1="${scatterW}" y1="${padT - 10}" x2="${scatterW}" y2="${h - 10}" stroke="#222" stroke-width="1"/>
+    <text x="${vrStartX}" y="${padT + 4}" fill="#888" font-size="8" font-weight="700" font-family="monospace">VOLATILITY RATIO VR(w)</text>
   `;
 
   vrData.forEach((item, idx) => {
-    const barY = padT + 20 + idx * 42;
+    const barY = padT + 28 + idx * 52;
     const barLen = (item.ratio / maxVR) * vrWidth;
     vrSvg += `
-      <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="8" font-family="monospace">${item.label}</text>
-      <rect class="vr-bar-rect" x="${vrStartX + 52}" y="${barY}" width="${barLen.toFixed(1)}" height="13" fill="${item.color}" opacity="0.9"/>
-      <text x="${vrStartX + 58 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="800" font-family="monospace">${item.ratio.toFixed(2)}x</text>
+      <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="9" font-family="monospace">${item.label}</text>
+      <rect class="vr-bar-rect" x="${vrStartX + 54}" y="${barY}" width="${barLen.toFixed(1)}" height="14" fill="${item.color}" opacity="0.9"/>
+      <text x="${vrStartX + 62 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="900" font-family="monospace">${item.ratio.toFixed(2)}x</text>
     `;
   });
 
@@ -702,8 +910,8 @@ function renderScatterChart(events, models) {
     <svg class="telemetry-svg" id="scatter-svg" viewBox="0 0 ${w} ${h}">
       <rect x="${nzLeft}" y="${padT}" width="${nzRight - nzLeft}" height="${h - padT - padB}" fill="#161616" opacity="0.5"/>
       <text x="${cx0}" y="${padT + 12}" fill="#555" font-size="8" text-anchor="middle" font-family="monospace">NOISE (|Z| &lt; 1.0σ)</text>
-      <line x1="${padL}" y1="${cy0}" x2="${scatterW - padR}" y2="${cy0}" stroke="#333" stroke-width="1"/>
-      <line x1="${cx0}" y1="${padT}" x2="${cx0}" y2="${h - padB}" stroke="#333" stroke-width="1"/>
+      <line x1="${padL}" y1="${cy0}" x2="${scatterW - padR}" y2="${cy0}" stroke="#262626" stroke-width="1"/>
+      <line x1="${cx0}" y1="${padT}" x2="${cx0}" y2="${h - padB}" stroke="#262626" stroke-width="1"/>
       <text x="${padL - 6}" y="${cy0 + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">0.0%</text>
       <text x="${cx0}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">0.0σ</text>
       <text x="${scatterW - padR}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">+3.0σ</text>
@@ -714,10 +922,13 @@ function renderScatterChart(events, models) {
     </svg>
   `;
   container.innerHTML = svg;
+
   if (typeof gsap !== "undefined") {
     gsap.fromTo(".scatter-dot", { scale: 0, transformOrigin: "center" }, { scale: 1, stagger: 0.012, duration: 0.5, ease: "back.out(2)" });
     gsap.fromTo(".vr-bar-rect", { scaleX: 0, transformOrigin: "left" }, { scaleX: 1, stagger: 0.08, duration: 0.7, ease: "power2.out" });
   }
+
+  initScatterControls(events, models);
 
   if (hudEl) {
     const dots = container.querySelectorAll(".scatter-dot");
@@ -727,11 +938,54 @@ function renderScatterChart(events, models) {
         const e = valid[idx];
         if (e) {
           hudEl.innerText = `${e.date} (${e.ref_month}): Z=${e.z_score_composite}σ | Gold: ${(e.gold_return_pct > 0 ? "+" : "") + e.gold_return_pct}% | DXY: ${(e.dxy_return_pct > 0 ? "+" : "") + e.dxy_return_pct}% [${e.regime}]`;
+          if (typeof gsap !== "undefined") {
+            gsap.to(d, { attr: { r: 7 }, duration: 0.2, ease: "power2.out" });
+          }
         }
       });
       d.addEventListener("mouseleave", () => {
-        hudEl.innerText = "HOVER OVER DATA POINT";
+        hudEl.innerText = "HOVER DATA POINT";
+        if (typeof gsap !== "undefined") {
+          gsap.to(d, { attr: { r: 4.5 }, duration: 0.2, ease: "power2.out" });
+        }
       });
+    });
+  }
+}
+
+function initScatterControls(events, models) {
+  const btnAll = document.getElementById("sc-filt-all");
+  const btnShock = document.getElementById("sc-filt-shock");
+  const btnNoise = document.getElementById("sc-filt-noise");
+
+  if (btnAll && !btnAll.__wired) {
+    btnAll.__wired = true;
+    btnAll.addEventListener("click", () => {
+      scatterRegimeFilter = "all";
+      btnAll.classList.add("active");
+      if (btnShock) btnShock.classList.remove("active");
+      if (btnNoise) btnNoise.classList.remove("active");
+      renderScatterChart(events, models);
+    });
+  }
+  if (btnShock && !btnShock.__wired) {
+    btnShock.__wired = true;
+    btnShock.addEventListener("click", () => {
+      scatterRegimeFilter = "shock";
+      btnShock.classList.add("active");
+      if (btnAll) btnAll.classList.remove("active");
+      if (btnNoise) btnNoise.classList.remove("active");
+      renderScatterChart(events, models);
+    });
+  }
+  if (btnNoise && !btnNoise.__wired) {
+    btnNoise.__wired = true;
+    btnNoise.addEventListener("click", () => {
+      scatterRegimeFilter = "noise";
+      btnNoise.classList.add("active");
+      if (btnAll) btnAll.classList.remove("active");
+      if (btnShock) btnShock.classList.remove("active");
+      renderScatterChart(events, models);
     });
   }
 }

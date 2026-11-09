@@ -276,46 +276,157 @@
       <div class="grid-box">
         <div class="grid-box-header">
           <span>[ 02 // MONTE CARLO PRICE TRAJECTORY SIMULATION (TIKTOK SLIDE 13) ]</span>
-          <span style="color:var(--accent-red);">2,000 PATH JUMP-DIFFUSION</span>
+          <span style="color:var(--accent-red);">2,000 PATH JUMP-DIFFUSION (24 STEPS)</span>
         </div>
         <div class="grid-box-body">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
             <div style="display:flex; gap:6px;">
-              <button class="btn-brutal btn-secondary mc-h-btn active" id="mc-btn-1d" style="font-size:9px; padding:4px 8px;">1-DAY</button>
-              <button class="btn-brutal btn-secondary mc-h-btn" id="mc-btn-5d" style="font-size:9px; padding:4px 8px;">5-DAY</button>
+              <button class="btn-brutal btn-secondary mc-h-btn active" id="mc-btn-1d" style="font-size:9px; padding:5px 10px;">1-DAY (INTRADAY)</button>
+              <button class="btn-brutal btn-secondary mc-h-btn" id="mc-btn-5d" style="font-size:9px; padding:5px 10px;">5-DAY (MULTI-DAY)</button>
             </div>
             <div style="display:flex; gap:6px;">
-              <button class="btn-brutal btn-secondary mc-z-btn active" id="mc-btn-z0" style="font-size:9px; padding:4px 8px;">Z = 0.0σ (IN-LINE)</button>
-              <button class="btn-brutal btn-secondary mc-z-btn" id="mc-btn-zpos" style="font-size:9px; padding:4px 8px; color:var(--accent-red);">Z = +1.33σ (BEAT)</button>
-              <button class="btn-brutal btn-secondary mc-z-btn" id="mc-btn-zneg" style="font-size:9px; padding:4px 8px; color:var(--accent-green);">Z = -1.33σ (MISS)</button>
+              <button class="btn-brutal btn-secondary mc-z-btn active" id="mc-btn-z0" style="font-size:9px; padding:5px 10px;">Z = 0.0σ (IN-LINE)</button>
+              <button class="btn-brutal btn-secondary mc-z-btn" id="mc-btn-zpos" style="font-size:9px; padding:5px 10px; color:var(--accent-red);">Z = +1.33σ (BEAT)</button>
+              <button class="btn-brutal btn-secondary mc-z-btn" id="mc-btn-zneg" style="font-size:9px; padding:5px 10px; color:var(--accent-green);">Z = -1.33σ (MISS)</button>
             </div>
           </div>
 
           <!-- Monte Carlo Probability Readouts -->
-          <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin-bottom:10px;">
-            <div class="stat-card" style="padding:8px;">
+          <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px;">
+            <div class="stat-card" style="padding:10px;">
               <div class="stat-label" style="font-size:8px;">P(POSITIVE RETURN)</div>
-              <div class="stat-value" id="mc-p-pos" style="font-size:13px; color:var(--accent-green);">50.4%</div>
+              <div class="stat-value" id="mc-p-pos" style="font-size:14px; color:var(--accent-green);">50.40%</div>
             </div>
-            <div class="stat-card" style="padding:8px;">
+            <div class="stat-card" style="padding:10px;">
               <div class="stat-label" style="font-size:8px;">P(NEGATIVE RETURN)</div>
-              <div class="stat-value" id="mc-p-neg" style="font-size:13px; color:var(--accent-red);">49.6%</div>
+              <div class="stat-value" id="mc-p-neg" style="font-size:14px; color:var(--accent-red);">49.60%</div>
             </div>
-            <div class="stat-card" style="padding:8px;">
+            <div class="stat-card" style="padding:10px;">
               <div class="stat-label" style="font-size:8px;">MEDIAN TERMINAL</div>
-              <div class="stat-value" id="mc-median-price" style="font-size:13px;">$4,135.50</div>
+              <div class="stat-value" id="mc-median-price" style="font-size:14px;">$4,135.50</div>
             </div>
-            <div class="stat-card" style="padding:8px;">
+            <div class="stat-card" style="padding:10px;">
               <div class="stat-label" style="font-size:8px;">95% VALUE-AT-RISK</div>
-              <div class="stat-value" id="mc-var-95" style="font-size:13px; color:var(--accent-red);">-3.04%</div>
+              <div class="stat-value" id="mc-var-95" style="font-size:14px; color:var(--accent-red);">-3.04%</div>
             </div>
           </div>
 
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--fg-dim); margin-bottom:6px; font-family:monospace;">
+            <span>INDICATORS: [ T0 ANCHOR: $4,136.60 ] [ 90% BAND (p5-p95) ] [ 50% CORE (p25-p75) ]</span>
+            <span id="mc-hover-hud" style="color:var(--accent-cyan);">HOVER TIMESTEP FOR ENVELOPE</span>
+          </div>
           <div class="chart-container" id="mc-chart-container">
-            <!-- Dynamic Monte Carlo Fan Chart injected via app.js -->
+            <!-- Dynamic Multi-Step Monte Carlo Fan Chart injected via app.js -->
           </div>
         </div>
       </div>
+
+      <!-- Panel: Bayesian Probability Density Function (PDF) -->
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ 03 // BAYESIAN PROBABILITY DENSITY FUNCTION (TIKTOK SLIDE 01) ]</span>
+          <span style="color:var(--accent-cyan);">f(x) = (1/σ√(2π)) e^(-(x-μ)²/2σ²)</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:10px; color:var(--fg-muted);">
+            <div>
+              <span><strong style="color:#777;">---</strong> PRIOR N(0, 0.08)</span>
+              <span style="margin-left:12px;"><strong style="color:#ff2a2a;">—</strong> POSTERIOR N(+0.08, 0.09)</span>
+            </div>
+            <div id="pdf-hover-hud" style="font-family:monospace; color:var(--accent-cyan); font-weight:700;">HOVER BELL CURVE</div>
+          </div>
+
+          <!-- Probability Zones Legend -->
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:12px;">
+            <div class="stat-card" style="padding:10px; border-left:2px solid var(--accent-green);">
+              <div class="stat-label" style="font-size:8px;">DOVISH MISS (x &le; -0.10pp)</div>
+              <div style="font-size:12px; font-weight:800; color:var(--accent-green);">P = 13.8%</div>
+            </div>
+            <div class="stat-card" style="padding:10px; border-left:2px solid #555;">
+              <div class="stat-label" style="font-size:8px;">NOISE RANGE (|x| &lt; 0.10pp)</div>
+              <div style="font-size:12px; font-weight:800; color:#aaa;">P = 53.8%</div>
+            </div>
+            <div class="stat-card" style="padding:10px; border-left:2px solid var(--accent-red);">
+              <div class="stat-label" style="font-size:8px;">HAWKISH BEAT (x &ge; +0.10pp)</div>
+              <div style="font-size:12px; font-weight:800; color:var(--accent-red);">P = 32.4%</div>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--fg-dim); margin-bottom:6px; font-family:monospace;">
+            <span>MILESTONES: [ T0: 0.00pp ] [ NOWCAST: -0.02pp ] [ POSTERIOR PEAK: +0.08pp ]</span>
+            <span>CRITICAL TAILS: &plusmn;1.0&sigma;</span>
+          </div>
+          <div class="chart-container" id="pdf-chart-container">
+            <!-- Dynamic PDF Bell Curve injected via app.js -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Section 3: Macro Component Dynamics & High-Frequency Event Study -->
+    <div class="two-col-grid" style="margin-bottom:16px;">
+      
+      <!-- Graph 1: 44-Month Component Breakdown (2023–2026) -->
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ 04 // 44-MONTH CPI INFLATION COMPONENT DYNAMICS (2023–2026) ]</span>
+          <span style="color:var(--fg-muted);">FRED / BLS HISTORICAL YoY (%)</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:10px; color:var(--fg-muted); flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <span class="filter-pill active" id="pill-supercore" style="color:#ff2a2a; border-color:#ff2a2a;">● SUPERCORE</span>
+              <span class="filter-pill active" id="pill-shelter" style="color:#00e5ff; border-color:#00e5ff;">● SHELTER OER</span>
+              <span class="filter-pill active" id="pill-core" style="color:#eaeaea; border-color:#eaeaea;">● CORE CPI</span>
+              <span class="filter-pill active" id="pill-headline" style="color:#888; border-color:#888;">○ HEADLINE</span>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <span class="filter-pill active" id="range-all">ALL 44M</span>
+              <span class="filter-pill" id="range-24m">24M</span>
+              <span class="filter-pill" id="range-12m">12M</span>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--fg-dim); margin-bottom:6px; font-family:monospace;">
+            <span>BENCHMARK: [ FED 2.0% TARGET ] [ INFLATION PEAK 2023: 6.33% ]</span>
+            <span id="comp-hover-hud" style="color:var(--accent-cyan); font-weight:700;">HOVER OVER TIMELINE</span>
+          </div>
+          <div class="chart-container" id="component-chart-container">
+            <!-- Dynamic 44-month SVG injected via app.js -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Graph 2: High-Frequency Event Study & Volatility Ratios -->
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ 05 // HIGH-FREQUENCY EVENT STUDY & REALIZED VOLATILITY RATIOS ]</span>
+          <span style="color:var(--accent-cyan);">TIKTOK SLIDE 05 & 07 (ANDERSEN ET AL. 2003)</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:10px; color:var(--fg-muted); flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; gap:8px;">
+              <span class="filter-pill active" id="sc-filt-all">ALL (34)</span>
+              <span class="filter-pill" id="sc-filt-shock" style="color:var(--accent-red);">SHOCK (|Z|&ge;1.0)</span>
+              <span class="filter-pill" id="sc-filt-noise" style="color:#888;">NOISE (|Z|&lt;1.0)</span>
+            </div>
+            <div style="display:flex; gap:12px;">
+              <span><strong style="color:var(--accent-green);">●</strong> POS</span>
+              <span><strong style="color:var(--accent-red);">●</strong> NEG</span>
+              <span><strong style="color:#00e5ff;">---</strong> OLS β = -0.558</span>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--fg-dim); margin-bottom:6px; font-family:monospace;">
+            <span>VOLATILITY RATIO VR(w) = RV_post / RV_pre</span>
+            <span id="scatter-hover-hud" style="color:var(--accent-cyan); font-weight:700;">HOVER DATA POINT</span>
+          </div>
+          <div class="chart-container" id="scatter-chart-container">
+            <!-- Dynamic Event Study SVG injected via app.js -->
+          </div>
+        </div>
+      </div>
+
+    </div>
 
       <!-- Panel: Bayesian Probability Density Function (PDF) -->
       <div class="grid-box">

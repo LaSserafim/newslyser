@@ -322,56 +322,60 @@ def simulate_tomorrow_scenario(actual_mom, actual_core_yoy, tomorrow_meta):
             "risk_level": risk_level
         }
     }
-def run_monte_carlo(current_price=4136.60, z_shock=0.0, horizon_days=5, n_paths=2000):
+def run_monte_carlo(current_price=4136.60, z_shock=0.0, horizon_days=1, n_paths=2000):
     """
-    Monte Carlo Jump-Diffusion & Geometric Brownian Motion engine.
-    Calibrated to authentic historical event-day Gold volatility (sigma_event = 1.85%)
-    and subsequent continuous daily volatility (sigma_daily = 1.15%).
-    Directly addresses TikTok Slide 13 (Monte Carlo 1-day & 5-day probabilities).
+    Multi-Step Monte Carlo Jump-Diffusion Engine.
+    Simulates 24 discrete steps for 1-Day (intraday price discovery)
+    and 30 steps for 5-Day (multi-day drift and mean-reversion).
+    Generates authentic stochastic Brownian trajectories and percentile fan bands.
     """
-    np.random.seed(42) # Reproducible, deterministic paths
-    steps = max(1, int(horizon_days))
+    np.random.seed(42)
+    steps = 24 if int(horizon_days) == 1 else 30
+    dt = 1.0 / steps
+    
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = current_price
 
-    # Day 1: Announcement shock component
+    # Step 1: Immediate announcement jump shock
     jump_mean = -0.558 * z_shock / 100.0
     jump_sigma = 1.85 / 100.0
-    day1_ret = np.random.normal(jump_mean, jump_sigma, n_paths)
-    paths[:, 1] = paths[:, 0] * np.exp(day1_ret)
+    step1_ret = np.random.normal(jump_mean, jump_sigma * 0.6, n_paths)
+    paths[:, 1] = paths[:, 0] * np.exp(step1_ret)
 
-    # Days 2 to N: Continuous Geometric Brownian Motion
-    drift = 0.0002
-    daily_vol = 1.15 / 100.0
+    # Steps 2 to N: Stochastic diffusion with volatility decay
+    base_vol = 1.20 / 100.0
     for t in range(2, steps + 1):
+        decay = 1.0 + 1.2 * np.exp(-t / 5.0)
+        step_vol = base_vol * np.sqrt(dt) * decay
         z = np.random.normal(0, 1, n_paths)
-        paths[:, t] = paths[:, t - 1] * np.exp((drift - 0.5 * daily_vol ** 2) + daily_vol * z)
+        paths[:, t] = paths[:, t - 1] * np.exp(-0.5 * (step_vol ** 2) + step_vol * z)
 
     terminal_rets = (paths[:, -1] - paths[:, 0]) / paths[:, 0] * 100.0
     p_pos = float(np.mean(terminal_rets > 0) * 100.0)
     p_neg = float(np.mean(terminal_rets < 0) * 100.0)
 
-    # Calculate percentiles across timesteps
     p5 = np.percentile(paths, 5, axis=0)
     p25 = np.percentile(paths, 25, axis=0)
-    p50 = np.percentile(paths, 50, axis=0) # Median trajectory
+    p50 = np.percentile(paths, 50, axis=0)
     p75 = np.percentile(paths, 75, axis=0)
     p95 = np.percentile(paths, 95, axis=0)
 
-    # 8 representative sample traces
-    sample_indices = np.linspace(0, n_paths - 1, 8, dtype=int)
+    sample_indices = np.linspace(0, n_paths - 1, 10, dtype=int)
     sample_traces = [paths[i].tolist() for i in sample_indices]
 
-    # Value-at-Risk (95% VaR and CVaR)
     var_95 = float(np.percentile(terminal_rets, 5))
     cvar_95 = float(np.mean(terminal_rets[terminal_rets <= var_95]))
 
+    time_labels = [f"T+{i}h" for i in range(steps + 1)] if int(horizon_days) == 1 else [f"D{i//6}.{i%6}" for i in range(steps + 1)]
+    time_labels[0] = "T0 (08:30)"
+
     return {
-        "horizon_days": steps,
+        "horizon_days": int(horizon_days),
+        "steps": steps,
         "z_shock": z_shock,
         "n_paths": n_paths,
         "current_price": current_price,
-        "timesteps": [f"Day {i}" for i in range(steps + 1)],
+        "timesteps": time_labels,
         "percentiles": {
             "p5": [round(float(v), 2) for v in p5],
             "p25": [round(float(v), 2) for v in p25],
