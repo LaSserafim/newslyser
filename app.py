@@ -163,6 +163,11 @@ def get_tomorrow():
         "event": tomorrow,
         "macro_snapshots": macro
     }
+@app.get("/api/pre-news-model")
+def get_pre_news_model():
+    _, tomorrow, _ = load_data()
+    return quant_model.calculate_pre_news_bayesian_model(tomorrow)
+
 
 class SimRequest(BaseModel):
     actual_mom: float
@@ -175,56 +180,86 @@ def simulate(req: SimRequest):
     return sim_result
 
 class DeepSeekRequest(BaseModel):
-    actual_mom: float
-    actual_core_yoy: float
-    supercore_mom_est: float = 0.2
-    market_context: str = "Gold trading at $4,128, DXY at 101.87, US 2Y yield at 4.46%, 10Y TIPS at 2.60%."
+    mode: str = "pre_news" # "pre_news" or "post_news"
+    actual_mom: float = 0.3
+    actual_core_yoy: float = 2.8
+    market_context: str = "Gold trading at $4,136.60, DXY at 101.82, US 2Y yield at 4.46%, 10Y yield at 4.84%, 10Y TIPS real yield at 2.60%."
 
 @app.post("/api/deepseek-briefing")
 def deepseek_briefing(req: DeepSeekRequest):
+    import re
     _, tomorrow, _ = load_data()
-    sim = quant_model.simulate_tomorrow_scenario(req.actual_mom, req.actual_core_yoy, tomorrow)
     
-    prompt = f"""You are the Chief Quantitative Macroeconomist and Head of Trading at an institutional fixed income & commodities proprietary trading desk.
-Analyze tomorrow's U.S. CPI release scenario strictly through empirical econometric principles, cross-asset transmission mechanisms, and market microstructure.
+    if req.mode == "pre_news":
+        bayesian = quant_model.calculate_pre_news_bayesian_model(tomorrow)
+        prompt = f"""You are the Chief Quantitative Macroeconomist and Head of Fixed Income & Commodities Trading at a Tier-1 macro hedge fund.
+Deliver an executive PRE-NEWS predictive macro memo ahead of tomorrow's U.S. October 2026 CPI release (Nov 10 @ 08:30 AM EST).
 
-SCENARIO PARAMETERS:
-- Release: U.S. October 2026 CPI (BLS Release: Nov 10, 2026, 08:30 AM EST)
-- Actual Headline CPI MoM: {req.actual_mom:.2f}% (Consensus Forecast: {tomorrow['forecast_mom']:.2f}%, Prev: {tomorrow['prev_mom']:.2f}%)
-- Actual Core CPI YoY: {req.actual_core_yoy:.2f}% (Consensus Forecast: {tomorrow['forecast_core_yoy']:.2f}%, Prev: {tomorrow['prev_core_yoy']:.2f}%)
-- Supercore (Services ex-Shelter) MoM Estimate: {req.supercore_mom_est:.2f}%
-- Quantitative Model Composite Z-Score: {sim['surprises']['z_score_composite']:+.2f} sigma
+AUTHENTIC EMPIRICAL CONTEXT:
+- Consensus Forecast: Headline MoM 0.3%, Core YoY 2.8%, Core MoM 0.2%.
+- Cleveland Fed Inflation Nowcast: Headline 0.28% MoM, Core 0.22% MoM.
+- Geopolitical / Energy Factor: October WTI Crude Oil surged +12.11% ($92.87 -> $104.12) due to Middle East supply tension.
+- Energy Contribution to Headline MoM: approx +0.08 percentage points upside pressure.
+- 10Y Breakeven Inflation (FRED T10YIE): 2.23%.
+- Historical 34-Release Consensus Distribution: In-line 53.8%, Beat 32.4%, Miss 13.8%.
+- Pre-Release Bayesian Expected Value on Gold: -0.196% (Downside Asymmetry).
+- Live Baseline: {req.market_context}
+
+STRICT INSTRUCTIONS:
+1. DO NOT USE ANY MARKDOWN ASTERISKS (** or *), NO HASHTAG HEADINGS (###), AND NO CONVERSATIONAL FILLER.
+2. Write in stark, uppercase industrial engineering format using brackets [ SECTION NAME ] and hyphen bullets (- ).
+3. Deliver:
+   [ 1. LEADING MACRO & GEOPOLITICAL ENERGY VECTOR ]
+   [ 2. BAYESIAN PROBABILITY DECOMPOSITION ]
+   [ 3. ASYMMETRIC EXPECTED PAYOFF ON GOLD (XAUUSD) ]
+   [ 4. PRE-NEWS POSITIONING DIRECTIVE (ENTRY, STOP, TARGET, RR) ]
+   [ 5. DUAL-STRATEGY COMPARISON: PRE-NEWS EXECUTION VS WAITING FOR POST-NEWS CONFIRMATION ]
+4. Every statement must be a quantitative fact, decision, or defined risk. No marketing."""
+    else:
+        sim = quant_model.simulate_tomorrow_scenario(req.actual_mom, req.actual_core_yoy, tomorrow)
+        prompt = f"""You are the Chief Quantitative Macroeconomist and Head of Trading at an institutional proprietary trading desk.
+Analyze the official U.S. CPI release numbers through empirical econometric principles and cross-asset transmission.
+
+SCENARIO DATA:
+- Actual Headline MoM: {req.actual_mom:.2f}% (Forecast: {tomorrow['forecast_mom']:.2f}%)
+- Actual Core YoY: {req.actual_core_yoy:.2f}% (Forecast: {tomorrow['forecast_core_yoy']:.2f}%)
+- Model Composite Z-Score: {sim['surprises']['z_score_composite']:+.2f} sigma
 - Model Regime: {sim['model_forecast']['regime']}
 - Model Signal: {sim['model_forecast']['signal']}
-- Baseline Expected Gold Move: {sim['model_forecast']['expected_gold_return_pct']:+.2f}%
-- Baseline Expected DXY Move: {sim['model_forecast']['expected_dxy_return_pct']:+.2f}%
-- Market Baseline: {req.market_context}
+- Expected Gold Move: {sim['model_forecast']['expected_gold_return_pct']:+.2f}%
+- Expected DXY Move: {sim['model_forecast']['expected_dxy_return_pct']:+.2f}%
+- Live Baseline: {req.market_context}
 
-INSTRUCTIONS:
-1. Provide an executive institutional desk briefing formatted in stark, professional industrial bullet points.
-2. Break down the Transmission Mechanism: CPI shock -> Fed terminal rate pricing (SOFR futures) -> US 2Y Yields -> 10Y TIPS Real Yields -> Gold (XAUUSD) & DXY.
-3. Detail the 3-Wave Execution Protocol:
-   - Wave 1 (T0 to T+60s): Microstructure liquidity gap, spread blowout warning ($2-$5 spread on Gold), and why market orders are prohibited.
-   - Wave 2 (T+2m to T+15m): Component digestion (Core vs Supercore vs Shelter lag) and filtering false knee-jerk moves.
-   - Wave 3 (T+15m to T+60m): Post-Announcement Drift (PEAD) entry trigger and invalidation levels.
-4. Conclude with an unambiguous, terse Tactical Verdict (Bias, Execution Trigger, Invalidation). Do NOT use conversational fluff or generic AI disclaimers."""
+STRICT INSTRUCTIONS:
+1. DO NOT USE ANY MARKDOWN ASTERISKS (** or *), NO HASHTAG HEADINGS (###), AND NO CONVERSATIONAL FILLER.
+2. Write in stark uppercase industrial format with brackets [ SECTION NAME ] and hyphen bullets (- ).
+3. Deliver:
+   [ 1. COMPONENT REALITY (SUPERCORE VS SHELTER LAG) ]
+   [ 2. CROSS-ASSET TRANSMISSION (2Y YIELDS & 10Y TIPS) ]
+   [ 3. 3-WAVE EXECUTION PROTOCOL (WAVE 1 FIREWALL, WAVE 2 FADE, WAVE 3 DRIFT) ]
+   [ 4. TACTICAL VERDICT (BIAS, ENTRY, INVALIDATION) ]"""
 
     try:
         client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "You are an elite quantitative macro research system. Provide terse, rigorous, mathematical and institutional analysis. Avoid generic AI slop."},
+                {"role": "system", "content": "You are an elite quantitative macro analyst. Output clean, raw plain text without asterisks or markdown styling."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=1000
+            temperature=0.2,
+            max_tokens=950
         )
         content = response.choices[0].message.content
+        
+        # Clean out any stray asterisks or markdown headers
+        clean_text = content.replace("**", "").replace("*", "").replace("### ", "").replace("## ", "").replace("# ", "")
+        clean_text = re.sub(r"\n{3,}", "\n\n", clean_text)
+        
         return {
             "status": "success",
-            "briefing": content,
-            "simulation": sim
+            "mode": req.mode,
+            "briefing": clean_text
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

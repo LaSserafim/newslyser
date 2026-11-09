@@ -47,10 +47,8 @@ async function fetchInitialData() {
     renderHistoricalTable(historicalData);
     renderComponentChart(macroSummary);
     renderScatterChart(historicalData, modelData);
-    
-    // Initial simulation with forecast
-    runSimulation(tomorrowMeta.forecast_mom, tomorrowMeta.forecast_core_yoy);
-  } catch (err) {
+    // Pre-news initial model state is pre-rendered in HTML
+} catch (err) {
     console.error("Data load failed:", err);
   }
 }
@@ -64,51 +62,21 @@ function renderTomorrowBanner(tom) {
   document.getElementById("tom-prev-core").innerText = tom.prev_core_yoy !== undefined ? `${tom.prev_core_yoy}%` : "2.6%";
   document.getElementById("tom-nowcast-mom").innerText = tom.cleveland_fed_nowcast_mom !== undefined ? `${tom.cleveland_fed_nowcast_mom}%` : "0.28%";
   document.getElementById("tom-nowcast-core").innerText = tom.cleveland_fed_nowcast_core_mom !== undefined ? `${tom.cleveland_fed_nowcast_core_mom}%` : "0.22%";
-  
-  // Set default form values
-  const momInput = document.getElementById("sim-mom");
-  const momRange = document.getElementById("sim-mom-range");
-  const coreInput = document.getElementById("sim-core");
-  const coreRange = document.getElementById("sim-core-range");
-  
-  if (momInput && tom.forecast_mom !== undefined) momInput.value = tom.forecast_mom;
-  if (momRange && tom.forecast_mom !== undefined) momRange.value = tom.forecast_mom;
-  if (coreInput && tom.forecast_core_yoy !== undefined) coreInput.value = tom.forecast_core_yoy;
-  if (coreRange && tom.forecast_core_yoy !== undefined) coreRange.value = tom.forecast_core_yoy;
 }
 
 function setupSimulationListeners() {
-  const momInput = document.getElementById("sim-mom");
-  const momRange = document.getElementById("sim-mom-range");
-  const coreInput = document.getElementById("sim-core");
-  const coreRange = document.getElementById("sim-core-range");
-  const btnDeepseek = document.getElementById("btn-deepseek");
+  const btnPreNews = document.getElementById("btn-run-prenewsmemo");
+  const btnPostNews = document.getElementById("btn-run-postnewsmemo");
 
-  if (momInput && momRange) {
-    momInput.addEventListener("input", (e) => {
-      momRange.value = e.target.value;
-      runSimulation(parseFloat(e.target.value), parseFloat(coreInput.value));
-    });
-    momRange.addEventListener("input", (e) => {
-      momInput.value = e.target.value;
-      runSimulation(parseFloat(e.target.value), parseFloat(coreInput.value));
+  if (btnPreNews) {
+    btnPreNews.addEventListener("click", () => {
+      executeDeepSeekMemo("pre_news");
     });
   }
 
-  if (coreInput && coreRange) {
-    coreInput.addEventListener("input", (e) => {
-      coreRange.value = e.target.value;
-      runSimulation(parseFloat(momInput.value), parseFloat(e.target.value));
-    });
-    coreRange.addEventListener("input", (e) => {
-      coreInput.value = e.target.value;
-      runSimulation(parseFloat(momInput.value), parseFloat(e.target.value));
-    });
-  }
-
-  if (btnDeepseek) {
-    btnDeepseek.addEventListener("click", () => {
-      executeDeepSeekBriefing(parseFloat(momInput.value), parseFloat(coreInput.value));
+  if (btnPostNews) {
+    btnPostNews.addEventListener("click", () => {
+      executeDeepSeekMemo("post_news");
     });
   }
 }
@@ -163,34 +131,46 @@ function renderSimulationOutputs(sim) {
   );
 }
 
-async function executeDeepSeekBriefing(actualMom, actualCore) {
+async function executeDeepSeekMemo(mode, actualMom, actualCore) {
   const terminal = document.getElementById("deepseek-terminal");
-  const btn = document.getElementById("btn-deepseek");
+  const btnPre = document.getElementById("btn-run-prenewsmemo");
+  const btnPost = document.getElementById("btn-run-postnewsmemo");
   
-  btn.disabled = true;
-  btn.innerText = "[ PROCESSING QUANT INTEL... ]";
-  terminal.innerText = ">>> INITIATING DEEPSEEK V3 QUANTITATIVE MACRO REASONING PROTOCOL...\n>>> CONNECTING TO API ENGINE (api.deepseek.com)...\n>>> PARAMETERS: MOM=" + actualMom + "%, CORE_YOY=" + actualCore + "%\n>>> CALCULATING CROSS-ASSET TRANSMISSION VECTOR...\n\n";
+  const activeBtn = mode === "pre_news" ? btnPre : btnPost;
+  if (activeBtn) {
+    activeBtn.disabled = true;
+    activeBtn.innerText = "[ GENERATING MACRO MEMO... ]";
+  }
+  
+  terminal.innerText = `>>> INITIATING DEEPSEEK V3 QUANTITATIVE MACRO ENGINE [MODE: ${mode.toUpperCase()}]...\n>>> CONNECTING TO API (api.deepseek.com)...\n>>> STRIPPING ALL AI FORMATTING SLOP (ZERO ASTERISKS / PURE TELEMETRY)...\n\n`;
 
   try {
     const res = await fetch("/api/deepseek-briefing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actual_mom: actualMom, actual_core_yoy: actualCore })
+      body: JSON.stringify({
+        mode: mode,
+        actual_mom: actualMom !== undefined ? actualMom : (tomorrowMeta.forecast_mom || 0.3),
+        actual_core_yoy: actualCore !== undefined ? actualCore : (tomorrowMeta.forecast_core_yoy || 2.8)
+      })
     });
     const data = await res.json();
     
     if (data.status === "success") {
-      terminal.innerText = "=== DEEPSEEK V3 INSTITUTIONAL DESK BRIEFING // OCT 2026 CPI ===\n" + data.briefing;
+      terminal.innerText = `=== DEEPSEEK V3 INSTITUTIONAL MACRO MEMO // ${mode.toUpperCase()} ===\n` + data.briefing;
     } else {
       terminal.innerText += "[ERROR]: " + JSON.stringify(data);
     }
   } catch (err) {
     terminal.innerText += "\n[FATAL ERROR]: Failed to reach DeepSeek API: " + err.message;
   } finally {
-    btn.disabled = false;
-    btn.innerText = "RUN DEEPSEEK MACRO BRIEFING";
+    if (activeBtn) {
+      activeBtn.disabled = false;
+      activeBtn.innerText = mode === "pre_news" ? "GENERATE PRE-NEWS MACRO BRIEFING" : "RUN CONFIRMED POST-NEWS MACRO BRIEFING";
+    }
   }
 }
+
 
 function renderModelComparison(m) {
   if (!m.baseline_ols || !m.refined_composite) return;
@@ -502,17 +482,11 @@ function handleOfficialRelease(data) {
     alertDetail.innerText = `ACTUAL HEADLINE: ${data.actual_mom.toFixed(2)}% | ACTUAL CORE YoY: ${data.actual_core_yoy.toFixed(2)}% | COMPOSITE Z: ${s.z_score_composite ? (s.z_score_composite > 0 ? "+" : "") + s.z_score_composite.toFixed(2) + "σ" : "-"}`;
   }
 
-  // Auto-populate input controls
-  const momInput = document.getElementById("sim-mom");
-  const momRange = document.getElementById("sim-mom-range");
-  const coreInput = document.getElementById("sim-core");
-  const coreRange = document.getElementById("sim-core-range");
-
-  if (momInput) momInput.value = data.actual_mom;
-  if (momRange) momRange.value = data.actual_mom;
-  if (coreInput) coreInput.value = data.actual_core_yoy;
-  if (coreRange) coreRange.value = data.actual_core_yoy;
-
+  // Toggle Option B from pending to active
+  const pendingEl = document.getElementById("option-b-pending");
+  const activeEl = document.getElementById("option-b-active");
+  if (pendingEl) pendingEl.style.display = "none";
+  if (activeEl) activeEl.style.display = "block";
   if (data.simulation) {
     renderSimulationOutputs(data.simulation);
   }
@@ -539,6 +513,6 @@ function handleOfficialRelease(data) {
   }
 
   if (isNew) {
-    executeDeepSeekBriefing(data.actual_mom, data.actual_core_yoy);
+    executeDeepSeekMemo("post_news", data.actual_mom, data.actual_core_yoy);
   }
 }

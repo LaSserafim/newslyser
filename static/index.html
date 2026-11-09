@@ -99,11 +99,11 @@
       </div>
     </div>
 
-    <!-- Section 1: Tomorrow Event Matrix & Interactive Simulator -->
+    <!-- Section 1: Dual-Strategy Quantitative CPI Framework -->
     <div class="grid-box">
       <div class="grid-box-header">
-        <span>[ 01 // TOMORROW'S CPI EVENT HORIZON & LIVE SIMULATOR ]</span>
-        <span class="header-accent">TARGET: OCT 2026 CPI RELEASE</span>
+        <span>[ 01 // DUAL-STRATEGY QUANTITATIVE CPI FRAMEWORK ]</span>
+        <span class="header-accent">OPTION A: PRE-NEWS PREDICTIVE vs OPTION B: POST-NEWS CONFIRMATION</span>
       </div>
       <div class="grid-box-body">
         
@@ -126,81 +126,128 @@
           </div>
         </div>
 
-        <!-- Interactive Simulator & Real-Time Output -->
+        <!-- Dual Model Architecture: Option A vs Option B -->
         <div class="two-col-grid">
           
-          <!-- Controls Panel -->
+          <!-- Option A: Pre-News Bayesian Predictive Model -->
           <div style="border:1px solid var(--border-color); padding:14px; background:var(--bg-main);">
-            <div style="font-size:11px; font-weight:800; text-transform:uppercase; margin-bottom:12px; color:var(--fg-main); border-bottom:1px solid var(--border-color); padding-bottom:6px;">
-              [ PARAMETRIC INPUTS // HYPOTHETICAL / LIVE SCENARIO ]
-            </div>
-
-            <div class="sim-form-group">
-              <label>ACTUAL HEADLINE CPI MoM (%)</label>
-              <div class="input-row">
-                <input type="range" id="sim-mom-range" min="-0.2" max="1.0" step="0.1" value="0.3">
-                <input type="number" id="sim-mom" step="0.1" value="0.3">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:6px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:900; text-transform:uppercase; color:var(--accent-cyan);">
+                [ OPTION A // PRE-NEWS BAYESIAN PREDICTIVE MODEL ]
               </div>
+              <span style="font-size:9px; color:var(--fg-muted); border:1px solid var(--border-light); padding:2px 4px;">FRONT-RUN SKEW</span>
+            </div>
+            <div style="font-size:10px; color:var(--fg-muted); margin-bottom:10px;">
+              Conditioned on: Oct WTI Crude Oil (+12.11% geopolitical supply shock), Cleveland Fed Nowcast (0.28%), and 34-release empirical base rates.
             </div>
 
-            <div class="sim-form-group">
-              <label>ACTUAL CORE CPI YoY (%)</label>
-              <div class="input-row">
-                <input type="range" id="sim-core-range" min="2.0" max="3.6" step="0.1" value="2.8">
-                <input type="number" id="sim-core" step="0.1" value="2.8">
-              </div>
-            </div>
-
-            <div style="margin-top:16px;">
-              <button class="btn-brutal" id="btn-deepseek" style="width:100%;">
-                RUN DEEPSEEK MACRO BRIEFING
-              </button>
-            </div>
-            <div style="font-size:10px; color:var(--fg-dim); margin-top:8px;">
-              * Triggers real-time quantitative reasoning via DeepSeek V3 API against transmission vectors.
-            </div>
-          </div>
-
-          <!-- Quantitative Readout Panel -->
-          <div style="border:1px solid var(--border-color); padding:14px; background:var(--bg-main);">
-            <div style="font-size:11px; font-weight:800; text-transform:uppercase; margin-bottom:12px; color:var(--fg-main); border-bottom:1px solid var(--border-color); padding-bottom:6px;">
-              [ TRANSMISSION READOUT // EXPECTED MARKET SHOCK ]
-            </div>
-
+            <!-- Bayesian Probabilities -->
             <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:10px;">
               <div class="stat-card">
-                <div class="stat-label">HEADLINE SURPRISE</div>
-                <div class="stat-value" id="out-hl-surprise" style="font-size:14px;">0.00 pp</div>
+                <div class="stat-label">P(HAWKISH BEAT &ge; 0.4%)</div>
+                <div class="stat-value" style="color:var(--accent-red); font-size:16px;">32.4%</div>
+                <div class="stat-sub">ENERGY PASS-THROUGH</div>
               </div>
               <div class="stat-card">
-                <div class="stat-label">CORE SURPRISE</div>
-                <div class="stat-value" id="out-core-surprise" style="font-size:14px;">0.00 pp</div>
+                <div class="stat-label">P(IN-LINE = 0.3%)</div>
+                <div class="stat-value" style="color:#ffaa00; font-size:16px;">53.8%</div>
+                <div class="stat-sub">CONSENSUS MODE</div>
               </div>
               <div class="stat-card">
-                <div class="stat-label">COMPOSITE Z-SCORE</div>
-                <div class="stat-value" id="out-z-comp" style="font-size:14px;">0.00 σ</div>
+                <div class="stat-label">P(DOVISH MISS &le; 0.2%)</div>
+                <div class="stat-value" style="color:var(--accent-green); font-size:16px;">13.8%</div>
+                <div class="stat-sub">SHELTER COOLING</div>
               </div>
             </div>
 
-            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px;">
-              <div class="stat-card">
-                <div class="stat-label">EXP. GOLD RETURN</div>
-                <div class="stat-value" id="out-gold-ret" style="font-size:15px;">0.00%</div>
+            <div class="stat-card" style="margin-bottom:10px;">
+              <div style="display:flex; justify-content:space-between;">
+                <span class="stat-label">MATHEMATICAL EXPECTED VALUE E[r_XAU]</span>
+                <span style="font-size:11px; font-weight:800; color:var(--accent-red);">-0.196% (BEARISH ASYMMETRY)</span>
               </div>
-              <div class="stat-card">
-                <div class="stat-label">EXP. DXY RETURN</div>
-                <div class="stat-value" id="out-dxy-ret" style="font-size:15px;">0.00%</div>
-              </div>
-              <div class="stat-card">
-                <div class="stat-label">2Y YIELD SHOCK</div>
-                <div class="stat-value" id="out-2y-bps" style="font-size:15px;">0.0 bps</div>
+              <div style="font-size:10px; color:var(--fg-muted); margin-top:4px;">
+                Calculated across probability density: Downside risk (-1.27% on beat) outweighs upside probability (13.8% miss).
               </div>
             </div>
 
-            <!-- Signal Output -->
-            <div id="signal-box" class="signal-box signal-neutral">
-              <div class="signal-title" id="signal-title">NEUTRAL / NO TRADE (NOISE ZONE)</div>
-              <div class="signal-desc" id="signal-desc">Awaiting input parameters to calculate transmission vector.</div>
+            <!-- Pre-News Action Card -->
+            <div class="signal-box signal-strong-short" style="margin-top:0; margin-bottom:12px; padding:10px;">
+              <div class="signal-title" style="font-size:12px;">PRE-RELEASE DIRECTIVE: SHORT XAUUSD AT RESISTANCE</div>
+              <div class="signal-desc" style="font-size:10px;">
+                ENTRY: $4,145.00 - $4,150.00 | STOP: $4,163.50 (Pre-news high) | TARGET: $4,085.00 | RR: 1:2.45
+              </div>
+            </div>
+
+            <button class="btn-brutal" id="btn-run-prenewsmemo" style="width:100%; font-size:11px;">
+              GENERATE PRE-NEWS MACRO BRIEFING
+            </button>
+          </div>
+
+          <!-- Option B: Post-News Confirmation Model -->
+          <div style="border:1px solid var(--border-color); padding:14px; background:var(--bg-main);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:6px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:900; text-transform:uppercase; color:var(--accent-green);">
+                [ OPTION B // POST-NEWS CONFIRMATION MODEL ]
+              </div>
+              <span style="font-size:9px; color:var(--fg-muted); border:1px solid var(--border-light); padding:2px 4px;">REACTIVE TRANSMISSION</span>
+            </div>
+            <div style="font-size:10px; color:var(--fg-muted); margin-bottom:10px;">
+              Linked strictly to "SYNC CURRENT LIVE DATA". Calculates verified transmission once official numbers drop at 20:30 WIB.
+            </div>
+
+            <!-- Dynamic Container for Option B -->
+            <div id="option-b-pending" style="border:1px solid var(--border-color); background:var(--bg-panel); padding:24px 16px; text-align:center;">
+              <div style="color:var(--accent-red); font-weight:800; font-size:13px; margin-bottom:6px;">
+                [ INSUFFICIENT DATA — RELEASE PENDING ]
+              </div>
+              <div style="font-size:11px; color:var(--fg-muted); line-height:1.6;">
+                Official BLS release scheduled for November 10 @ 08:30 AM EST.<br>
+                Click <strong>"SYNC CURRENT LIVE DATA"</strong> in Section 00 once numbers release to calculate the confirmed transmission vector and 60s Wave 1 firewall.
+              </div>
+              <div style="margin-top:12px; font-size:10px; color:var(--fg-dim);">
+                CURRENT VERIFIED BASELINE: XAUUSD $4,136.60 | DXY 101.82 | US 2Y 4.46%
+              </div>
+            </div>
+
+            <div id="option-b-active" style="display:none;">
+              <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:10px;">
+                <div class="stat-card">
+                  <div class="stat-label">HEADLINE SURPRISE</div>
+                  <div class="stat-value" id="out-hl-surprise" style="font-size:14px;">0.00 pp</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">CORE SURPRISE</div>
+                  <div class="stat-value" id="out-core-surprise" style="font-size:14px;">0.00 pp</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">COMPOSITE Z-SCORE</div>
+                  <div class="stat-value" id="out-z-comp" style="font-size:14px;">0.00 σ</div>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:10px;">
+                <div class="stat-card">
+                  <div class="stat-label">EXP. GOLD RETURN</div>
+                  <div class="stat-value" id="out-gold-ret" style="font-size:14px;">0.00%</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">EXP. DXY RETURN</div>
+                  <div class="stat-value" id="out-dxy-ret" style="font-size:14px;">0.00%</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">2Y YIELD SHOCK</div>
+                  <div class="stat-value" id="out-2y-bps" style="font-size:14px;">0.0 bps</div>
+                </div>
+              </div>
+
+              <div id="signal-box" class="signal-box signal-neutral" style="margin-top:0; margin-bottom:12px; padding:10px;">
+                <div class="signal-title" id="signal-title" style="font-size:12px;">NEUTRAL / NO TRADE</div>
+                <div class="signal-desc" id="signal-desc" style="font-size:10px;">Awaiting calculation.</div>
+              </div>
+
+              <button class="btn-brutal btn-secondary" id="btn-run-postnewsmemo" style="width:100%; font-size:11px;">
+                RUN CONFIRMED POST-NEWS MACRO BRIEFING
+              </button>
             </div>
 
           </div>
