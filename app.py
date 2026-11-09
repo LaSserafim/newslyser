@@ -43,6 +43,134 @@ def load_data():
     with open(os.path.join(DATA_DIR, "macro_summary.json")) as f:
         macro = json.load(f)
     return hist, tomorrow, macro
+# In-Memory Live Sync State
+LIVE_SYNC_STATE = {
+    "is_released": False,
+    "is_simulated": False,
+    "release_time": None,
+    "actual_mom": None,
+    "actual_core_yoy": None,
+    "actual_core_mom": None,
+    "simulation": None,
+    "deepseek_memo": None
+}
+
+def fetch_live_forexfactory_cpi():
+    import urllib.request, re
+    url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            events = json.loads(resp.read().decode("utf-8"))
+        
+        headline_actual = None
+        core_actual = None
+        for item in events:
+            if item.get("country") == "USD" and "2026-11-10" in item.get("date", ""):
+                title = item.get("title", "")
+                act_str = item.get("actual", "")
+                if act_str:
+                    # Clean percentage
+                    m = re.search(r"([\-\+]?\d+\.?\d*)", act_str)
+                    if m:
+                        val = float(m.group(1))
+                        if "Core" in title and "m/m" in title:
+                            core_actual = val
+                        elif "CPI m/m" in title and "Core" not in title:
+                            headline_actual = val
+        
+        return headline_actual, core_actual
+    except Exception as e:
+        print(f"[LIVE POLLER] Error checking ForexFactory: {e}")
+        return None, None
+
+@app.get("/api/live-sync")
+def live_sync():
+    global LIVE_SYNC_STATE
+    _, tomorrow, _ = load_data()
+    
+    # If already triggered by simulated test or released
+    if LIVE_SYNC_STATE["is_released"]:
+        return {
+            "status": "RELEASED",
+            "source": "SIMULATION_TEST" if LIVE_SYNC_STATE["is_simulated"] else "LIVE_BLS_FEED",
+            "release_time": LIVE_SYNC_STATE["release_time"],
+            "actual_mom": LIVE_SYNC_STATE["actual_mom"],
+            "actual_core_yoy": LIVE_SYNC_STATE["actual_core_yoy"],
+            "simulation": LIVE_SYNC_STATE["simulation"],
+            "deepseek_memo": LIVE_SYNC_STATE["deepseek_memo"]
+        }
+        
+    # Check real-time feed
+    hl_act, core_act = fetch_live_forexfactory_cpi()
+    if hl_act is not None:
+        import datetime
+        LIVE_SYNC_STATE["is_released"] = True
+        LIVE_SYNC_STATE["is_simulated"] = False
+        LIVE_SYNC_STATE["release_time"] = datetime.datetime.utcnow().isoformat() + "Z"
+        LIVE_SYNC_STATE["actual_mom"] = hl_act
+        # Estimate Core YoY if only Core MoM reported:
+        est_core_yoy = tomorrow["forecast_core_yoy"] + (core_act - tomorrow["forecast_core_mom"]) if core_act else tomorrow["forecast_core_yoy"]
+        LIVE_SYNC_STATE["actual_core_yoy"] = round(est_core_yoy, 2)
+        LIVE_SYNC_STATE["simulation"] = quant_model.simulate_tomorrow_scenario(hl_act, est_core_yoy, tomorrow)
+        
+        return {
+            "status": "RELEASED",
+            "source": "LIVE_BLS_FEED",
+            "release_time": LIVE_SYNC_STATE["release_time"],
+            "actual_mom": hl_act,
+            "actual_core_yoy": LIVE_SYNC_STATE["actual_core_yoy"],
+            "simulation": LIVE_SYNC_STATE["simulation"]
+        }
+        
+    return {
+        "status": "AWAITING_RELEASE",
+        "target_release_time": tomorrow["time"],
+        "target_date": tomorrow["date"],
+        "forecast_mom": tomorrow["forecast_mom"],
+        "forecast_core_yoy": tomorrow["forecast_core_yoy"]
+    }
+
+class TestTriggerRequest(BaseModel):
+    actual_mom: float
+    actual_core_yoy: float
+
+@app.post("/api/test-trigger")
+def test_trigger(req: TestTriggerRequest):
+    global LIVE_SYNC_STATE
+    import datetime
+    _, tomorrow, _ = load_data()
+    
+    sim = quant_model.simulate_tomorrow_scenario(req.actual_mom, req.actual_core_yoy, tomorrow)
+    LIVE_SYNC_STATE["is_released"] = True
+    LIVE_SYNC_STATE["is_simulated"] = True
+    LIVE_SYNC_STATE["release_time"] = datetime.datetime.utcnow().isoformat() + "Z"
+    LIVE_SYNC_STATE["actual_mom"] = req.actual_mom
+    LIVE_SYNC_STATE["actual_core_yoy"] = req.actual_core_yoy
+    LIVE_SYNC_STATE["simulation"] = sim
+    
+    return {
+        "status": "RELEASED",
+        "source": "SIMULATION_TEST",
+        "actual_mom": req.actual_mom,
+        "actual_core_yoy": req.actual_core_yoy,
+        "simulation": sim
+    }
+
+@app.post("/api/reset-live")
+def reset_live():
+    global LIVE_SYNC_STATE
+    LIVE_SYNC_STATE = {
+        "is_released": False,
+        "is_simulated": False,
+        "release_time": None,
+        "actual_mom": None,
+        "actual_core_yoy": None,
+        "actual_core_mom": None,
+        "simulation": None,
+        "deepseek_memo": None
+    }
+    return {"status": "AWAITING_RELEASE", "message": "Live poller reset successfully."}
 
 @app.get("/")
 def get_index():
