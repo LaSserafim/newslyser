@@ -345,7 +345,7 @@ async function renderMonteCarloChart(horizon, z) {
   const w = container.clientWidth || 700;
   const h = 320;
   const padL = 52;
-  const padR = 25;
+  const padR = 65;
   const padT = 25;
   const padB = 32;
 
@@ -394,9 +394,11 @@ async function renderMonteCarloChart(horizon, z) {
   // Upper / Lower Band Indicators at Terminal
   const upperY = getY(p75[steps]);
   const lowerY = getY(p25[steps]);
+  const medianY = getY(p50[steps]);
   const indicatorLines = `
-    <text x="${getX(steps) - 6}" y="${upperY - 4}" fill="#00e5ff" font-size="8" text-anchor="end" font-family="monospace">+1σ: $${p75[steps].toFixed(0)}</text>
-    <text x="${getX(steps) - 6}" y="${lowerY + 11}" fill="#ff2a2a" font-size="8" text-anchor="end" font-family="monospace">-1σ: $${p25[steps].toFixed(0)}</text>
+    <text x="${getX(steps) + 8}" y="${upperY + 3}" fill="#00e5ff" font-size="8" text-anchor="start" font-family="monospace">+1σ: $${p75[steps].toFixed(0)}</text>
+    <text x="${getX(steps) + 8}" y="${medianY + 3}" fill="#00e5ff" font-size="8.5" font-weight="900" text-anchor="start" font-family="monospace">$${p50[steps].toFixed(0)}</text>
+    <text x="${getX(steps) + 8}" y="${lowerY + 3}" fill="#ff2a2a" font-size="8" text-anchor="start" font-family="monospace">-1σ: $${p25[steps].toFixed(0)}</text>
   `;
 
   // Grid lines
@@ -526,16 +528,16 @@ async function renderPDFChart() {
   // Indicator milestone lines & labels
   const indicatorsSvg = `
     <!-- T0 Consensus Marker -->
-    <line x1="${x0}" y1="${padT + 12}" x2="${x0}" y2="${yZero}" stroke="#888" stroke-width="1" stroke-dasharray="2,2"/>
-    <text x="${x0}" y="${padT + 10}" fill="#888" font-size="7.5" text-anchor="middle" font-family="monospace">T0: 0.00pp</text>
+    <line x1="${x0}" y1="${padT + 16}" x2="${x0}" y2="${yZero}" stroke="#888" stroke-width="1" stroke-dasharray="2,2"/>
+    <text x="${x0}" y="${padT + 12}" fill="#888" font-size="7.5" text-anchor="middle" font-family="monospace">T0: 0.00pp</text>
 
     <!-- Nowcast Marker -->
-    <line x1="${xNowcast}" y1="${padT + 22}" x2="${xNowcast}" y2="${yZero}" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2"/>
-    <text x="${xNowcast}" y="${padT + 20}" fill="#00e5ff" font-size="7.5" text-anchor="end" font-family="monospace">NOWCAST -0.02pp</text>
+    <line x1="${xNowcast}" y1="${padT + 28}" x2="${xNowcast}" y2="${yZero}" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2"/>
+    <text x="${xNowcast - 4}" y="${padT + 26}" fill="#00e5ff" font-size="7.5" text-anchor="end" font-family="monospace">NOWCAST -0.02pp</text>
 
     <!-- Energy Posterior Peak Marker -->
-    <line x1="${xPeak}" y1="${padT + 12}" x2="${xPeak}" y2="${yZero}" stroke="#ff2a2a" stroke-width="1.5"/>
-    <text x="${xPeak}" y="${padT + 10}" fill="#ff2a2a" font-size="8" font-weight="900" text-anchor="middle" font-family="monospace">PEAK +0.08pp</text>
+    <line x1="${xPeak}" y1="${padT + 16}" x2="${xPeak}" y2="${yZero}" stroke="#ff2a2a" stroke-width="1.5"/>
+    <text x="${xPeak + 4}" y="${padT + 12}" fill="#ff2a2a" font-size="8" font-weight="900" text-anchor="start" font-family="monospace">PEAK +0.08pp</text>
   `;
 
   let svg = `
@@ -672,15 +674,15 @@ async function renderComponentChart() {
   `;
 
   let dateTicks = "";
-  const stepTicks = Math.max(1, Math.floor(n / 6));
-  for (let i = 0; i < n; i += stepTicks) {
-    const x = getX(i);
+  const cleanIndices = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1];
+  cleanIndices.forEach((idx, i) => {
+    const x = getX(idx);
+    const anchor = i === 0 ? "start" : (i === cleanIndices.length - 1 ? "end" : "middle");
     dateTicks += `
       <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#141414" stroke-width="1"/>
-      <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">${data[i].date}</text>
+      <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="${anchor}" font-family="monospace">${data[idx].date}</text>
     `;
-  }
-  dateTicks += `<text x="${getX(n-1)}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">${data[n-1].date}</text>`;
+  });
 
   const lastD = data[n - 1];
   let svg = `
@@ -832,9 +834,8 @@ function renderScatterChart(events, models) {
   const w = container.clientWidth || 700;
   const h = 320;
 
-  const scatterW = Math.floor(w * 0.58);
+  const scatterW = Math.floor(w * 0.54);
   const vrW = w - scatterW;
-
   const padL = 40;
   const padR = 20;
   const padT = 25;
@@ -888,9 +889,8 @@ function renderScatterChart(events, models) {
     { label: "VR(60m)", ratio: 1.84, color: "#888888" }
   ];
   const maxVR = 6.0;
-  const vrStartX = scatterW + 20;
-  const vrWidth = Math.max(80, w - vrStartX - 45); // Guaranteed right margin
-
+  const vrStartX = scatterW + 18;
+  const vrWidth = Math.max(50, w - vrStartX - 70); // 70px right margin guarantees '5.42x' is NEVER cut off
   let vrSvg = `
     <line x1="${scatterW}" y1="${padT - 10}" x2="${scatterW}" y2="${h - 10}" stroke="#222" stroke-width="1"/>
     <text x="${vrStartX}" y="${padT + 4}" fill="#888" font-size="8" font-weight="700" font-family="monospace">VOLATILITY RATIO VR(w)</text>
@@ -900,9 +900,9 @@ function renderScatterChart(events, models) {
     const barY = padT + 28 + idx * 52;
     const barLen = (item.ratio / maxVR) * vrWidth;
     vrSvg += `
-      <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="9" font-family="monospace">${item.label}</text>
-      <rect class="vr-bar-rect" x="${vrStartX + 54}" y="${barY}" width="${barLen.toFixed(1)}" height="14" fill="${item.color}" opacity="0.9"/>
-      <text x="${vrStartX + 62 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="900" font-family="monospace">${item.ratio.toFixed(2)}x</text>
+      <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="8.5" font-family="monospace">${item.label}</text>
+      <rect class="vr-bar-rect" x="${vrStartX + 52}" y="${barY}" width="${barLen.toFixed(1)}" height="14" fill="${item.color}" opacity="0.9"/>
+      <text x="${vrStartX + 58 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="900" font-family="monospace">${item.ratio.toFixed(2)}x</text>
     `;
   });
 
