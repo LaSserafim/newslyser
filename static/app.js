@@ -69,14 +69,14 @@ async function fetchInitialData() {
     tomorrowMeta = tomJson.event || {};
     macroSummary = tomJson.macro_snapshots || {};
 
-    renderTomorrowBanner(tomorrowMeta);
-    renderModelComparison(modelData);
-    renderHistoricalTable(historicalData);
-    renderComponentChart();
-    renderScatterChart(historicalData, modelData);
-    renderMonteCarloChart(1, 0.0);
-    renderPDFChart();
-    initMonteCarloControls();
+    try { renderTomorrowBanner(tomorrowMeta); } catch(e) { console.error("banner:", e); }
+    try { renderModelComparison(modelData); } catch(e) { console.error("models:", e); }
+    try { renderHistoricalTable(historicalData); } catch(e) { console.error("table:", e); }
+    try { await renderComponentChart(); } catch(e) { console.error("comp:", e); }
+    try { renderScatterChart(historicalData, modelData); } catch(e) { console.error("scatter:", e); }
+    try { await renderMonteCarloChart(1, 0.0); } catch(e) { console.error("mc:", e); }
+    try { await renderPDFChart(); } catch(e) { console.error("pdf:", e); }
+    try { initMonteCarloControls(); } catch(e) { console.error("mcControls:", e); }
   } catch (err) {
     console.error("Data load failed:", err);
   }

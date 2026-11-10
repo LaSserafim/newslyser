@@ -144,7 +144,11 @@ def sync_live():
 
 @app.get("/")
 def get_index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    res = FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    res.headers["Pragma"] = "no-cache"
+    res.headers["Expires"] = "0"
+    return res
 
 @app.get("/api/historical")
 def get_historical():
