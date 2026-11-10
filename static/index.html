@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NEWSLYSER // CPI QUANTITATIVE ENGINE</title>
-  <link rel="stylesheet" href="/static/style.css?v=2.7.0">
+  <link rel="stylesheet" href="/static/style.css?v=3.0.0">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800;900&family=Inter:wght@700;800;900&display=swap" rel="stylesheet">
 </head>
@@ -15,7 +15,8 @@
     <div class="brand-title">
       NEWSLYSER <span>//</span> CPI QUANTITATIVE ENGINE <span style="font-size:10px; color:var(--fg-dim); font-weight:400; margin-left:8px;">[REV 2.4.0]</span>
     </div>
-    <div style="display:flex; gap:12px; align-items:center;">
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button class="btn-brutal" id="btn-master-refresh" style="background:#ff2a2a; color:#fff; font-size:10px; padding:5px 14px;">🔄 REFRESH ALL LIVE DATA</button>
       <a href="/static/CPI_Quantitative_Model_Master_Guide.pdf" target="_blank" class="btn-brutal btn-secondary" style="font-size:10px; padding:5px 12px; text-decoration:none;">DOWNLOAD PDF GUIDE</a>
       <div id="live-clock" style="font-size:11px; color:var(--fg-muted);">--:--:-- UTC</div>
       <div class="sys-badge"><span class="sys-pulse-dot"></span> SYSTEM ONLINE // HC3 CALIBRATED</div>
@@ -26,11 +27,11 @@
   <div class="ticker-bar">
     <div class="ticker-item">
       <span class="ticker-label">XAUUSD GOLD (GC=F)</span>
-      <span class="ticker-val">$4,128.30</span>
+      <span class="ticker-val">$4,069.40</span>
     </div>
     <div class="ticker-item">
       <span class="ticker-label">U.S. DOLLAR INDEX (DXY)</span>
-      <span class="ticker-val">101.87</span>
+      <span class="ticker-val">101.98</span>
     </div>
     <div class="ticker-item">
       <span class="ticker-label">U.S. 2-YEAR YIELD</span>
@@ -38,7 +39,7 @@
     </div>
     <div class="ticker-item">
       <span class="ticker-label">U.S. 10-YEAR YIELD</span>
-      <span class="ticker-val">4.86%</span>
+      <span class="ticker-val">4.94%</span>
     </div>
     <div class="ticker-item">
       <span class="ticker-label">10Y TIPS (REAL YIELD)</span>
@@ -46,11 +47,24 @@
     </div>
     <div class="ticker-item">
       <span class="ticker-label">EVENT HORIZON</span>
-      <span class="ticker-val" style="color:var(--accent-red);">TOMORROW 08:30 ET</span>
+      <span class="ticker-val" style="color:var(--accent-red);">OCT CPI: 0.4% / 0.3%</span>
     </div>
   </div>
 
+  <!-- Module Navigation Bar -->
+  <div class="module-nav-bar">
+    <button class="nav-tab-btn active" data-tab="tab-cpi">[ 01: CPI ENGINE ]</button>
+    <button class="nav-tab-btn" data-tab="tab-fomc">[ 02: FOMC RATE ]</button>
+    <button class="nav-tab-btn" data-tab="tab-nfp">[ 03: NFP & JOBS ]</button>
+    <button class="nav-tab-btn" data-tab="tab-ppi">[ 04: PPI & RETAIL ]</button>
+    <button class="nav-tab-btn" data-tab="tab-astar">[ 05: DAILY A* SETUP ]</button>
+    <button class="nav-tab-btn" data-tab="tab-calendar">[ 06: US CALENDAR ]</button>
+  </div>
   <main class="main-container">
+
+    <!-- ==================== TAB 01: CPI ENGINE ==================== -->
+    <div class="tab-pane active" id="tab-cpi">
+
     <!-- Section 00: Live On-Demand Macro Data Sync -->
     <div class="grid-box" style="border: 1px solid var(--border-light); margin-bottom: 8px;">
       <div class="grid-box-header">
@@ -92,6 +106,39 @@
               <div style="font-size:9px; color:var(--fg-muted); text-transform:uppercase;">WAVE 1 SPREAD FIREWALL</div>
               <div id="wave1-timer" style="font-size:22px; font-weight:900; color:var(--accent-red);">60s</div>
               <div style="font-size:9px; color:var(--accent-red); font-weight:700;">SPREAD BLOWOUT IN PROGRESS</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Manual Input Override & Instant Transmission Calculator -->
+        <div style="border-top:1px solid var(--border-color); margin-top:16px; padding-top:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+            <div style="font-size:10px; font-weight:900; color:var(--accent-cyan); text-transform:uppercase;">
+              [ MANUAL INPUT OVERRIDE // ZERO-LATENCY INSTANT TRANSMISSION CALCULATION ]
+            </div>
+            <span style="font-size:9px; color:var(--fg-dim);">TYPE ACTUAL NUMBER & CLICK TO CALCULATE INSTANTLY WITHOUT AUTO-SYNC</span>
+          </div>
+          <div class="manual-calc-grid">
+            <div class="manual-input-box">
+              <label>ACTUAL HEADLINE MoM (%)</label>
+              <input type="number" id="manual-cpi-act" step="0.1" value="0.4">
+            </div>
+            <div class="manual-input-box">
+              <label>FORECAST HEADLINE MoM (%)</label>
+              <input type="number" id="manual-cpi-fcst" step="0.1" value="0.3">
+            </div>
+            <div class="manual-input-box">
+              <label>ACTUAL CORE YoY (%)</label>
+              <input type="number" id="manual-cpi-core-act" step="0.1" value="2.9">
+            </div>
+            <div class="manual-input-box">
+              <label>FORECAST CORE YoY (%)</label>
+              <input type="number" id="manual-cpi-core-fcst" step="0.1" value="2.8">
+            </div>
+            <div>
+              <button class="btn-brutal" id="btn-manual-cpi-calc" style="background:var(--accent-cyan); color:#000; width:100%; font-size:10px; padding:8px 12px;">
+                CALCULATE INSTANT TRANSMISSION
+              </button>
             </div>
           </div>
         </div>
@@ -664,6 +711,331 @@
         </div>
       </div>
     </div>
+    </div> <!-- End #tab-cpi -->
+
+    <!-- ==================== TAB 02: FOMC RATE ==================== -->
+    <div class="tab-pane" id="tab-fomc">
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ FOMC RATE DECISION & POLICY PATH TRANSMISSION MODEL ]</span>
+          <span class="header-accent">FED FUNDS RATE vs CME FEDWATCH PRICING</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="font-size:10px; color:var(--fg-muted); margin-bottom:12px;">
+            Shock equation: Policy Shock (bps) = (Actual Rate - Implied Priced Rate) * 100 + 0.5 * (Dot Plot Shift bps). Gold responds with approx -1.80% per 25 bps hawkish surprise.
+          </div>
+
+          <!-- Manual Input & Instant Calculator -->
+          <div class="manual-calc-grid" style="margin-bottom:16px;">
+            <div class="manual-input-box">
+              <label>ACTUAL FED FUNDS RATE (%)</label>
+              <input type="number" id="manual-fomc-act" step="0.25" value="5.00">
+            </div>
+            <div class="manual-input-box">
+              <label>PRICED RATE (CME FEDWATCH) (%)</label>
+              <input type="number" id="manual-fomc-priced" step="0.25" value="5.00">
+            </div>
+            <div class="manual-input-box">
+              <label>DOT PLOT TERMINAL SHIFT (bps)</label>
+              <input type="number" id="manual-fomc-dots" step="5" value="0">
+            </div>
+            <div>
+              <button class="btn-brutal" id="btn-manual-fomc-calc" style="background:var(--accent-red); width:100%; font-size:10px; padding:8px 12px;">
+                CALCULATE FOMC TRANSMISSION
+              </button>
+            </div>
+          </div>
+
+          <!-- Output Readouts -->
+          <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:14px;">
+            <div class="stat-card">
+              <div class="stat-label">POLICY RATE SHOCK</div>
+              <div class="stat-value" id="fomc-out-shock" style="font-size:15px;">0.0 bps</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">EXPECTED GOLD MOVE</div>
+              <div class="stat-value" id="fomc-out-gold" style="font-size:15px;">0.00%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">EXPECTED DXY MOVE</div>
+              <div class="stat-value" id="fomc-out-dxy" style="font-size:15px;">0.00%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">POLICY STANCE</div>
+              <div class="stat-value" id="fomc-out-stance" style="font-size:13px; color:var(--accent-amber);">IN-LINE PAUSE</div>
+            </div>
+          </div>
+
+          <div id="fomc-signal-box" class="signal-box signal-neutral">
+            <div class="signal-title" id="fomc-signal-title">NO TRADE (WHIPSAW NOISE)</div>
+            <div class="signal-desc" id="fomc-signal-desc">Policy announcement priced in. Fade extreme spikes during Powell press conference.</div>
+          </div>
+        </div>
+      </div>
+    </div> <!-- End #tab-fomc -->
+
+    <!-- ==================== TAB 03: NFP & JOBS ==================== -->
+    <div class="tab-pane" id="tab-nfp">
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ NON-FARM PAYROLLS & LABOR MARKET COMPOSITE ENGINE ]</span>
+          <span style="color:var(--accent-cyan);">Z_labor = 0.50*Z_nfp - 0.30*Z_unemp + 0.20*Z_wages</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="font-size:10px; color:var(--fg-muted); margin-bottom:12px;">
+            Standardized composite labor shock weighting job creation against unemployment rate and wage inflation. Gold responds with approx -0.95% per 1 sigma labor shock.
+          </div>
+
+          <!-- Manual Input & Instant Calculator -->
+          <div class="manual-calc-grid" style="margin-bottom:16px;">
+            <div class="manual-input-box">
+              <label>NFP ACTUAL (K)</label>
+              <input type="number" id="manual-nfp-act" step="5" value="220">
+            </div>
+            <div class="manual-input-box">
+              <label>NFP FORECAST (K)</label>
+              <input type="number" id="manual-nfp-fcst" step="5" value="175">
+            </div>
+            <div class="manual-input-box">
+              <label>UNEMPLOYMENT (%)</label>
+              <input type="number" id="manual-nfp-unemp" step="0.1" value="4.1">
+            </div>
+            <div class="manual-input-box">
+              <label>UNEMP FCST (%)</label>
+              <input type="number" id="manual-nfp-unemp-fcst" step="0.1" value="4.2">
+            </div>
+            <div class="manual-input-box">
+              <label>WAGES AHE MoM (%)</label>
+              <input type="number" id="manual-nfp-wages" step="0.1" value="0.4">
+            </div>
+            <div>
+              <button class="btn-brutal" id="btn-manual-nfp-calc" style="background:var(--accent-cyan); color:#000; width:100%; font-size:10px; padding:8px 12px;">
+                CALCULATE NFP TRANSMISSION
+              </button>
+            </div>
+          </div>
+
+          <!-- Output Readouts -->
+          <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:14px;">
+            <div class="stat-card">
+              <div class="stat-label">LABOR COMPOSITE Z</div>
+              <div class="stat-value" id="nfp-out-z" style="font-size:15px; color:var(--accent-red);">+1.35 σ</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">EXPECTED GOLD MOVE</div>
+              <div class="stat-value" id="nfp-out-gold" style="font-size:15px; color:var(--accent-red);">-1.28%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">EXPECTED DXY MOVE</div>
+              <div class="stat-value" id="nfp-out-dxy" style="font-size:15px; color:var(--accent-green);">+0.30%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">LABOR MARKET REGIME</div>
+              <div class="stat-value" id="nfp-out-regime" style="font-size:13px; color:var(--accent-red);">HAWKISH EXPANSION</div>
+            </div>
+          </div>
+
+          <div id="nfp-signal-box" class="signal-box signal-strong-short">
+            <div class="signal-title" id="nfp-signal-title">STRONG SHORT GOLD (HOT LABOR MARKET)</div>
+            <div class="signal-desc" id="nfp-signal-desc">Hot payrolls and firm wage growth compress rate cut odds. Fade early liquidity bounces.</div>
+          </div>
+        </div>
+      </div>
+    </div> <!-- End #tab-nfp -->
+
+    <!-- ==================== TAB 04: PPI & RETAIL ==================== -->
+    <div class="tab-pane" id="tab-ppi">
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ PPI WHOLESALE INFLATION & ADVANCE RETAIL SALES DEMAND ]</span>
+          <span style="color:var(--accent-amber);">LEADING PIPELINE & CONSUMER RESILIENCE</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="font-size:10px; color:var(--fg-muted); margin-bottom:12px;">
+            Producer price inflation leads consumer CPI by 30-60 days. Retail sales measures consumer demand elasticity.
+          </div>
+
+          <!-- Manual Input & Instant Calculator -->
+          <div class="manual-calc-grid" style="margin-bottom:16px;">
+            <div class="manual-input-box">
+              <label>ACTUAL PPI MoM (%)</label>
+              <input type="number" id="manual-ppi-act" step="0.1" value="0.3">
+            </div>
+            <div class="manual-input-box">
+              <label>FORECAST PPI (%)</label>
+              <input type="number" id="manual-ppi-fcst" step="0.1" value="0.2">
+            </div>
+            <div class="manual-input-box">
+              <label>RETAIL SALES MoM (%)</label>
+              <input type="number" id="manual-retail-act" step="0.1" value="0.6">
+            </div>
+            <div class="manual-input-box">
+              <label>RETAIL FCST (%)</label>
+              <input type="number" id="manual-retail-fcst" step="0.1" value="0.4">
+            </div>
+            <div>
+              <button class="btn-brutal" id="btn-manual-ppi-calc" style="background:var(--accent-amber); color:#000; width:100%; font-size:10px; padding:8px 12px;">
+                CALCULATE DEMAND SHOCK
+              </button>
+            </div>
+          </div>
+
+          <!-- Output Readouts -->
+          <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:14px;">
+            <div class="stat-card">
+              <div class="stat-label">DEMAND COMPOSITE Z</div>
+              <div class="stat-value" id="ppi-out-z" style="font-size:15px; color:var(--accent-red);">+1.12 σ</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">EXPECTED GOLD MOVE</div>
+              <div class="stat-value" id="ppi-out-gold" style="font-size:15px; color:var(--accent-red);">-0.84%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">EXPECTED DXY MOVE</div>
+              <div class="stat-value" id="ppi-out-dxy" style="font-size:15px; color:var(--accent-green);">+0.20%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">DEMAND STANCE</div>
+              <div class="stat-value" id="ppi-out-stance" style="font-size:13px; color:var(--accent-red);">WHOLESALE PRESSURE</div>
+            </div>
+          </div>
+
+          <div id="ppi-signal-box" class="signal-box signal-strong-short">
+            <div class="signal-title" id="ppi-signal-title">MODERATE SHORT GOLD (RESILIENT DEMAND)</div>
+            <div class="signal-desc" id="ppi-signal-desc">Elevated wholesale pipeline costs and resilient retail spending suppress dovish Fed pivot odds.</div>
+          </div>
+        </div>
+      </div>
+    </div> <!-- End #tab-ppi -->
+
+    <!-- ==================== TAB 05: DAILY A* SETUP ==================== -->
+    <div class="tab-pane" id="tab-astar">
+      
+      <!-- Top Header Summary Card -->
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ DAILY A* GRADE SETUP ENGINE // M30 STRUCTURE & M15 EXECUTION ]</span>
+          <span class="header-accent" id="astar-live-grade">A* GRADE (INSTITUTIONAL PRIMED) // 94/100</span>
+        </div>
+        <div class="grid-box-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; margin-bottom:16px;">
+            <div>
+              <div style="font-size:13px; font-weight:900; color:var(--fg-main);">
+                LIVE GOLD ANCHOR: <span id="astar-live-price" style="color:var(--accent-cyan);">$4,069.40</span>
+              </div>
+              <div style="font-size:10px; color:var(--fg-muted); margin-top:2px;">
+                Determining Timeframe: M30 Structure & VWAP +/- 2.0&sigma; | Execution: M15 Rejection Wick | All levels calculated dynamically relative to live price.
+              </div>
+            </div>
+            <div>
+              <button class="btn-brutal" id="btn-recalc-astar" style="font-size:10px; padding:6px 14px;">
+                🔄 RECALCULATE AT CURRENT TICK
+              </button>
+            </div>
+          </div>
+
+          <!-- 4 Quantitative Confluence Pillars -->
+          <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:16px;">
+            <div class="stat-card" style="border-left:3px solid var(--accent-green);">
+              <div class="stat-label">1. MACRO TREND (M30)</div>
+              <div class="stat-value" style="font-size:16px; color:var(--accent-green);">25 / 25</div>
+              <div class="stat-sub">DXY > 101.95 & 10Y Yields > 4.90%</div>
+            </div>
+            <div class="stat-card" style="border-left:3px solid var(--accent-green);">
+              <div class="stat-label">2. LIQUIDITY SWEEP</div>
+              <div class="stat-value" style="font-size:16px; color:var(--accent-green);">23 / 25</div>
+              <div class="stat-sub">Retest of 50% News Displacement Zone</div>
+            </div>
+            <div class="stat-card" style="border-left:3px solid var(--accent-green);">
+              <div class="stat-label">3. VOLATILITY EXTENSION</div>
+              <div class="stat-value" style="font-size:16px; color:var(--accent-green);">22 / 25</div>
+              <div class="stat-sub">Price at Upper M30 Volume Threshold</div>
+            </div>
+            <div class="stat-card" style="border-left:3px solid var(--accent-green);">
+              <div class="stat-label">4. CROSS-ASSET MATRIX</div>
+              <div class="stat-value" style="font-size:16px; color:var(--accent-green);">24 / 25</div>
+              <div class="stat-sub">2Y Yield Breakout & Real Yield Expansion</div>
+            </div>
+          </div>
+
+          <!-- Dynamic S/R Levels & Execution Ticket -->
+          <div class="two-col-grid">
+            
+            <!-- Left: Dynamic S/R Levels -->
+            <div class="stat-card">
+              <div class="stat-label">DYNAMIC INTRADAY STRUCTURE LEVELS (CALCULATED FROM LIVE TICK)</div>
+              <table class="brutal-table" style="margin-top:8px;">
+                <thead>
+                  <tr><th>LEVEL</th><th>PRICE</th><th>ZONE TYPE</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><strong style="color:var(--accent-red);">R3 (Upper Vol Limit)</strong></td><td id="dyn-r3">$4,094.40</td><td>Major Exhaustion & Liquidity Pool</td></tr>
+                  <tr><td><strong style="color:var(--accent-red);">R2 (Primary Resistance)</strong></td><td id="dyn-r2">$4,085.30</td><td>50% News Retracement Ceiling</td></tr>
+                  <tr><td><strong style="color:var(--accent-red);">R1 (Minor Resistance)</strong></td><td id="dyn-r1">$4,077.12</td><td>M30 VWAP Value Area High</td></tr>
+                  <tr><td><strong style="color:var(--fg-muted);">S1 (Minor Support)</strong></td><td id="dyn-s1">$4,061.68</td><td>Local Consolidation Floor</td></tr>
+                  <tr><td><strong style="color:var(--accent-green);">S2 (Primary Target)</strong></td><td id="dyn-s2">$4,053.50</td><td>Initial News Low Test</td></tr>
+                  <tr><td><strong style="color:var(--accent-green);">S3 (Expansion Low)</strong></td><td id="dyn-s3">$4,044.40</td><td>Session Extension Target</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Right: Ready-to-Execute A* Ticket -->
+            <div class="stat-card" style="border:2px solid var(--accent-red);">
+              <div class="stat-label" style="color:var(--accent-red); font-weight:800;">A* GRADE EXECUTION TICKET (M30/M15 CONFIRMATION)</div>
+              <div style="font-size:14px; font-weight:900; color:#fff; margin-top:8px; margin-bottom:12px;">
+                ACTION: SELL LIMIT / SHORT ON M15 VWAP REJECTION
+              </div>
+              <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; font-size:11px; margin-bottom:12px;">
+                <div>ENTRY ZONE: <strong id="astar-entry" style="color:var(--accent-cyan);">$4,073.15 - $4,079.23</strong></div>
+                <div>STOP LOSS: <strong id="astar-sl" style="color:var(--accent-red);">$4,089.23</strong></div>
+                <div>TAKE PROFIT 1: <strong id="astar-tp1" style="color:var(--accent-green);">$4,054.40 (1:1.5 RR)</strong></div>
+                <div>TAKE PROFIT 2: <strong id="astar-tp2" style="color:var(--accent-green);">$4,038.15 (1:2.8 RR)</strong></div>
+              </div>
+              <div style="border-top:1px solid #222; padding-top:10px; font-size:11px;">
+                <div>RECOMMENDED LOT FOR $1,000 EQUITY: <strong id="astar-lot" style="color:var(--accent-amber);">0.03 LOT</strong></div>
+                <div style="font-size:10px; color:var(--fg-muted); margin-top:4px;">
+                  Max Risk Budget: $30.00 (3.0% of equity). Strict single-trade discipline.
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </div> <!-- End #tab-astar -->
+
+    <!-- ==================== TAB 06: US CALENDAR ==================== -->
+    <div class="tab-pane" id="tab-calendar">
+      <div class="grid-box">
+        <div class="grid-box-header">
+          <span>[ U.S. HIGH-IMPACT MACROECONOMIC CALENDAR ]</span>
+          <span style="color:var(--fg-muted);">VERIFIED INSTITUTIONAL RELEASES</span>
+        </div>
+        <div class="grid-box-body">
+          <div class="data-table-wrap">
+            <table class="brutal-table">
+              <thead>
+                <tr>
+                  <th>DATE</th>
+                  <th>TIME</th>
+                  <th>EVENT NAME</th>
+                  <th>IMPACT</th>
+                  <th>CATEGORY</th>
+                  <th>ACTUAL</th>
+                  <th>FORECAST</th>
+                  <th>PREVIOUS</th>
+                  <th>GOLD (XAUUSD) TRANSMISSION EFFECT</th>
+                </tr>
+              </thead>
+              <tbody id="cal-tbody">
+                <!-- Injected via app.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div> <!-- End #tab-calendar -->
   </main>
 
   <!-- Industrial Footer -->
@@ -672,6 +1044,7 @@
     <div>STRICT EMPIRICAL STANDARDS // WHITE HC3 COVARIANCE // ZERO-SLOP INTERFACE</div>
   </footer>
 
-  <script src="/static/gsap.min.js?v=2.7.0"></script>
-  <script src="/static/app.js?v=2.7.0"></script>
+  <script src="/static/gsap.min.js?v=3.0.0"></script>
+  <script src="/static/app.js?v=3.0.0"></script>
+</body>
 </html>

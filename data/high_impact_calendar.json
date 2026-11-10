@@ -1,0 +1,93 @@
+[
+  {
+    "event_id": "cpi_oct26",
+    "title": "Consumer Price Index (CPI) MoM",
+    "country": "USD",
+    "date": "2026-11-10",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "HIGH",
+    "actual": "0.4%",
+    "forecast": "0.3%",
+    "previous": "0.6%",
+    "category": "INFLATION",
+    "effect_xauusd": "HAWKISH SHOCK (-$39.00 DROP TO $4,042)"
+  },
+  {
+    "event_id": "core_cpi_oct26",
+    "title": "Core CPI (MoM) Less Food & Energy",
+    "country": "USD",
+    "date": "2026-11-10",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "HIGH",
+    "actual": "0.3%",
+    "forecast": "0.2%",
+    "previous": "0.3%",
+    "category": "INFLATION",
+    "effect_xauusd": "STICKY SERVICES SURPRISE (RATE CUTS DELAYED)"
+  },
+  {
+    "event_id": "ppi_oct26",
+    "title": "Producer Price Index (PPI) Final Demand MoM",
+    "country": "USD",
+    "date": "2026-11-12",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "HIGH",
+    "actual": "",
+    "forecast": "0.2%",
+    "previous": "0.1%",
+    "category": "INFLATION",
+    "effect_xauusd": "LEADING WHOLESALE COST PIPELINE"
+  },
+  {
+    "event_id": "claims_nov12",
+    "title": "Initial Jobless Claims",
+    "country": "USD",
+    "date": "2026-11-12",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "MEDIUM-HIGH",
+    "actual": "",
+    "forecast": "218K",
+    "previous": "221K",
+    "category": "LABOR",
+    "effect_xauusd": "WEEKLY LABOR MARKET VELOCITY"
+  },
+  {
+    "event_id": "retail_oct26",
+    "title": "Advance Retail Sales MoM",
+    "country": "USD",
+    "date": "2026-11-17",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "HIGH",
+    "actual": "",
+    "forecast": "0.4%",
+    "previous": "0.7%",
+    "category": "CONSUMER_DEMAND",
+    "effect_xauusd": "U.S. CONSUMER RESILIENCE & GDP TRACKER"
+  },
+  {
+    "event_id": "nfp_nov26",
+    "title": "Non-Farm Payrolls (NFP) Employment Change",
+    "country": "USD",
+    "date": "2026-12-04",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "HIGH",
+    "actual": "",
+    "forecast": "175K",
+    "previous": "210K",
+    "category": "LABOR",
+    "effect_xauusd": "FED DUAL-MANDATE LABOR FOUNDATION"
+  },
+  {
+    "event_id": "fomc_dec26",
+    "title": "FOMC Interest Rate Decision & Summary of Economic Projections (Dot Plot)",
+    "country": "USD",
+    "date": "2026-12-16",
+    "time": "02:00 PM EST (02:00 WIB next day)",
+    "impact": "MAXIMUM",
+    "actual": "",
+    "forecast": "5.00%",
+    "previous": "5.00%",
+    "category": "CENTRAL_BANK",
+    "effect_xauusd": "GLOBAL MACRO BENCHMARK (DOT PLOT TERMINAL PATH)"
+  }
+]

@@ -8,13 +8,23 @@ let modelData = {};
 let tomorrowMeta = {};
 let macroSummary = {};
 
-document.addEventListener("DOMContentLoaded", () => {
+function initApp() {
   initClock();
   fetchInitialData();
   setupSimulationListeners();
   initLiveSyncButton();
   initGsapEntrances();
-});
+  initTabs();
+  initMasterRefresh();
+  initManualCalculators();
+  fetchCalendarData();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
+}
 
 function initGsapEntrances() {
   if (typeof gsap === "undefined") return;
@@ -1123,5 +1133,269 @@ function handleOfficialRelease(data) {
 
   if (isNew) {
     executeDeepSeekMemo("post_news", data.actual_mom, data.actual_core_yoy);
+  }
+}
+
+// ==================== MULTI-TAB & MODULE NAVIGATION ====================
+function initTabs() {
+  const tabs = document.querySelectorAll(".nav-tab-btn");
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      const targetId = tab.getAttribute("data-tab");
+      tabs.forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+
+      const panes = document.querySelectorAll(".tab-pane");
+      panes.forEach(p => p.classList.remove("active"));
+
+      const targetPane = document.getElementById(targetId);
+      if (targetPane) {
+        targetPane.classList.add("active");
+        if (typeof gsap !== "undefined") {
+          gsap.fromTo(targetPane, { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.35, ease: "power2.out" });
+        }
+      }
+    });
+  });
+}
+
+// ==================== MASTER REFRESH BUTTON ====================
+function initMasterRefresh() {
+  const btn = document.getElementById("btn-master-refresh");
+  const astarRecalc = document.getElementById("btn-recalc-astar");
+
+  async function doMasterRefresh() {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = "⏳ REFRESHING ALL...";
+    }
+    try {
+      const res = await fetch("/api/refresh-all", { method: "POST" });
+      const data = await res.json();
+      if (data.status === "SUCCESS") {
+        if (data.prices) updateTickerPrices(data.prices);
+        if (data.daily_a_star && data.dynamic_levels) {
+          updateDailyASetup(data.daily_a_star, data.dynamic_levels);
+        }
+      }
+    } catch (e) {
+      console.error("Master refresh failed:", e);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerText = "🔄 REFRESH ALL LIVE DATA";
+      }
+    }
+  }
+
+  if (btn) btn.addEventListener("click", doMasterRefresh);
+  if (astarRecalc) astarRecalc.addEventListener("click", doMasterRefresh);
+}
+
+function updateDailyASetup(aStar, dyn) {
+  const pEl = document.getElementById("astar-live-price");
+  const gradeEl = document.getElementById("astar-live-grade");
+  const r3 = document.getElementById("dyn-r3");
+  const r2 = document.getElementById("dyn-r2");
+  const r1 = document.getElementById("dyn-r1");
+  const s1 = document.getElementById("dyn-s1");
+  const s2 = document.getElementById("dyn-s2");
+  const s3 = document.getElementById("dyn-s3");
+
+  const entry = document.getElementById("astar-entry");
+  const sl = document.getElementById("astar-sl");
+  const tp1 = document.getElementById("astar-tp1");
+  const tp2 = document.getElementById("astar-tp2");
+  const lot = document.getElementById("astar-lot");
+
+  if (pEl) animateNumber(pEl, dyn.current_price, "$", "", 2);
+  if (gradeEl) gradeEl.innerText = `${aStar.grade} // ${aStar.confluence_score}/100`;
+  if (r3) r3.innerText = `$${dyn.resistance.r3.toFixed(2)}`;
+  if (r2) r2.innerText = `$${dyn.resistance.r2.toFixed(2)}`;
+  if (r1) r1.innerText = `$${dyn.resistance.r1.toFixed(2)}`;
+  if (s1) s1.innerText = `$${dyn.support.s1.toFixed(2)}`;
+  if (s2) s2.innerText = `$${dyn.support.s2.toFixed(2)}`;
+  if (s3) s3.innerText = `$${dyn.support.s3.toFixed(2)}`;
+
+  if (entry) entry.innerText = aStar.trade_ticket.entry_zone;
+  if (sl) sl.innerText = aStar.trade_ticket.stop_loss;
+  if (tp1) tp1.innerText = aStar.trade_ticket.take_profit_1;
+  if (tp2) tp2.innerText = aStar.trade_ticket.take_profit_2;
+  if (lot) lot.innerText = `${aStar.trade_ticket.recommended_lot_size_1000_equity} LOT`;
+}
+
+// ==================== MANUAL INPUT OVERRIDE CALCULATORS ====================
+function initManualCalculators() {
+  // 1. CPI Manual Calculator
+  const btnCpi = document.getElementById("btn-manual-cpi-calc");
+  if (btnCpi) {
+    btnCpi.addEventListener("click", async () => {
+      const act = parseFloat(document.getElementById("manual-cpi-act").value);
+      const fcst = parseFloat(document.getElementById("manual-cpi-fcst").value);
+      const coreAct = parseFloat(document.getElementById("manual-cpi-core-act").value);
+      const coreFcst = parseFloat(document.getElementById("manual-cpi-core-fcst").value);
+
+      try {
+        const res = await fetch("/api/manual-calc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event_type: "cpi",
+            actual: act,
+            forecast: fcst,
+            extra_actual: coreAct,
+            extra_forecast: coreFcst
+          })
+        });
+        const data = await res.json();
+        if (data.result) {
+          handleOfficialRelease({
+            status: "RELEASED",
+            source: "MANUAL OVERRIDE INPUT",
+            timestamp: new Date().toISOString().substring(11, 19) + " UTC",
+            actual_mom: act,
+            actual_core_yoy: coreAct,
+            simulation: data.result
+          });
+        }
+      } catch (err) {
+        console.error("Manual CPI calc error:", err);
+      }
+    });
+  }
+
+  // 2. FOMC Manual Calculator
+  const btnFomc = document.getElementById("btn-manual-fomc-calc");
+  if (btnFomc) {
+    btnFomc.addEventListener("click", async () => {
+      const act = parseFloat(document.getElementById("manual-fomc-act").value);
+      const priced = parseFloat(document.getElementById("manual-fomc-priced").value);
+      const dots = parseFloat(document.getElementById("manual-fomc-dots").value);
+
+      try {
+        const res = await fetch("/api/manual-calc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ event_type: "fomc", actual: act, forecast: priced, extra_actual: dots })
+        });
+        const data = await res.json();
+        const m = data.result.metrics;
+        document.getElementById("fomc-out-shock").innerText = (m.total_policy_shock_bps > 0 ? "+" : "") + m.total_policy_shock_bps + " bps";
+        document.getElementById("fomc-out-gold").innerText = (m.expected_gold_return_pct > 0 ? "+" : "") + m.expected_gold_return_pct + "%";
+        document.getElementById("fomc-out-dxy").innerText = (m.expected_dxy_return_pct > 0 ? "+" : "") + m.expected_dxy_return_pct + "%";
+        document.getElementById("fomc-out-stance").innerText = m.stance;
+        document.getElementById("fomc-signal-title").innerText = m.tactical_signal;
+
+        const box = document.getElementById("fomc-signal-box");
+        box.className = "signal-box " + (m.tactical_signal.includes("SHORT") ? "signal-strong-short" : (m.tactical_signal.includes("LONG") ? "signal-strong-long" : "signal-neutral"));
+      } catch (e) {
+        console.error("FOMC calc error:", e);
+      }
+    });
+  }
+
+  // 3. NFP Manual Calculator
+  const btnNfp = document.getElementById("btn-manual-nfp-calc");
+  if (btnNfp) {
+    btnNfp.addEventListener("click", async () => {
+      const nfpAct = parseFloat(document.getElementById("manual-nfp-act").value);
+      const nfpFcst = parseFloat(document.getElementById("manual-nfp-fcst").value);
+      const unempAct = parseFloat(document.getElementById("manual-nfp-unemp").value);
+      const unempFcst = parseFloat(document.getElementById("manual-nfp-unemp-fcst").value);
+      const wages = parseFloat(document.getElementById("manual-nfp-wages").value);
+
+      try {
+        const res = await fetch("/api/manual-calc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event_type: "nfp",
+            actual: nfpAct,
+            forecast: nfpFcst,
+            extra_actual: unempAct,
+            extra_forecast: unempFcst,
+            ahe_actual: wages,
+            ahe_forecast: 0.3
+          })
+        });
+        const data = await res.json();
+        const m = data.result.metrics;
+        document.getElementById("nfp-out-z").innerText = (m.z_score_composite_labor > 0 ? "+" : "") + m.z_score_composite_labor + " σ";
+        document.getElementById("nfp-out-gold").innerText = (m.expected_gold_return_pct > 0 ? "+" : "") + m.expected_gold_return_pct + "%";
+        document.getElementById("nfp-out-dxy").innerText = (m.expected_dxy_return_pct > 0 ? "+" : "") + m.expected_dxy_return_pct + "%";
+        document.getElementById("nfp-out-regime").innerText = m.regime;
+        document.getElementById("nfp-signal-title").innerText = m.tactical_signal;
+
+        const box = document.getElementById("nfp-signal-box");
+        box.className = "signal-box " + (m.tactical_signal.includes("SHORT") ? "signal-strong-short" : (m.tactical_signal.includes("LONG") ? "signal-strong-long" : "signal-neutral"));
+      } catch (e) {
+        console.error("NFP calc error:", e);
+      }
+    });
+  }
+
+  // 4. PPI & Retail Sales Manual Calculator
+  const btnPpi = document.getElementById("btn-manual-ppi-calc");
+  if (btnPpi) {
+    btnPpi.addEventListener("click", async () => {
+      const ppiAct = parseFloat(document.getElementById("manual-ppi-act").value);
+      const ppiFcst = parseFloat(document.getElementById("manual-ppi-fcst").value);
+      const retAct = parseFloat(document.getElementById("manual-retail-act").value);
+      const retFcst = parseFloat(document.getElementById("manual-retail-fcst").value);
+
+      try {
+        const res = await fetch("/api/manual-calc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event_type: "ppi_retail",
+            actual: ppiAct,
+            forecast: ppiFcst,
+            extra_actual: retAct,
+            extra_forecast: retFcst
+          })
+        });
+        const data = await res.json();
+        const m = data.result.metrics;
+        document.getElementById("ppi-out-z").innerText = (m.composite_z > 0 ? "+" : "") + m.composite_z + " σ";
+        document.getElementById("ppi-out-gold").innerText = (m.expected_gold_return_pct > 0 ? "+" : "") + m.expected_gold_return_pct + "%";
+        document.getElementById("ppi-out-dxy").innerText = (m.expected_dxy_return_pct > 0 ? "+" : "") + m.expected_dxy_return_pct + "%";
+        document.getElementById("ppi-signal-title").innerText = m.tactical_signal;
+
+        const box = document.getElementById("ppi-signal-box");
+        box.className = "signal-box " + (m.tactical_signal.includes("SHORT") ? "signal-strong-short" : (m.tactical_signal.includes("LONG") ? "signal-strong-long" : "signal-neutral"));
+      } catch (e) {
+        console.error("PPI calc error:", e);
+      }
+    });
+  }
+}
+
+// ==================== U.S. HIGH-IMPACT CALENDAR FETCHER ====================
+async function fetchCalendarData() {
+  const tbody = document.getElementById("cal-tbody");
+  if (!tbody) return;
+  try {
+    const res = await fetch("/api/high-impact-calendar");
+    const events = await res.json();
+    tbody.innerHTML = "";
+    events.forEach(ev => {
+      const tr = document.createElement("tr");
+      const impactClass = ev.impact === "MAXIMUM" ? "color:#ff2a2a; font-weight:900;" : (ev.impact === "HIGH" ? "color:#ff5555; font-weight:800;" : "color:#ffaa00; font-weight:700;");
+      tr.innerHTML = `
+        <td><strong>${ev.date}</strong></td>
+        <td>${ev.time}</td>
+        <td><strong style="color:#fff;">${ev.title}</strong></td>
+        <td><span style="${impactClass}">[ ${ev.impact} ]</span></td>
+        <td><span style="font-size:9px; border:1px solid #333; padding:2px 4px;">${ev.category}</span></td>
+        <td style="color:var(--accent-cyan); font-weight:700;">${ev.actual || "-"}</td>
+        <td>${ev.forecast || "-"}</td>
+        <td style="color:#777;">${ev.previous || "-"}</td>
+        <td style="font-size:10px; color:#aaa;">${ev.effect_xauusd}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    console.warn("Calendar load failed:", e);
   }
 }
