@@ -1,0 +1,147 @@
+{
+  "active_setup": {
+    "setup_id": "SETUP-20261111-1747",
+    "created_at_utc": "2026-11-11 15:42:27 UTC",
+    "created_epoch": 1794411747,
+    "expires_epoch": 1794417147,
+    "direction": "BUY",
+    "action": "MOMENTUM BUY CATCH / LONG EXPANSION ON M30 IMPULSE",
+    "ticket_type": "BULLISH_MONTE_CARLO_MOMENTUM",
+    "entry_zone": [
+      4005.57,
+      4046.3
+    ],
+    "stop_loss": 3919.84,
+    "take_profit_1": 4059.6,
+    "take_profit_2": 4078.6,
+    "planned_rr": "1:0.63",
+    "recommended_lot": 0.03,
+    "status": "PENDING_TRIGGER",
+    "fill_price": null,
+    "fill_timestamp": null,
+    "trailed_sl": null,
+    "highest_seen": 4003.7,
+    "lowest_seen": 4003.57,
+    "floating_pnl_usd": 0.0,
+    "floating_r": 0.0,
+    "realized_r": null,
+    "realized_pnl_usd": null,
+    "resolution": null
+  },
+  "completed_setups": [
+    {
+      "setup_id": "SETUP-20261111-6337",
+      "created_at_utc": "2026-11-11 14:12:17 UTC",
+      "created_epoch": 1794406337,
+      "expires_epoch": 1794411737,
+      "direction": "BUY",
+      "action": "MOMENTUM BUY CATCH / LONG EXPANSION ON M30 IMPULSE",
+      "ticket_type": "BULLISH_MONTE_CARLO_MOMENTUM",
+      "entry_zone": [
+        4031.26,
+        4046.3
+      ],
+      "stop_loss": 3958.24,
+      "take_profit_1": 4059.6,
+      "take_profit_2": 4078.6,
+      "planned_rr": "1:0.39",
+      "recommended_lot": 0.03,
+      "status": "INVALIDATED_TIME_DECAY",
+      "fill_price": 4035.0,
+      "fill_timestamp": "2026-11-11 14:14:42 UTC",
+      "trailed_sl": null,
+      "highest_seen": 4050.0,
+      "lowest_seen": 4001.7,
+      "floating_pnl_usd": -93.9,
+      "floating_r": -0.41,
+      "realized_r": null,
+      "realized_pnl_usd": null,
+      "resolution": "Time limit exceeded before entry fill.",
+      "resolved_at": "2026-11-11 15:42:27 UTC"
+    },
+    {
+      "setup_id": "SETUP-20261110-CPI-001",
+      "created_at_utc": "2026-11-10 08:30:00 UTC",
+      "event_type": "OCT_CPI",
+      "direction": "SELL",
+      "action": "SELL RALLIES IN WAVE 2 (HAWKISH SHOCK)",
+      "entry_zone": [
+        4063.5,
+        4068.5
+      ],
+      "stop_loss": 4078.5,
+      "take_profit_1": 4038.5,
+      "take_profit_2": 4015.0,
+      "recommended_lot": 0.03,
+      "status": "FULL_TP_HIT",
+      "fill_price": 4065.2,
+      "exit_price": 4038.5,
+      "realized_r": 2.45,
+      "realized_pnl_usd": 73.5,
+      "resolution": "Full take profit reached during Wave 3 post-announcement drift."
+    },
+    {
+      "setup_id": "SETUP-20261108-ASTAR-002",
+      "created_at_utc": "2026-11-08 14:15:00 UTC",
+      "event_type": "DAILY_ASTAR",
+      "direction": "BUY",
+      "action": "BUY LIMIT / DIP BUY AT S2 DEMAND",
+      "entry_zone": [
+        4026.0,
+        4029.5
+      ],
+      "stop_loss": 4014.0,
+      "take_profit_1": 4046.3,
+      "take_profit_2": 4058.0,
+      "recommended_lot": 0.03,
+      "status": "PARTIAL_TP_HIT",
+      "fill_price": 4027.5,
+      "exit_price": 4046.3,
+      "realized_r": 1.55,
+      "realized_pnl_usd": 46.5,
+      "resolution": "TP1 hit at pivot point. 50% closed, SL moved to BE."
+    },
+    {
+      "setup_id": "SETUP-20261106-NFP-003",
+      "created_at_utc": "2026-11-06 08:30:00 UTC",
+      "event_type": "NOV_NFP",
+      "direction": "SELL",
+      "action": "MOMENTUM SHORT CATCH ON HOT PAYROLLS",
+      "entry_zone": [
+        4072.0,
+        4075.0
+      ],
+      "stop_loss": 4085.0,
+      "take_profit_1": 4042.0,
+      "take_profit_2": 4020.0,
+      "recommended_lot": 0.03,
+      "status": "FULL_TP_HIT",
+      "fill_price": 4073.0,
+      "exit_price": 4042.0,
+      "realized_r": 2.38,
+      "realized_pnl_usd": 71.4,
+      "resolution": "Target hit as 2Y yields surged +6.8 bps."
+    },
+    {
+      "setup_id": "SETUP-20261104-ASTAR-004",
+      "created_at_utc": "2026-11-04 19:30:00 UTC",
+      "event_type": "DAILY_ASTAR",
+      "direction": "BUY",
+      "action": "BUY BREAKOUT AT SESSION PIVOT",
+      "entry_zone": [
+        4048.0,
+        4051.0
+      ],
+      "stop_loss": 4038.0,
+      "take_profit_1": 4065.0,
+      "take_profit_2": 4078.0,
+      "recommended_lot": 0.03,
+      "status": "SL_TOUCHED_LOSS",
+      "fill_price": 4049.0,
+      "exit_price": 4038.0,
+      "realized_r": -1.0,
+      "realized_pnl_usd": -30.0,
+      "resolution": "Stop loss touched on DXY spike. Defined risk absorbed."
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "timestamp": "2026-11-11 00:00:00 UTC",
+  "benchmark": "XAUUSD GOLD SPOT / MULTILATERAL SOVEREIGN DISCOUNT",
+  "global_surprise_index_gsi": 0.82,
+  "global_fiat_debasement_score": 84.5,
+  "sovereigns": {
+    "USD": {
+      "country": "United States",
+      "currency": "USD",
+      "headline_cpi_yoy": 3.1,
+      "core_cpi_yoy": 2.8,
+      "policy_rate": 5.0,
+      "real_policy_rate": 2.2,
+      "tips_10y_real_yield": 2.77,
+      "dxy_weight_pct": 0.0,
+      "gold_transmission_beta": -0.85,
+      "regime": "RESTRICTIVE_HOLD",
+      "impact_on_gold": "Primary sovereign hurdle. Elevated real rates apply negative drift unless inflation surprises to the upside."
+    },
+    "EUR": {
+      "country": "Eurozone",
+      "currency": "EUR",
+      "headline_cpi_yoy": 2.1,
+      "core_cpi_yoy": 2.7,
+      "policy_rate": 3.25,
+      "real_policy_rate": 1.15,
+      "dxy_weight_pct": 57.6,
+      "gold_transmission_beta": 0.62,
+      "regime": "GRADUAL_EASING",
+      "impact_on_gold": "Dominates 57.6% of DXY. ECB rate cuts widen US-EU rate differential, strengthening DXY and creating temporary headwind for XAUUSD."
+    },
+    "JPY": {
+      "country": "Japan",
+      "currency": "JPY",
+      "headline_cpi_yoy": 2.8,
+      "core_cpi_yoy": 2.5,
+      "policy_rate": 0.25,
+      "real_policy_rate": -2.55,
+      "dxy_weight_pct": 13.6,
+      "gold_transmission_beta": 0.78,
+      "regime": "DEEP_NEGATIVE_REAL_RATES",
+      "impact_on_gold": "Deep negative real rates (-2.55%) drive massive domestic gold accumulation. Any BoJ rate hike unwinds carry trades, causing violent global gold volatility."
+    },
+    "GBP": {
+      "country": "United Kingdom",
+      "currency": "GBP",
+      "headline_cpi_yoy": 2.3,
+      "core_cpi_yoy": 3.3,
+      "policy_rate": 4.75,
+      "real_policy_rate": 2.45,
+      "dxy_weight_pct": 11.9,
+      "gold_transmission_beta": 0.42,
+      "regime": "STAGFLATIONARY_HOLD",
+      "impact_on_gold": "Sticky services inflation (3.3%) limits BoE rate cut room, providing bilateral support against dollar dominance."
+    },
+    "CNY": {
+      "country": "China",
+      "currency": "CNY",
+      "headline_cpi_yoy": 0.3,
+      "producer_ppi_yoy": -2.5,
+      "pboc_1y_lpr": 3.1,
+      "real_policy_rate": 2.8,
+      "pboc_gold_reserves_moz": 72.8,
+      "world_gold_demand_share_pct": 32.4,
+      "gold_transmission_beta": 0.88,
+      "regime": "SOVEREIGN_ACCUMULATION",
+      "impact_on_gold": "World's largest physical gold buyer. PBOC continuous reserve accumulation provides structural institutional put option under XAUUSD dips."
+    },
+    "CHF": {
+      "country": "Switzerland",
+      "currency": "CHF",
+      "headline_cpi_yoy": 0.6,
+      "policy_rate": 1.0,
+      "real_policy_rate": 0.4,
+      "dxy_weight_pct": 3.6,
+      "gold_transmission_beta": 0.35,
+      "regime": "LOW_INFLATION_BENCHMARK",
+      "impact_on_gold": "Safe-haven currency competitor. Disinflation in Switzerland reflects global goods deflation trends."
+    }
+  },
+  "transmission_model": {
+    "formula": "r_XAU = beta_0 + beta_US * Z_US + beta_EU * Z_EU + beta_JP * Z_JP + beta_CN * Z_CN + delta * Delta_Real_Rates",
+    "r2_multilateral": 0.482,
+    "f_stat": 24.15,
+    "white_hc3_verified": true
+  }
+}

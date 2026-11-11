@@ -1,26 +1,98 @@
 [
   {
-    "citation": "Andersen, Bollerslev, Diebold & Vega (2003)",
-    "title": "Micro Effects of Macro Announcements: Real-Time Price Discovery in Foreign Exchange",
-    "journal": "American Economic Review, 93(1), 38\u201362",
-    "empirical_finding": "Identified that macro announcements create immediate volatility jumps VR(5) > 5x, with high-frequency price discovery concentrating in the initial 15 minutes before spreads compress."
+    "citation": "White (1980) / MacKinnon & White (1985)",
+    "title": "A Heteroskedasticity-Consistent Covariance Matrix Estimator and a Direct Test for Heteroskedasticity",
+    "journal": "Econometrica / Journal of Econometrics",
+    "method_role": "Method 1.1: White HC3 Small-Sample Covariance & Forecast Margin of Error",
+    "equation": "Omega_HC3 = (X'X)^-1 X' diag(e_i^2 / (1 - h_ii)^2) X (X'X)^-1",
+    "empirical_finding": "Penalizes influential release-day leverage points (h_ii), preventing false t-significance under announcement heteroskedasticity."
   },
   {
-    "citation": "Faust, Rogers, Wang & Wright (2007)",
-    "title": "The High-Frequency Response of Exchange Rates and Interest Rates to Macro Announcements",
-    "journal": "Journal of Monetary Economics, 54(4), 1051\u20131068",
-    "empirical_finding": "Proved that asset price discovery around macro surprises operates through the transmission of short-term policy rate expectations (2Y yields) into the real term structure."
+    "citation": "Balduzzi, Elton & Green (2001)",
+    "title": "Economic News and Bond Prices: An Empirical Analysis of Real-Time Data",
+    "journal": "Journal of Financial and Quantitative Analysis, 36(4), 523\u2013543",
+    "method_role": "Method 1.2 & 3.1: Multi-Attribute Component Standardization",
+    "equation": "Z_k = (Actual_k - Forecast_k) / max(sigma_survey, sigma_hist)",
+    "empirical_finding": "Removes unit-of-measurement distortions across headline, core, and wage surprises into scale-invariant standard deviation shocks."
   },
   {
-    "citation": "Christie-David, Chaudhry & Koch (2000)",
-    "title": "Do Macro Announcements Affect Gold and Silver Futures Markets?",
-    "journal": "Journal of Futures Markets, 20(8), 705\u2013721",
-    "empirical_finding": "Established that CPI surprises generate the strongest variance jumps in Gold futures among all macroeconomic releases, significantly exceeding employment and trade balance reports."
+    "citation": "Gelman, Carlin, Stern & Rubin (2013)",
+    "title": "Bayesian Data Analysis (3rd Edition)",
+    "journal": "Chapman & Hall / CRC Texts in Statistical Science",
+    "method_role": "Method 1.3 & 3.3: Bayesian Conjugate Gaussian Prior-to-Posterior Updating",
+    "equation": "mu_post = (tau_0*mu_0 + sum(tau_i*x_i)) / (tau_0 + sum(tau_i)),  sigma_post = 1 / sqrt(tau_post)",
+    "empirical_finding": "Synthesizes historical base rates with high-frequency leading evidence (Cleveland Nowcast, WTI Oil, ADP) to calculate exact probability density regimes."
   },
   {
-    "citation": "Modi & Zaratiegui (2024)",
-    "title": "The Perceived Sources of Unexpected Inflation",
-    "journal": "Working Paper / Econometric Research",
-    "empirical_finding": "Demonstrated that discrete consensus rounding errors (0.1 pp increments) create spurious noise in naive linear models, necessitating standardized Z-score filtering."
+    "citation": "Merton (1976) / Kou (2002) / Andersen et al. (2003)",
+    "title": "Option Pricing When Underlying Stock Returns Are Discontinuous / Jump-Diffusion Models",
+    "journal": "Journal of Financial Economics / Management Science",
+    "method_role": "Method 1.4: Merton-Kou Jump-Diffusion SDE with Volatility Decay",
+    "equation": "dS_t / S_t = (mu - lambda*kappa) dt + sigma(t) dW_t + J_t dN_t,  sigma(t) = sigma_0 * (1 + kappa * e^(-t/tau))",
+    "empirical_finding": "Captures post-announcement conditional price jumps with exponentially decaying volatility, generating calibrated 95% VaR and CVaR."
+  },
+  {
+    "citation": "G\u00fcrkaynak, Sack & Swanson (2005)",
+    "title": "Do Actions Speak Louder Than Words? The Response of Asset Prices to Monetary Policy Actions and Statements",
+    "journal": "American Economic Review, 95(1), 55\u201373",
+    "method_role": "Method 2.1: Two-Factor Decomposition (Target Factor vs Path Factor)",
+    "equation": "Delta ln(P_Gold) = gamma_0 + gamma_1 * Target_Factor + gamma_2 * Path_Factor + epsilon",
+    "empirical_finding": "Proved that the forward-guidance/Dot Plot path factor accounts for over 70% of asset price variance, dominating immediate target rate decisions."
+  },
+  {
+    "citation": "Kuttner (2001)",
+    "title": "Monetary Policy Surprises and Interest Rates: Evidence from the Fed Funds Futures Market",
+    "journal": "Journal of Monetary Economics, 47(3), 523\u2013544",
+    "method_role": "Method 2.2: Fed Funds Futures Implied Rate Surprise & Bid-Ask Noise Bound",
+    "equation": "Delta r^u = (D / (D - d_t)) * (f_t - f_t-1),  MoE = +- (D / (D - d_t)) * 0.005%",
+    "empirical_finding": "Calculates unexpected policy rate adjustments from 30-Day Fed Funds Futures with strict noise-filtering thresholds."
+  },
+  {
+    "citation": "Hamilton (1989) / Dueker (1997)",
+    "title": "A New Approach to the Economic Analysis of Nonstationary Time Series and the Business Cycle",
+    "journal": "Econometrica, 57(2), 357\u2013384",
+    "method_role": "Method 2.3: Multinomial Logistic / Probit Policy Regime Shift Classifier",
+    "equation": "P(Regime_j | X) = exp(X*beta_j) / sum_k(exp(X*beta_k)),  Wald_MoE = +- 1.96 * SE(eta)",
+    "empirical_finding": "Quantifies the probability transitions between Hawkish Hike, Consensus Pause, and Dovish Cut regimes."
+  },
+  {
+    "citation": "Andersen, Bollerslev, Diebold & Vega (2007)",
+    "title": "Real-Time Price Discovery in Global Stock, Bond and Foreign Exchange Markets",
+    "journal": "Journal of International Economics, 73(2), 251\u2013277",
+    "method_role": "Method 3.1 & 3.4: Labor Market High-Frequency Volatility Jump Ratio VR(w)",
+    "equation": "VR(w) = sum(r_{T0+k}^2) / sum(r_{T0-k}^2),  S(t) = S_base * (1 + psi * VR(w) * e^(-lambda*t))",
+    "empirical_finding": "Establishes empirical spread blowout firewall criteria during Wave 1 (T0 to T+3m) before liquidity stabilizes in Wave 2."
+  },
+  {
+    "citation": "Koenker & Bassett (1978) / Cenesizoglu & Dzhumashev (2014)",
+    "title": "Regression Quantiles / The Asymmetric Response of Asset Prices to Macro Surprises",
+    "journal": "Econometrica / Journal of Empirical Finance",
+    "method_role": "Method 3.2: High-Frequency Quantile Event-Study Regression",
+    "equation": "min_{beta_tau} sum rho_tau(y_i - x_i'*beta_tau),  Width_{80%} = Q_{0.90} - Q_{0.10}",
+    "empirical_finding": "Models asymmetric tail risk in precious metals without assuming normal error distributions."
+  },
+  {
+    "citation": "Clark (1995)",
+    "title": "Do Producer Prices Lead Consumer Prices?",
+    "journal": "Federal Reserve Bank of Kansas City Economic Review, 80(3), 25\u201339",
+    "method_role": "Method 4.1: Upstream Cost Pass-Through Autoregressive Distributed Lag (ARDL)",
+    "equation": "Delta ln(P_Gold) = mu + sum(alpha_i * Delta PPI_{t-i}) + sum(beta_j * Delta Retail_{t-j}) + delta * Delta y_{2Y}",
+    "empirical_finding": "Identifies wholesale goods pipeline cost transmission into market breakeven inflation expectations."
+  },
+  {
+    "citation": "Scotti (2016)",
+    "title": "Surprise and Uncertainty Indexes: Real-Time Aggregation of Real-Activity Macro-Surprises",
+    "journal": "Journal of Monetary Economics, 82, 1\u201319",
+    "method_role": "Method 4.2: Dynamic Real Activity & Consumer Demand Surprise Index",
+    "equation": "Z_Demand = omega_PPI * Z_PPI + omega_Retail * Z_Retail,  MoE = +- 1.96 * sigma_survey",
+    "empirical_finding": "Aggregates real consumer spending and wholesale production surprises to identify stagflationary vs recessionary regimes."
+  },
+  {
+    "citation": "Hamilton (2003) / Kilian (2009)",
+    "title": "What is an Oil Shock? / Not All Oil Price Shocks Are Alike",
+    "journal": "Journal of Econometrics / American Economic Review",
+    "method_role": "Method 5.1: Non-Linear Geopolitical Energy & Commodity Beta Engine",
+    "equation": "Delta ln(P_Gold) = theta_0 + theta_1 * max(0, ln(WTI_t) - max(ln(WTI_{t-12}))) + theta_2 * Delta VIX + theta_3 * Delta DXY",
+    "empirical_finding": "Proves that exogenous geopolitical energy supply shocks produce significant positive beta in gold safe-haven premiums."
   }
 ]

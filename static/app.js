@@ -1,46 +1,98 @@
 /**
- * NEWSLYSER // CLIENT TELEMETRY & ENGINE CONTROLLER
- * Zero-dependency pure JavaScript for mathematical charts and live interactive simulation.
+ * NEWSLYSER // BLOOMBERG PROFESSIONAL TERMINAL WORKSTATION [PORT 8889 & 8888]
+ * Authentic Monochrome White-on-Black Architecture.
+ * Complete 9-Module Institutional Macro Suite with GSAP & Framer Motion.
  */
 
-let historicalData = [];
-let modelData = {};
-let tomorrowMeta = {};
-let macroSummary = {};
+let currentZ = 1.33;
+let currentHorizon = 1;
+let currentPdfEvent = "cpi";
+let currentTransAsset = "gold";
+let currentDiagView = "tcurve";
+let currentAiMode = "pre_news";
+let waveTimer = null;
+let maximizedPaneId = null;
 
-function initApp() {
+// YoY visibility toggles
+let yoySeries = { headline: true, core: true, supercore: true, shelter: true };
+
+// Data caches
+let stateCache = null;
+let pdfCache = null;
+let mcCache = null;
+let freqCache = null;
+let transCache = null;
+let diagCache = null;
+let ttlTimerInterval = null;
+
+function init() {
   initClock();
-  fetchInitialData();
-  setupSimulationListeners();
-  initLiveSyncButton();
-  initGsapEntrances();
-  initTabs();
-  initMasterRefresh();
-  initManualCalculators();
+  initModuleNavigation();
+  initTopSliders();
+  initControls();
+  initAuditToggle();
+  initKeyboardShortcuts();
+  initFomcSliders();
+  initNfpSliders();
+  initPpiSliders();
+  initDeepSeekControls();
+  initYoyControls();
+
+  // Initial data fetches
+  fetchState();
+  fetchAuditLedger();
   fetchCalendarData();
+  fetchAcademicLit();
+  fetchFomcData();
+  fetchNfpData();
+  fetchPpiData();
+  fetchAstarData();
+  initAutoRefreshLoop();
+
+  // Render initial CPI workstation panes
+  renderPdfPane();
+  renderMcPane();
+  renderFreqPane();
+  renderTransPane();
+  renderDiagPane();
+
+  // Staggered pane entrance
+  if (window.Motion) {
+    const { animate, stagger } = window.Motion;
+    animate(".bbg-pane", { opacity: [0, 1], y: [10, 0] }, { delay: stagger(0.03), duration: 0.35 });
+  } else if (typeof gsap !== "undefined") {
+    gsap.from(".bbg-pane", { opacity: 0, y: 10, stagger: 0.04, duration: 0.4, ease: "power2.out" });
+  }
 }
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initApp);
-} else {
-  initApp();
+function initClock() {
+  const clockEl = document.getElementById("live-clock");
+  function tick() {
+    if (clockEl) {
+      clockEl.innerText = new Date().toISOString().replace("T", " ").substring(0, 19) + " UTC";
+    }
+  }
+  tick();
+  setInterval(tick, 1000);
 }
 
-function initGsapEntrances() {
-  if (typeof gsap === "undefined") return;
-  gsap.from(".top-nav", { opacity: 0, y: -16, duration: 0.6, ease: "power2.out" });
-  gsap.from(".ticker-item", { opacity: 0, y: -10, stagger: 0.04, duration: 0.6, delay: 0.15, ease: "power2.out" });
-  gsap.from(".grid-box", { opacity: 0, y: 18, stagger: 0.08, duration: 0.7, delay: 0.25, ease: "power2.out" });
-}
-
-function animateNumber(el, targetVal, prefix="", suffix="", decimals=2, duration=0.8) {
+function animateNumber(el, targetVal, prefix="", suffix="", decimals=2, duration=0.6) {
   if (!el) return;
+  const rawCurrent = el.innerText.replace(/[^0-9.-]/g, "");
+  const current = parseFloat(rawCurrent) || 0;
+
   if (typeof gsap === "undefined") {
     el.innerText = `${prefix}${targetVal.toFixed(decimals)}${suffix}`;
     return;
   }
-  const rawCurrent = el.innerText.replace(/[^0-9.-]/g, "");
-  const current = parseFloat(rawCurrent) || 0;
+
+  if (Math.abs(targetVal - current) > 1e-4) {
+    gsap.fromTo(el, 
+      { textShadow: "0 0 8px #ffffff", color: "#ffffff" },
+      { textShadow: "none", color: "var(--fg-bright)", duration: 0.7, ease: "power2.out" }
+    );
+  }
+
   const obj = { val: current };
   gsap.to(obj, {
     val: targetVal,
@@ -52,312 +104,446 @@ function animateNumber(el, targetVal, prefix="", suffix="", decimals=2, duration
   });
 }
 
-function initClock() {
-  const clockEl = document.getElementById("live-clock");
-  function tick() {
-    const now = new Date();
-    if (clockEl) {
-      clockEl.innerText = now.toISOString().replace("T", " ").substring(0, 19) + " UTC";
+// ==============================================================
+// 1. TOP-LEVEL MODULE NAVIGATION
+// ==============================================================
+function initModuleNavigation() {
+  const titles = {
+    "mod-cpi": "CPI.XAU <GO>",
+    "mod-fomc": "FOMC.RATE <GO>",
+    "mod-nfp": "JOBS.NFP <GO>",
+    "mod-ppi": "PPI.DEMAND <GO>",
+    "mod-astar": "ASTR.SETUP <GO>",
+    "mod-cal": "ECO.CAL <GO>",
+    "mod-ai": "AI.MEMO <GO>",
+    "mod-yoy": "TIMELN.YOY <GO>",
+    "mod-lit": "LIT.ACADEMIC <GO>"
+  };
+
+  const navBtns = document.querySelectorAll(".nav-tab-btn");
+  navBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const modId = btn.getAttribute("data-mod");
+      navBtns.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+
+      document.querySelectorAll(".module-view").forEach(v => v.classList.remove("active"));
+      const activeView = document.getElementById(modId);
+      if (activeView) activeView.classList.add("active");
+
+      const titleEl = document.getElementById("cmd-function-title");
+      if (titleEl && titles[modId]) titleEl.innerText = titles[modId];
+
+      if (window.Motion) {
+        window.Motion.animate(activeView, { opacity: [0, 1], y: [6, 0] }, { duration: 0.25 });
+      }
+
+      // Execute loaders when module is selected
+      if (modId === "mod-cpi") { renderPdfPane(); renderMcPane(); renderFreqPane(); renderTransPane(); renderDiagPane(); }
+      else if (modId === "mod-fomc") renderFomcWorkstation();
+      else if (modId === "mod-nfp") renderNfpWorkstation();
+      else if (modId === "mod-ppi") renderPpiWorkstation();
+      else if (modId === "mod-astar") fetchAstarData();
+      else if (modId === "mod-cal") fetchCalendarData();
+      else if (modId === "mod-yoy") renderYoyTimeline();
+      else if (modId === "mod-lit") fetchAcademicLit();
+    });
+  });
+}
+
+// ==============================================================
+// 2. CONTROLS, SLIDERS & FIREWALL
+// ==============================================================
+function initTopSliders() {
+  const rHeadline = document.getElementById("bbg-range-headline");
+  const rCore = document.getElementById("bbg-range-core");
+  const vHeadline = document.getElementById("bbg-val-headline");
+  const vCore = document.getElementById("bbg-val-core");
+  const vShock = document.getElementById("bbg-val-shock");
+  const vRegime = document.getElementById("bbg-val-regime");
+
+  function onSliderChange() {
+    const hl = parseFloat(rHeadline.value);
+    const core = parseFloat(rCore.value);
+
+    vHeadline.innerText = `${hl.toFixed(2)}%`;
+    vCore.innerText = `${core.toFixed(2)}%`;
+
+    const fHl = 0.3, fCore = 2.8, sd = 0.075;
+    const zHl = (hl - fHl) / sd;
+    const zCore = (core - fCore) / sd;
+    const zComp = 0.60 * zCore + 0.40 * zHl;
+    currentZ = zComp;
+
+    vShock.innerText = `${zComp > 0 ? "+" : ""}${zComp.toFixed(2)}σ`;
+    vShock.style.color = zComp > 0.8 ? "var(--amber-cmd)" : (zComp < -0.8 ? "#ffffff" : "var(--fg-normal)");
+
+    let regime = "IN-LINE NOISE";
+    if (zComp >= 1.5) regime = "HAWKISH EXPANSION DRIFT";
+    else if (zComp >= 0.8) regime = "HAWKISH SURPRISE";
+    else if (zComp <= -1.5) regime = "DOVISH REVERSAL TREND";
+    else if (zComp <= -0.8) regime = "DOVISH RELIEF";
+    vRegime.innerText = regime;
+
+    renderPdfPane();
+    renderMcPane();
+    renderFreqPane();
+    executeSimulate(hl, core);
+  }
+
+  rHeadline?.addEventListener("input", onSliderChange);
+  rCore?.addEventListener("input", onSliderChange);
+}
+
+function initControls() {
+  document.getElementById("bbg-btn-horizon-1d")?.addEventListener("click", (e) => {
+    setBtnActive(e.target, "#bbg-btn-horizon-1d, #bbg-btn-horizon-5d");
+    currentHorizon = 1;
+    renderMcPane();
+  });
+
+  document.getElementById("bbg-btn-horizon-5d")?.addEventListener("click", (e) => {
+    setBtnActive(e.target, "#bbg-btn-horizon-1d, #bbg-btn-horizon-5d");
+    currentHorizon = 5;
+    renderMcPane();
+  });
+
+  document.getElementById("bbg-btn-firewall")?.addEventListener("click", () => {
+    triggerFirewallCountdown(60);
+  });
+
+  document.getElementById("bbg-btn-reset")?.addEventListener("click", () => {
+    const rH = document.getElementById("bbg-range-headline");
+    const rC = document.getElementById("bbg-range-core");
+    if (rH && rC) {
+      rH.value = 0.4;
+      rC.value = 3.4;
+      rH.dispatchEvent(new Event("input"));
     }
-  }
-  tick();
-  setInterval(tick, 1000);
+  });
+
+  document.getElementById("btn-sync-live")?.addEventListener("click", () => {
+    const btn = document.getElementById("btn-sync-live");
+    btn.innerText = "SYNCING B-PIPE...";
+    fetchState().then(() => {
+      fetchAstarData();
+      setTimeout(() => { btn.innerText = "SYNC LIVE <GO>"; }, 700);
+    });
+  });
+
+  document.querySelectorAll("[data-z]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      setBtnActive(e.target, "[data-z]");
+      currentZ = parseFloat(e.target.getAttribute("data-z"));
+      document.getElementById("bbg-val-shock").innerText = `${currentZ > 0 ? "+" : ""}${currentZ.toFixed(2)}σ`;
+      renderMcPane();
+      renderFreqPane();
+    });
+  });
+
+  document.querySelectorAll("[data-toggle]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      setBtnActive(e.target, "[data-toggle]");
+      const ev = e.target.getAttribute("data-toggle").replace("pdf-", "");
+      currentPdfEvent = ev;
+      renderPdfPane();
+    });
+  });
+
+  document.querySelectorAll("[data-asset]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      setBtnActive(e.target, "[data-asset]");
+      currentTransAsset = e.target.getAttribute("data-asset");
+      renderTransPane();
+    });
+  });
+
+  document.querySelectorAll("[data-diag]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      setBtnActive(e.target, "[data-diag]");
+      currentDiagView = e.target.getAttribute("data-diag");
+      renderDiagPane();
+    });
+  });
+
+  // Maximize toggle [+]
+  document.querySelectorAll(".btn-maximize").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      const paneId = e.target.getAttribute("data-pane");
+      const pane = document.getElementById(paneId);
+      if (!pane) return;
+
+      if (maximizedPaneId === paneId) {
+        pane.classList.remove("maximized");
+        e.target.innerText = "[+]";
+        maximizedPaneId = null;
+      } else {
+        document.querySelectorAll(".bbg-pane").forEach(p => p.classList.remove("maximized"));
+        document.querySelectorAll(".btn-maximize").forEach(b => b.innerText = "[+]");
+        pane.classList.add("maximized");
+        e.target.innerText = "[-]";
+        maximizedPaneId = paneId;
+      }
+
+      setTimeout(() => {
+        if (paneId === "pane-pdf") renderPdfPane();
+        else if (paneId === "pane-mc") renderMcPane();
+        else if (paneId === "pane-freq") renderFreqPane();
+        else if (paneId === "pane-trans") renderTransPane();
+        else if (paneId === "pane-diag") renderDiagPane();
+      }, 50);
+    });
+  });
 }
 
-async function fetchInitialData() {
+function setBtnActive(el, groupSelector) {
+  document.querySelectorAll(groupSelector).forEach(b => b.classList.remove("active"));
+  el.classList.add("active");
+}
+
+function initAuditToggle() {
+  const pairs = [
+    ["audit-toggle-header", "audit-table-scroll", "audit-toggle-icon"],
+    ["fomc-audit-toggle-header", "fomc-audit-table-scroll", "fomc-audit-toggle-icon"],
+    ["nfp-audit-toggle-header", "nfp-audit-table-scroll", "nfp-audit-toggle-icon"],
+    ["ppi-audit-toggle-header", "ppi-audit-table-scroll", "ppi-audit-toggle-icon"],
+    ["astar-audit-toggle-header", "astar-audit-table-scroll", "astar-audit-toggle-icon"]
+  ];
+
+  pairs.forEach(([headId, scrollId, iconId]) => {
+    const head = document.getElementById(headId);
+    const scroll = document.getElementById(scrollId);
+    const icon = document.getElementById(iconId);
+    head?.addEventListener("click", () => {
+      const isHidden = scroll.style.display === "none";
+      scroll.style.display = isHidden ? "block" : "none";
+      if (icon) icon.innerText = isHidden ? "[ - CLICK TO COLLAPSE DATABASE ]" : "[ + CLICK TO EXPAND FULL DATABASE ]";
+    });
+  });
+}
+
+function initKeyboardShortcuts() {
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "F1") { e.preventDefault(); alert("NEWSLYSER B-PIPE TERMINAL // 2SLS HC3 KERNEL // KOU SDE // USE NAV BUTTONS TO SWITCH MACRO MODULES."); }
+    else if (e.key === "F2") { e.preventDefault(); document.getElementById("bbg-range-headline")?.focus(); }
+    else if (e.key === "F3") { e.preventDefault(); document.querySelector("[data-pane='pane-mc']")?.click(); }
+    else if (e.key === "F4") { e.preventDefault(); document.querySelector("[data-pane='pane-trans']")?.click(); }
+    else if (e.key === "F5") { e.preventDefault(); document.querySelector("[data-pane='pane-diag']")?.click(); }
+    else if (e.key === "F6") { e.preventDefault(); document.getElementById("audit-toggle-header")?.click(); }
+    else if (e.key === "F8") { e.preventDefault(); document.getElementById("bbg-btn-reset")?.click(); }
+    else if (e.key === "F12") { e.preventDefault(); document.getElementById("btn-sync-live")?.click(); }
+  });
+}
+
+function triggerFirewallCountdown(seconds = 60) {
+  clearInterval(waveTimer);
+  let timeLeft = seconds;
+  const timerEl = document.getElementById("val-firewall-timer");
+  const statusEl = document.getElementById("val-firewall-status");
+
+  if (timerEl) { timerEl.innerText = `${timeLeft}s`; timerEl.style.color = "#ff4444"; }
+  if (statusEl) { statusEl.innerText = "WAVE 1 // SPREAD BLOWOUT"; statusEl.style.color = "#ff4444"; statusEl.style.borderColor = "#ff4444"; }
+
+  waveTimer = setInterval(() => {
+    timeLeft--;
+    if (timerEl) {
+      if (timeLeft > 0) {
+        timerEl.innerText = `${timeLeft}s`;
+        if (timeLeft <= 15 && statusEl) {
+          statusEl.innerText = "WAVE 1 ENDING: SPREADS COMPRESSING TO 40c";
+        }
+      } else {
+        timerEl.innerText = "WAVE 2";
+        if (statusEl) statusEl.innerText = "WAVE 2 ACTIVE: CHECK 2Y & DXY ALIGNMENT";
+        clearInterval(waveTimer);
+        waveTimer = null;
+      }
+    }
+  }, 1000);
+}
+
+async function fetchState() {
   try {
-    const [histRes, tomRes] = await Promise.all([
-      fetch("/api/historical"),
-      fetch("/api/tomorrow")
-    ]);
-
-    const histJson = await histRes.json();
-    const tomJson = await tomRes.json();
-
-    historicalData = histJson.events || [];
-    modelData = histJson.models || {};
-    tomorrowMeta = tomJson.event || {};
-    macroSummary = tomJson.macro_snapshots || {};
-
-    try { renderTomorrowBanner(tomorrowMeta); } catch(e) { console.error("banner:", e); }
-    try { renderModelComparison(modelData); } catch(e) { console.error("models:", e); }
-    try { renderHistoricalTable(historicalData); } catch(e) { console.error("table:", e); }
-    try { await renderComponentChart(); } catch(e) { console.error("comp:", e); }
-    try { renderScatterChart(historicalData, modelData); } catch(e) { console.error("scatter:", e); }
-    try { await renderMonteCarloChart(1, 0.0); } catch(e) { console.error("mc:", e); }
-    try { await renderPDFChart(); } catch(e) { console.error("pdf:", e); }
-    try { initMonteCarloControls(); } catch(e) { console.error("mcControls:", e); }
-  } catch (err) {
-    console.error("Data load failed:", err);
+    const res = await fetch("/api/state");
+    const data = await res.json();
+    stateCache = data;
+    const p = data.prices;
+    if (p) {
+      animateNumber(document.getElementById("tick-gold"), p["GC=F"], "$", "", 2);
+      animateNumber(document.getElementById("tick-dxy"), p["DX-Y.NYB"], "", "", 2);
+      animateNumber(document.getElementById("tick-2y"), p["ZT=F"], "", "%", 2);
+      animateNumber(document.getElementById("tick-10y"), p["^TNX"], "", "%", 2);
+      animateNumber(document.getElementById("tick-oil"), p["CL=F"], "$", "", 2);
+    }
+    const av = data.dynamic_levels?.avwap_bands;
+    if (av) {
+      if (document.getElementById("val-ticket-avwap")) document.getElementById("val-ticket-avwap").innerText = `$${av.avwap.toFixed(2)} (±1σ: $${av.upper_1sd.toFixed(0)} / $${av.lower_1sd.toFixed(0)})`;
+      if (document.getElementById("val-ticket-lambda")) document.getElementById("val-ticket-lambda").innerText = `${av.kyles_lambda_illiquidity_proxy.toFixed(4)}% (SLIPPAGE RISK)`;
+    }
+  } catch (e) {
+    console.warn("fetchState failed:", e);
   }
 }
 
-function renderTomorrowBanner(tom) {
-  document.getElementById("tom-date").innerText = tom.date || "2026-11-10";
-  document.getElementById("tom-time").innerText = tom.time || "08:30 AM EST";
-  document.getElementById("tom-forecast-mom").innerText = tom.forecast_mom !== undefined ? `${tom.forecast_mom}%` : "0.3%";
-  document.getElementById("tom-prev-mom").innerText = tom.prev_mom !== undefined ? `${tom.prev_mom}%` : "0.6%";
-  document.getElementById("tom-forecast-core").innerText = tom.forecast_core_yoy !== undefined ? `${tom.forecast_core_yoy}%` : "2.8%";
-  document.getElementById("tom-prev-core").innerText = tom.prev_core_yoy !== undefined ? `${tom.prev_core_yoy}%` : "2.6%";
-  document.getElementById("tom-nowcast-mom").innerText = tom.cleveland_fed_nowcast_mom !== undefined ? `${tom.cleveland_fed_nowcast_mom}%` : "0.28%";
-  document.getElementById("tom-nowcast-core").innerText = tom.cleveland_fed_nowcast_core_mom !== undefined ? `${tom.cleveland_fed_nowcast_core_mom}%` : "0.22%";
-}
-
-function setupSimulationListeners() {
-  const btnPreNews = document.getElementById("btn-run-prenewsmemo");
-  const btnPostNews = document.getElementById("btn-run-postnewsmemo");
-
-  if (btnPreNews) {
-    btnPreNews.addEventListener("click", () => {
-      executeDeepSeekMemo("pre_news");
-    });
-  }
-
-  if (btnPostNews) {
-    btnPostNews.addEventListener("click", () => {
-      executeDeepSeekMemo("post_news");
-    });
-  }
-}
-
-async function runSimulation(actualMom, actualCore) {
-  if (isNaN(actualMom) || isNaN(actualCore)) return;
+async function executeSimulate(actMom, actCoreYoY) {
   try {
     const res = await fetch("/api/simulate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actual_mom: actualMom, actual_core_yoy: actualCore })
-    });
-    const sim = await res.json();
-    renderSimulationOutputs(sim);
-  } catch (err) {
-    console.error("Simulation failed:", err);
-  }
-}
-
-function renderSimulationOutputs(sim) {
-  const s = sim.surprises;
-  const f = sim.model_forecast;
-
-  document.getElementById("out-hl-surprise").innerText = (s.headline_surprise_pp > 0 ? "+" : "") + s.headline_surprise_pp.toFixed(2) + " pp";
-  document.getElementById("out-core-surprise").innerText = (s.core_surprise_pp > 0 ? "+" : "") + s.core_surprise_pp.toFixed(2) + " pp";
-  
-  const zEl = document.getElementById("out-z-comp");
-  zEl.innerText = (s.z_score_composite > 0 ? "+" : "") + s.z_score_composite.toFixed(2) + " σ";
-  zEl.style.color = Math.abs(s.z_score_composite) >= 1.5 ? "var(--accent-red)" : (Math.abs(s.z_score_composite) >= 1.0 ? "var(--accent-cyan)" : "var(--fg-muted)");
-
-  const goldEl = document.getElementById("out-gold-ret");
-  goldEl.innerText = (f.expected_gold_return_pct > 0 ? "+" : "") + f.expected_gold_return_pct.toFixed(2) + "%";
-  goldEl.className = "stat-value " + (f.expected_gold_return_pct > 0 ? "val-up" : (f.expected_gold_return_pct < 0 ? "val-down" : "val-neutral"));
-
-  const dxyEl = document.getElementById("out-dxy-ret");
-  dxyEl.innerText = (f.expected_dxy_return_pct > 0 ? "+" : "") + f.expected_dxy_return_pct.toFixed(2) + "%";
-  dxyEl.className = "stat-value " + (f.expected_dxy_return_pct > 0 ? "val-up" : "val-down");
-
-  document.getElementById("out-2y-bps").innerText = (f.expected_2y_yield_shift_bps > 0 ? "+" : "") + f.expected_2y_yield_shift_bps.toFixed(1) + " bps";
-
-  // Tactical Signal Box
-  const sigBox = document.getElementById("signal-box");
-  const sigTitle = document.getElementById("signal-title");
-  const sigDesc = document.getElementById("signal-desc");
-
-  sigTitle.innerText = f.signal;
-  sigDesc.innerText = f.tactical_action;
-
-  sigBox.className = "signal-box " + (
-    f.signal.includes("SHORT") ? "signal-strong-short" :
-    (f.signal.includes("LONG") ? "signal-strong-long" : "signal-neutral")
-  );
-}
-
-async function executeDeepSeekMemo(mode, actualMom, actualCore) {
-  const terminal = document.getElementById("deepseek-terminal");
-  const btnPre = document.getElementById("btn-run-prenewsmemo");
-  const btnPost = document.getElementById("btn-run-postnewsmemo");
-  
-  const activeBtn = mode === "pre_news" ? btnPre : btnPost;
-  if (activeBtn) {
-    activeBtn.disabled = true;
-    activeBtn.innerText = "[ GENERATING MACRO MEMO... ]";
-  }
-  
-  terminal.innerText = `>>> INITIATING DEEPSEEK V3 QUANTITATIVE MACRO ENGINE [MODE: ${mode.toUpperCase()}]...\n>>> CONNECTING TO API (api.deepseek.com)...\n>>> STRIPPING ALL AI FORMATTING SLOP (ZERO ASTERISKS / PURE TELEMETRY)...\n\n`;
-
-  try {
-    const res = await fetch("/api/deepseek-briefing", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: mode,
-        actual_mom: actualMom !== undefined ? actualMom : (tomorrowMeta.forecast_mom || 0.3),
-        actual_core_yoy: actualCore !== undefined ? actualCore : (tomorrowMeta.forecast_core_yoy || 2.8)
-      })
+      body: JSON.stringify({ actual_mom: actMom, actual_core_yoy: actCoreYoY })
     });
     const data = await res.json();
-    
-    if (data.status === "success") {
-      terminal.innerText = `=== DEEPSEEK V3 INSTITUTIONAL MACRO MEMO // ${mode.toUpperCase()} ===\n` + data.briefing;
-    } else {
-      terminal.innerText += "[ERROR]: " + JSON.stringify(data);
+    const f = data.model_forecast;
+    const d = data.dynamic_execution;
+
+    if (f && d) {
+      const actEl = document.getElementById("val-ticket-action");
+      if (actEl) actEl.innerText = f.signal;
+      if (document.getElementById("val-ticket-entry")) document.getElementById("val-ticket-entry").innerText = d.entry_zone;
+      if (document.getElementById("val-ticket-sl")) document.getElementById("val-ticket-sl").innerText = `${d.stop_loss} (STRUCTURAL CEILING)`;
+      if (document.getElementById("val-ticket-tp")) document.getElementById("val-ticket-tp").innerText = `${d.target} (RR: ${d.risk_reward_ratio})`;
     }
-  } catch (err) {
-    terminal.innerText += "\n[FATAL ERROR]: Failed to reach DeepSeek API: " + err.message;
-  } finally {
-    if (activeBtn) {
-      activeBtn.disabled = false;
-      activeBtn.innerText = mode === "pre_news" ? "GENERATE PRE-NEWS MACRO BRIEFING" : "RUN CONFIRMED POST-NEWS MACRO BRIEFING";
+  } catch (e) {
+    console.warn("executeSimulate failed:", e);
+  }
+}
+
+// ==============================================================
+// 3. PANE RENDERING (PDF, MC, FREQ, TRANS, DIAG)
+// ==============================================================
+async function renderPdfPane() {
+  const container = document.getElementById("canvas-pdf");
+  const hudEl = document.getElementById("hud-pdf");
+  if (!container) return;
+
+  let data = null;
+  try {
+    const res = await fetch(`/api/pdf-distribution?event_type=${currentPdfEvent}`);
+    data = await res.json();
+    pdfCache = data;
+  } catch (e) {
+    console.warn("PDF error:", e);
+    return;
+  }
+
+  const pts = data.points;
+  const w = container.clientWidth || 360;
+  const h = container.clientHeight || 210;
+  const padL = 35;
+  const padR = 35;
+  const padT = 16;
+  const padB = 25;
+
+  const minX = pts[0].x;
+  const maxX = pts[pts.length - 1].x;
+  const maxPdf = Math.max(...pts.map(p => Math.max(p.prior_pdf, p.posterior_pdf))) * 1.15;
+
+  function getX(x) { return padL + ((x - minX) / (maxX - minX)) * (w - padL - padR); }
+  function getY(y) { return padT + (1 - (y / maxPdf)) * (h - padT - padB); }
+
+  const pathPrior = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.prior_pdf).toFixed(1)}`).join(" ");
+  const pathPost = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.posterior_pdf).toFixed(1)}`).join(" ");
+
+  const x0 = getX(0);
+  const xMiss = getX(minX * 0.35);
+  const xBeat = getX(maxX * 0.35);
+  const yZero = getY(0);
+
+  const existingSvg = document.getElementById("svg-pdf");
+  if (existingSvg) {
+    if (typeof gsap !== "undefined") {
+      gsap.to("#pdf-prior-line", { attr: { d: pathPrior }, duration: 0.5, ease: "power2.out" });
+      gsap.to("#pdf-post-line", { attr: { d: pathPost }, duration: 0.5, ease: "power2.out" });
     }
-  }
-}
-
-
-function renderModelComparison(m) {
-  if (!m.baseline_ols || !m.refined_composite) return;
-
-  const base = m.baseline_ols;
-  const ref = m.refined_composite;
-  const reg = m.regime_breakdown;
-
-  document.getElementById("base-formula").innerText = base.formula;
-  document.getElementById("base-r2").innerText = base.r2.toFixed(4);
-  document.getElementById("base-slope").innerText = base.slope.toFixed(3);
-  document.getElementById("base-acc").innerText = base.directional_accuracy_pct + "%";
-
-  document.getElementById("ref-formula").innerText = ref.formula;
-  document.getElementById("ref-r2").innerText = ref.r2.toFixed(4);
-  document.getElementById("ref-slope").innerText = ref.slope.toFixed(3);
-  document.getElementById("ref-p").innerText = ref.p_value < 0.001 ? "< 0.0001 (HC3)" : ref.p_value;
-  document.getElementById("ref-corr").innerText = ref.corr_gold_dxy.toFixed(3);
-
-  if (reg && reg.momentum_shock_zone) {
-    const sEl = document.getElementById("shock-acc");
-    if (sEl) sEl.innerText = reg.momentum_shock_zone.directional_accuracy_pct + "%";
-    const nEl = document.getElementById("noise-acc");
-    if (nEl) nEl.innerText = reg.noise_zone.directional_accuracy_pct + "%";
-  }
-}
-
-function renderHistoricalTable(events) {
-  const tbody = document.getElementById("hist-tbody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-
-  // Sort descending by date
-  const sorted = [...events].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-  sorted.forEach(ev => {
-    const tr = document.createElement("tr");
-
-    const retClass = ev.gold_return_pct > 0 ? "val-up" : (ev.gold_return_pct < 0 ? "val-down" : "val-neutral");
-    const dxyClass = ev.dxy_return_pct > 0 ? "val-up" : "val-down";
-    const zColor = Math.abs(ev.z_score_composite) >= 1.5 ? "color:var(--accent-red);" : (Math.abs(ev.z_score_composite) >= 1.0 ? "color:var(--accent-cyan);" : "color:var(--fg-muted);");
-
-    tr.innerHTML = `
-      <td>${ev.date}</td>
-      <td><strong>${ev.ref_month}</strong></td>
-      <td>${ev.actual_mom.toFixed(1)}%</td>
-      <td>${ev.forecast_mom.toFixed(1)}%</td>
-      <td class="${ev.headline_surprise > 0 ? 'val-up' : (ev.headline_surprise < 0 ? 'val-down' : '')}">${(ev.headline_surprise > 0 ? '+' : '') + ev.headline_surprise.toFixed(2)}</td>
-      <td>${ev.actual_core_yoy.toFixed(1)}%</td>
-      <td>${ev.forecast_core_yoy.toFixed(1)}%</td>
-      <td style="${zColor}"><strong>${(ev.z_score_composite > 0 ? '+' : '') + ev.z_score_composite.toFixed(2)}σ</strong></td>
-      <td>$${ev.gold_open ? ev.gold_open.toFixed(1) : '-'}</td>
-      <td class="${retClass}"><strong>${ev.gold_return_pct !== undefined ? (ev.gold_return_pct > 0 ? '+' : '') + ev.gold_return_pct.toFixed(2) + '%' : '-'}</strong></td>
-      <td>${ev.gold_range_pct !== undefined ? ev.gold_range_pct.toFixed(2) + '%' : '-'}</td>
-      <td class="${dxyClass}">${ev.dxy_return_pct !== undefined ? (ev.dxy_return_pct > 0 ? '+' : '') + ev.dxy_return_pct.toFixed(2) + '%' : '-'}</td>
-      <td><span style="font-size:9px; padding:2px 4px; border:1px solid ${ev.regime === 'MOMENTUM_DRIFT' ? 'var(--accent-red)' : (ev.regime === 'MODERATE_SHOCK' ? 'var(--accent-cyan)' : 'var(--border-color)')};">${ev.regime}</span></td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-let currentMCHorizon = 1;
-let currentMCZ = 0.0;
-
-function initMonteCarloControls() {
-  const btn1d = document.getElementById("mc-btn-1d");
-  const btn5d = document.getElementById("mc-btn-5d");
-  const btnZ0 = document.getElementById("mc-btn-z0");
-  const btnZpos = document.getElementById("mc-btn-zpos");
-  const btnZneg = document.getElementById("mc-btn-zneg");
-
-  if (btn1d && btn5d) {
-    btn1d.addEventListener("click", () => {
-      currentMCHorizon = 1;
-      btn1d.classList.add("active");
-      btn5d.classList.remove("active");
-      renderMonteCarloChart(currentMCHorizon, currentMCZ);
-    });
-    btn5d.addEventListener("click", () => {
-      currentMCHorizon = 5;
-      btn5d.classList.add("active");
-      btn1d.classList.remove("active");
-      renderMonteCarloChart(currentMCHorizon, currentMCZ);
-    });
+    return;
   }
 
-  if (btnZ0 && btnZpos && btnZneg) {
-    btnZ0.addEventListener("click", () => {
-      currentMCZ = 0.0;
-      btnZ0.classList.add("active");
-      btnZpos.classList.remove("active");
-      btnZneg.classList.remove("active");
-      renderMonteCarloChart(currentMCHorizon, currentMCZ);
+  const svg = `
+    <svg id="svg-pdf" viewBox="0 0 ${w} ${h}" class="bbg-svg">
+      <defs>
+        <pattern id="hatch-gray" width="5" height="5" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="0" y2="5" stroke="#1f1f1f" stroke-width="1" />
+        </pattern>
+      </defs>
+
+      <rect x="${padL}" y="${padT}" width="${xMiss - padL}" height="${h - padT - padB}" fill="url(#hatch-gray)"/>
+      <rect x="${xBeat}" y="${padT}" width="${w - padR - xBeat}" height="${h - padT - padB}" fill="url(#hatch-gray)"/>
+
+      <line x1="${padL}" y1="${yZero}" x2="${w - padR}" y2="${yZero}" class="axis-line"/>
+      <line x1="${xMiss}" y1="${padT}" x2="${xMiss}" y2="${h - padB}" class="grid-dot"/>
+      <line x1="${xBeat}" y1="${padT}" x2="${xBeat}" y2="${h - padB}" class="grid-dot"/>
+      
+      <line x1="${x0}" y1="${padT}" x2="${x0}" y2="${yZero}" stroke="#ffb000" stroke-width="1" stroke-dasharray="2,2"/>
+      <text x="${x0}" y="${padT + 10}" fill="#ffb000" text-anchor="middle">T0: 0.0σ</text>
+
+      <path id="pdf-prior-line" d="${pathPrior}" fill="none" stroke="#666666" stroke-width="1.2" stroke-dasharray="3,3"/>
+      <path id="pdf-post-line" d="${pathPost}" fill="none" stroke="#ffffff" stroke-width="2.2"/>
+
+      <text x="${padL}" y="${h - 6}" text-anchor="start">${minX.toFixed(2)}pp</text>
+      <text x="${xMiss}" y="${h - 6}" text-anchor="middle">MISS</text>
+      <text x="${xBeat}" y="${h - 6}" text-anchor="middle">BEAT</text>
+      <text x="${w - padR}" y="${h - 6}" text-anchor="end">${maxX.toFixed(2)}pp</text>
+
+      <line id="pdf-needle" x1="0" y1="0" x2="0" y2="0" class="crosshair" style="display:none;"/>
+    </svg>
+  `;
+  container.innerHTML = svg;
+
+  const svgEl = document.getElementById("svg-pdf");
+  const needle = document.getElementById("pdf-needle");
+  if (svgEl && hudEl) {
+    svgEl.addEventListener("mousemove", (ev) => {
+      const rect = svgEl.getBoundingClientRect();
+      const mouseX = Math.max(padL, Math.min(w - padR, ((ev.clientX - rect.left) / rect.width) * w));
+      const xVal = minX + ((mouseX - padL) / (w - padL - padR)) * (maxX - minX);
+
+      let closest = pts[0];
+      let minDiff = 999;
+      pts.forEach(p => {
+        const d = Math.abs(p.x - xVal);
+        if (d < minDiff) { minDiff = d; closest = p; }
+      });
+
+      hudEl.innerHTML = `x = <span class="highlight">${closest.x > 0 ? "+" : ""}${closest.x.toFixed(2)}pp</span> | Prior PDF = <span class="highlight">${closest.prior_pdf.toFixed(2)}</span> | Post PDF = <span class="highlight">${closest.posterior_pdf.toFixed(2)}</span> [${closest.zone}]`;
+      if (needle) {
+        needle.style.display = "block";
+        needle.setAttribute("x1", mouseX);
+        needle.setAttribute("x2", mouseX);
+        needle.setAttribute("y1", padT);
+        needle.setAttribute("y2", yZero);
+      }
     });
-    btnZpos.addEventListener("click", () => {
-      currentMCZ = 1.33;
-      btnZpos.classList.add("active");
-      btnZ0.classList.remove("active");
-      btnZneg.classList.remove("active");
-      renderMonteCarloChart(currentMCHorizon, currentMCZ);
-    });
-    btnZneg.addEventListener("click", () => {
-      currentMCZ = -1.33;
-      btnZneg.classList.add("active");
-      btnZ0.classList.remove("active");
-      btnZpos.classList.remove("active");
-      renderMonteCarloChart(currentMCHorizon, currentMCZ);
+    svgEl.addEventListener("mouseleave", () => {
+      hudEl.innerText = "HOVER NEEDLE OVER CURVE // PRIOR N(0, 0.075) vs ENERGY POSTERIOR";
+      if (needle) needle.style.display = "none";
     });
   }
 }
 
-let mcDataCache = null;
-let componentDataFull = [];
-let compSeriesVisibility = { supercore: true, shelter: true, core: true, headline: true };
-let compRangeSelection = "all";
-let scatterRegimeFilter = "all";
-
-async function renderMonteCarloChart(horizon, z) {
-  const container = document.getElementById("mc-chart-container");
-  const hudEl = document.getElementById("mc-hover-hud");
+async function renderMcPane() {
+  const container = document.getElementById("canvas-mc");
+  const hudEl = document.getElementById("hud-mc");
   if (!container) return;
 
   let mc = null;
   try {
-    const res = await fetch(`/api/monte-carlo?horizon=${horizon}&z=${z}`);
+    const res = await fetch(`/api/monte-carlo?horizon=${currentHorizon}&z=${currentZ}`);
     mc = await res.json();
-    mcDataCache = mc;
-  } catch (err) {
-    console.warn("Monte Carlo fetch error:", err);
+    mcCache = mc;
+  } catch (e) {
+    console.warn("MC error:", e);
     return;
   }
 
-  // Smooth counter updates via GSAP
-  const pPosEl = document.getElementById("mc-p-pos");
-  const pNegEl = document.getElementById("mc-p-neg");
-  const medEl = document.getElementById("mc-median-price");
-  const varEl = document.getElementById("mc-var-95");
+  document.getElementById("val-mc-median").innerText = `$${mc.metrics.median_terminal_price.toFixed(2)}`;
+  document.getElementById("val-mc-var").innerText = `${mc.metrics.var_95_pct > 0 ? "+" : ""}${mc.metrics.var_95_pct.toFixed(2)}% (P_pos: ${mc.metrics.p_positive_return_pct.toFixed(1)}% / P_neg: ${mc.metrics.p_negative_return_pct.toFixed(1)}%)`;
 
-  animateNumber(pPosEl, mc.metrics.p_positive_return_pct, "", "%", 2);
-  animateNumber(pNegEl, mc.metrics.p_negative_return_pct, "", "%", 2);
-  animateNumber(medEl, mc.metrics.median_terminal_price, "$", "", 2);
-  animateNumber(varEl, mc.metrics.var_95_pct, (mc.metrics.var_95_pct > 0 ? "+" : ""), "%", 2);
-
-  const w = container.clientWidth || 700;
-  const h = 320;
-  const padL = 52;
-  const padR = 65;
-  const padT = 25;
-  const padB = 32;
+  const w = container.clientWidth || 360;
+  const h = container.clientHeight || 210;
+  const padL = 40;
+  const padR = 45;
+  const padT = 16;
+  const padB = 25;
 
   const steps = mc.steps || 24;
   const p5 = mc.percentiles.p5;
@@ -370,1032 +556,1269 @@ async function renderMonteCarloChart(horizon, z) {
   const minP = Math.min(...allVals) * 0.995;
   const maxP = Math.max(...allVals) * 1.005;
 
-  function getX(i) {
-    return padL + (i / steps) * (w - padL - padR);
-  }
-  function getY(p) {
-    return padT + (1 - (p - minP) / (maxP - minP)) * (h - padT - padB);
-  }
+  function getX(i) { return padL + (i / steps) * (w - padL - padR); }
+  function getY(p) { return padT + (1 - (p - minP) / (maxP - minP)) * (h - padT - padB); }
 
-  // 90% and 50% percentile envelopes
-  let path90 = `M ${getX(0)} ${getY(p95[0])} ` + p95.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
+  const path90 = `M ${getX(0)} ${getY(p95[0])} ` + p95.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
     p5.slice().reverse().map((v, i) => ` L ${getX(steps - i)} ${getY(v)}`).join("") + " Z";
 
-  let path50 = `M ${getX(0)} ${getY(p75[0])} ` + p75.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
+  const path50 = `M ${getX(0)} ${getY(p75[0])} ` + p75.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
     p25.slice().reverse().map((v, i) => ` L ${getX(steps - i)} ${getY(v)}`).join("") + " Z";
 
-  let pathMedian = p50.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
+  const pathMedian = p50.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
 
-  // Sample path traces
-  let samplePathsSvg = "";
-  mc.sample_traces.forEach((tr, idx) => {
-    const d = tr.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
-    const op = idx < 3 ? "0.35" : (idx < 6 ? "0.22" : "0.12");
-    samplePathsSvg += `<path d="${d}" fill="none" stroke="#999" stroke-width="1" opacity="${op}"/>`;
-  });
-
-  // T0 Anchor Baseline Indicator
-  const baseY = getY(mc.current_price);
-  const baseLine = `
-    <line x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}" stroke="#ffaa00" stroke-width="1.2" stroke-dasharray="3,3"/>
-    <text x="${padL + 6}" y="${baseY - 4}" fill="#ffaa00" font-size="8" font-family="monospace">T0 ANCHOR: $${mc.current_price.toFixed(1)}</text>
-  `;
-
-  // Upper / Lower Band Indicators at Terminal
-  const upperY = getY(p75[steps]);
-  const lowerY = getY(p25[steps]);
-  const medianY = getY(p50[steps]);
-  const indicatorLines = `
-    <text x="${getX(steps) + 8}" y="${upperY + 3}" fill="#00e5ff" font-size="8" text-anchor="start" font-family="monospace">+1σ: $${p75[steps].toFixed(0)}</text>
-    <text x="${getX(steps) + 8}" y="${medianY + 3}" fill="#00e5ff" font-size="8.5" font-weight="900" text-anchor="start" font-family="monospace">$${p50[steps].toFixed(0)}</text>
-    <text x="${getX(steps) + 8}" y="${lowerY + 3}" fill="#ff2a2a" font-size="8" text-anchor="start" font-family="monospace">-1σ: $${p25[steps].toFixed(0)}</text>
-  `;
-
-  // Grid lines
-  let gridSvg = "";
-  const stepStride = steps > 10 ? 4 : 1;
-  for (let step = 0; step <= steps; step += stepStride) {
-    const x = getX(step);
-    gridSvg += `
-      <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#141414" stroke-width="1"/>
-      <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">${mc.timesteps[step] || ""}</text>
-    `;
-  }
-
-  const priceTicks = [minP, (minP + maxP) / 2, maxP];
-  priceTicks.forEach(pt => {
-    const y = getY(pt);
-    gridSvg += `
-      <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#141414" stroke-width="1"/>
-      <text x="${padL - 6}" y="${y + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">$${pt.toFixed(0)}</text>
-    `;
-  });
-
-  let svg = `
-    <svg class="telemetry-svg" id="mc-svg" viewBox="0 0 ${w} ${h}">
-      ${gridSvg}
-      ${baseLine}
-      <!-- 90% Confidence Envelope -->
-      <path d="${path90}" fill="#161616" opacity="0.6"/>
-      <!-- 50% Interquartile Core Band -->
-      <path d="${path50}" fill="#222222" opacity="0.85"/>
-      <!-- Stochastic Path Traces -->
-      ${samplePathsSvg}
-      <!-- Median Trajectory -->
-      <path d="${pathMedian}" fill="none" stroke="#00e5ff" stroke-width="2.5"/>
-      <circle cx="${getX(steps)}" cy="${getY(p50[steps])}" r="3.5" fill="#00e5ff"/>
-      <text x="${getX(steps) - 6}" y="${getY(p50[steps]) - 6}" fill="#00e5ff" font-size="9" font-weight="900" text-anchor="end" font-family="monospace">MEDIAN: $${p50[steps].toFixed(1)}</text>
-      ${indicatorLines}
-      <!-- Interactive Hover Crosshair -->
-      <line id="mc-crosshair" x1="0" y1="0" x2="0" y2="0" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"/>
-    </svg>
-  `;
-  container.innerHTML = svg;
-
-  if (typeof gsap !== "undefined") {
-    gsap.fromTo("#mc-svg path, #mc-svg line", { opacity: 0.2 }, { opacity: 1, duration: 0.5, ease: "power2.out" });
-  }
-
-  // Interactive Hover Inspection
-  const svgEl = document.getElementById("mc-svg");
-  const crosshair = document.getElementById("mc-crosshair");
-  if (svgEl && hudEl) {
-    svgEl.addEventListener("mousemove", (ev) => {
-      const rect = svgEl.getBoundingClientRect();
-      const mouseX = ev.clientX - rect.left;
-      const clampedX = Math.max(padL, Math.min(w - padR, (mouseX / rect.width) * w));
-      const stepIdx = Math.round(((clampedX - padL) / (w - padL - padR)) * steps);
-      const safeIdx = Math.max(0, Math.min(steps, stepIdx));
-
-      const medP = p50[safeIdx];
-      const upP = p95[safeIdx];
-      const lowP = p5[safeIdx];
-      const retPct = ((medP - mc.current_price) / mc.current_price * 100).toFixed(2);
-
-      hudEl.innerText = `${mc.timesteps[safeIdx]} | Median: $${medP.toFixed(1)} (+2σ: $${upP.toFixed(1)} / -2σ: $${lowP.toFixed(1)}) | Ret: ${retPct > 0 ? "+" : ""}${retPct}%`;
-
-      if (crosshair) {
-        crosshair.style.display = "block";
-        crosshair.setAttribute("x1", getX(safeIdx));
-        crosshair.setAttribute("x2", getX(safeIdx));
-        crosshair.setAttribute("y1", padT);
-        crosshair.setAttribute("y2", h - padB);
-      }
-    });
-    svgEl.addEventListener("mouseleave", () => {
-      hudEl.innerText = "HOVER TIMESTEP FOR ENVELOPE";
-      if (crosshair) crosshair.style.display = "none";
-    });
-  }
-}
-
-async function renderPDFChart() {
-  const container = document.getElementById("pdf-chart-container");
-  const hudEl = document.getElementById("pdf-hover-hud");
-  if (!container) return;
-
-  let pdfData = null;
-  try {
-    const res = await fetch("/api/pdf-distribution");
-    pdfData = await res.json();
-  } catch (err) {
-    console.warn("PDF fetch error:", err);
+  const existingSvg = document.getElementById("svg-mc");
+  if (existingSvg) {
+    if (typeof gsap !== "undefined") {
+      gsap.to("#mc-env-90", { attr: { d: path90 }, duration: 0.5, ease: "power2.out" });
+      gsap.to("#mc-env-50", { attr: { d: path50 }, duration: 0.5, ease: "power2.out" });
+      gsap.to("#mc-med-line", { attr: { d: pathMedian }, duration: 0.5, ease: "power2.out" });
+      gsap.to("#mc-term-dot", { attr: { cx: getX(steps), cy: getY(p50[steps]) }, duration: 0.5, ease: "power2.out" });
+    }
     return;
   }
 
-  const pts = pdfData.points;
-  const n = pts.length;
-  if (n < 2) return;
+  let tracesSvg = "";
+  mc.sample_traces.forEach((tr, idx) => {
+    const d = tr.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
+    tracesSvg += `<path d="${d}" fill="none" stroke="#444444" stroke-width="0.8" opacity="${idx < 3 ? '0.5' : '0.2'}"/>`;
+  });
 
-  const w = container.clientWidth || 700;
-  const h = 320;
-  const padL = 45;
-  const padR = 25;
-  const padT = 30;
-  const padB = 32;
+  const baseY = getY(mc.current_price);
+  const svg = `
+    <svg id="svg-mc" viewBox="0 0 ${w} ${h}" class="bbg-svg">
+      <line x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}" stroke="#ffb000" stroke-width="1" stroke-dasharray="2,2"/>
+      <text x="${padL + 4}" y="${baseY - 4}" fill="#ffb000">T0: $${mc.current_price.toFixed(1)}</text>
 
-  const minX = -0.35;
-  const maxX = +0.35;
-  const maxY = 5.2;
+      <path id="mc-env-90" d="${path90}" fill="#111111" opacity="0.8"/>
+      <path id="mc-env-50" d="${path50}" fill="#222222" opacity="0.9"/>
+      
+      <g id="mc-sample-traces">${tracesSvg}</g>
+      
+      <path id="mc-med-line" d="${pathMedian}" fill="none" stroke="#ffffff" stroke-width="2"/>
+      <circle id="mc-term-dot" cx="${getX(steps)}" cy="${getY(p50[steps])}" r="3" fill="#ffffff"/>
+      <text x="${getX(steps) + 5}" y="${getY(p50[steps]) + 3}" fill="#ffffff" font-weight="700">$${p50[steps].toFixed(0)}</text>
 
-  function getX(x) {
-    return padL + ((x - minX) / (maxX - minX)) * (w - padL - padR);
-  }
-  function getY(y) {
-    return padT + (1 - (y / maxY)) * (h - padT - padB);
-  }
-
-  const pathPrior = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.prior_pdf).toFixed(1)}`).join(" ");
-  const pathPost = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.posterior_pdf).toFixed(1)}`).join(" ");
-
-  const xMiss = getX(-0.10);
-  const xBeat = getX(+0.10);
-  const yZero = getY(0);
-  const x0 = getX(0);
-  const xNowcast = getX(-0.02);
-  const xPeak = getX(0.08);
-
-  // Indicator milestone lines & labels
-  const indicatorsSvg = `
-    <!-- T0 Consensus Marker -->
-    <line x1="${x0}" y1="${padT + 16}" x2="${x0}" y2="${yZero}" stroke="#888" stroke-width="1" stroke-dasharray="2,2"/>
-    <text x="${x0}" y="${padT + 12}" fill="#888" font-size="7.5" text-anchor="middle" font-family="monospace">T0: 0.00pp</text>
-
-    <!-- Nowcast Marker -->
-    <line x1="${xNowcast}" y1="${padT + 28}" x2="${xNowcast}" y2="${yZero}" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2"/>
-    <text x="${xNowcast - 4}" y="${padT + 26}" fill="#00e5ff" font-size="7.5" text-anchor="end" font-family="monospace">NOWCAST -0.02pp</text>
-
-    <!-- Energy Posterior Peak Marker -->
-    <line x1="${xPeak}" y1="${padT + 16}" x2="${xPeak}" y2="${yZero}" stroke="#ff2a2a" stroke-width="1.5"/>
-    <text x="${xPeak + 4}" y="${padT + 12}" fill="#ff2a2a" font-size="8" font-weight="900" text-anchor="start" font-family="monospace">PEAK +0.08pp</text>
-  `;
-
-  let svg = `
-    <svg class="telemetry-svg" id="pdf-svg" viewBox="0 0 ${w} ${h}">
-      <!-- Shaded Zones -->
-      <rect x="${padL}" y="${padT}" width="${xMiss - padL}" height="${h - padT - padB}" fill="rgba(74, 246, 38, 0.07)"/>
-      <rect x="${xMiss}" y="${padT}" width="${xBeat - xMiss}" height="${h - padT - padB}" fill="#141414" opacity="0.6"/>
-      <rect x="${xBeat}" y="${padT}" width="${w - padR - xBeat}" height="${h - padT - padB}" fill="rgba(255, 42, 42, 0.08)"/>
-
-      <line x1="${padL}" y1="${yZero}" x2="${w - padR}" y2="${yZero}" stroke="#333" stroke-width="1"/>
-      <line x1="${xMiss}" y1="${padT}" x2="${xMiss}" y2="${h - padB}" stroke="#444" stroke-width="1" stroke-dasharray="1,2"/>
-      <line x1="${xBeat}" y1="${padT}" x2="${xBeat}" y2="${h - padB}" stroke="#444" stroke-width="1" stroke-dasharray="1,2"/>
-
-      ${indicatorsSvg}
-
-      <text x="${padL}" y="${h - 8}" fill="#666" font-size="8" text-anchor="start" font-family="monospace">-0.35pp</text>
-      <text x="${xMiss}" y="${h - 8}" fill="var(--accent-green)" font-size="8" text-anchor="middle" font-family="monospace">-0.10pp (MISS)</text>
-      <text x="${x0}" y="${h - 8}" fill="#888" font-size="8" text-anchor="middle" font-family="monospace">0.00pp</text>
-      <text x="${xBeat}" y="${h - 8}" fill="var(--accent-red)" font-size="8" text-anchor="middle" font-family="monospace">+0.10pp (BEAT)</text>
-      <text x="${w - padR}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">+0.35pp</text>
-
-      <path d="${pathPrior}" fill="none" stroke="#777" stroke-width="1.5" stroke-dasharray="3,3"/>
-      <path d="${pathPost}" fill="none" stroke="#ff2a2a" stroke-width="2.5"/>
-      <circle cx="${xPeak}" cy="${getY(4.43)}" r="4" fill="#ff2a2a"/>
-
-      <!-- Interactive Scanning Needle -->
-      <line id="pdf-needle" x1="0" y1="0" x2="0" y2="0" stroke="#00e5ff" stroke-width="1.5" stroke-dasharray="2,2" style="display:none;"/>
+      <line id="mc-crosshair-v" x1="0" y1="0" x2="0" y2="0" class="crosshair" style="display:none;"/>
     </svg>
   `;
   container.innerHTML = svg;
 
-  if (typeof gsap !== "undefined") {
-    gsap.fromTo("#pdf-svg path", { opacity: 0.2, scaleY: 0.3, transformOrigin: "bottom" }, { opacity: 1, scaleY: 1, stagger: 0.1, duration: 0.7, ease: "power2.out" });
-  }
-
-  const svgEl = document.getElementById("pdf-svg");
-  const needle = document.getElementById("pdf-needle");
+  const svgEl = document.getElementById("svg-mc");
+  const crossV = document.getElementById("mc-crosshair-v");
   if (svgEl && hudEl) {
     svgEl.addEventListener("mousemove", (ev) => {
       const rect = svgEl.getBoundingClientRect();
-      const mouseX = ev.clientX - rect.left;
-      const clampedX = Math.max(padL, Math.min(w - padR, (mouseX / rect.width) * w));
-      const xVal = minX + ((clampedX - padL) / (w - padL - padR)) * (maxX - minX);
-      
-      let closest = pts[0];
-      let minDiff = 999;
-      pts.forEach(p => {
-        const diff = Math.abs(p.x - xVal);
-        if (diff < minDiff) { minDiff = diff; closest = p; }
-      });
+      const mouseX = Math.max(padL, Math.min(w - padR, ((ev.clientX - rect.left) / rect.width) * w));
+      const s = Math.max(0, Math.min(steps, Math.round(((mouseX - padL) / (w - padL - padR)) * steps)));
 
-      const zScore = (closest.x / 0.075).toFixed(2);
-      hudEl.innerText = `x: ${(closest.x > 0 ? "+" : "") + closest.x.toFixed(2)}pp (Z = ${zScore}σ) | Prior: ${closest.prior_pdf.toFixed(2)} | Post: ${closest.posterior_pdf.toFixed(2)} [${closest.zone}]`;
+      const medP = p50[s];
+      const p95Val = p95[s];
+      const p5Val = p5[s];
+      hudEl.innerHTML = `${mc.timesteps[s]} | Median: <span class="highlight">$${medP.toFixed(1)}</span> (P95: $${p95Val.toFixed(0)} / P5: $${p5Val.toFixed(0)})`;
 
-      if (needle) {
-        needle.style.display = "block";
-        needle.setAttribute("x1", clampedX);
-        needle.setAttribute("x2", clampedX);
-        needle.setAttribute("y1", padT);
-        needle.setAttribute("y2", yZero);
+      if (crossV) {
+        crossV.style.display = "block";
+        crossV.setAttribute("x1", getX(s));
+        crossV.setAttribute("x2", getX(s));
+        crossV.setAttribute("y1", padT);
+        crossV.setAttribute("y2", h - padB);
       }
     });
     svgEl.addEventListener("mouseleave", () => {
-      hudEl.innerText = "HOVER BELL CURVE";
-      if (needle) needle.style.display = "none";
+      hudEl.innerText = "HOVER TIMESTEP // PERCENTILE ENVELOPE [P5, P25, P50, P75, P95]";
+      if (crossV) crossV.style.display = "none";
     });
   }
 }
 
-async function renderComponentChart() {
-  const container = document.getElementById("component-chart-container");
-  const hudEl = document.getElementById("comp-hover-hud");
+async function renderFreqPane() {
+  const container = document.getElementById("canvas-freq");
+  const hudEl = document.getElementById("hud-freq");
   if (!container) return;
 
-  if (componentDataFull.length === 0) {
-    try {
-      const res = await fetch("/api/yoy-timeline");
-      componentDataFull = await res.json();
-    } catch (e) {
-      console.warn("Failed to fetch yoy-timeline:", e);
-      return;
-    }
+  let freq = null;
+  try {
+    const res = await fetch(`/api/shock-frequency?z=${currentZ}`);
+    freq = await res.json();
+    freqCache = freq;
+  } catch (e) {
+    console.warn("Freq error:", e);
+    return;
   }
 
-  // Filter by range
-  let data = [...componentDataFull];
-  if (compRangeSelection === "24") data = data.slice(-24);
-  else if (compRangeSelection === "12") data = data.slice(-12);
+  document.getElementById("val-freq-rank").innerText = `${freq.empirical_percentile_rank.toFixed(1)}th PERCENTILE (DIST FROM MEDIAN: ${freq.distance_from_median > 0 ? "+" : ""}${freq.distance_from_median.toFixed(2)}σ)`;
 
-  const n = data.length;
-  if (n < 2) return;
+  const w = container.clientWidth || 360;
+  const h = container.clientHeight || 210;
+  const padL = 35;
+  const padR = 35;
+  const padT = 16;
+  const padB = 25;
 
-  const w = container.clientWidth || 700;
-  const h = 320;
-  const padL = 45;
-  const padR = 25;
-  const padT = 25;
-  const padB = 32;
+  const minX = -3.0;
+  const maxX = +3.0;
+  const maxCount = Math.max(...freq.histogram_bars.map(b => b.count)) || 15;
+  const maxKde = Math.max(...freq.kde_curve.map(k => k.density)) || 0.6;
 
-  const minV = 1.5;
-  const maxV = 8.5;
+  function getX(x) { return padL + ((x - minX) / (maxX - minX)) * (w - padL - padR); }
+  function getYCount(c) { return padT + (1 - (c / maxCount)) * (h - padT - padB); }
+  function getYKde(d) { return padT + (1 - (d / maxKde)) * (h - padT - padB); }
 
-  function getX(i) {
-    return padL + (i / (n - 1)) * (w - padL - padR);
-  }
-  function getY(v) {
-    return padT + (1 - (v - minV) / (maxV - minV)) * (h - padT - padB);
-  }
+  const kdePath = freq.kde_curve.map((k, i) => `${i === 0 ? "M" : "L"} ${getX(k.x).toFixed(1)} ${getYKde(k.density).toFixed(1)}`).join(" ");
 
-  function makePath(key) {
-    return data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${getX(i).toFixed(1)} ${getY(d[key]).toFixed(1)}`).join(' ');
-  }
+  let barsSvg = "";
+  freq.histogram_bars.forEach(b => {
+    const x1 = getX(b.range[0]);
+    const x2 = getX(b.range[1]);
+    const barW = Math.max(2, (x2 - x1) - 2);
+    const barY = getYCount(b.count);
+    const barH = (h - padB) - barY;
+    const isCurrent = b.range[0] <= currentZ && currentZ <= b.range[1];
+    const fill = isCurrent ? "#282828" : "#0d0d0d";
+    const stroke = isCurrent ? "#ffffff" : "#222222";
 
-  const pHL = makePath("headline_yoy");
-  const pCore = makePath("core_yoy");
-  const pSuper = makePath("supercore_yoy");
-  const pShelter = makePath("shelter_yoy");
-
-  // Grid lines
-  let gridLines = "";
-  for (let val = 2.0; val <= 8.0; val += 1.0) {
-    const y = getY(val);
-    gridLines += `
-      <line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#161616" stroke-width="1"/>
-      <text x="${padL - 6}" y="${y + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">${val.toFixed(0)}%</text>
-    `;
-  }
-
-  // Federal Reserve 2.0% Inflation Target Line Indicator
-  const yTarget = getY(2.0);
-  const targetLineSvg = `
-    <line x1="${padL}" y1="${yTarget}" x2="${w - padR}" y2="${yTarget}" stroke="#4af626" stroke-width="1" stroke-dasharray="3,3" opacity="0.8"/>
-    <text x="${padL + 6}" y="${yTarget - 4}" fill="#4af626" font-size="7.5" font-family="monospace">FED 2.0% TARGET</text>
-  `;
-
-  let dateTicks = "";
-  const cleanIndices = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1];
-  cleanIndices.forEach((idx, i) => {
-    const x = getX(idx);
-    const anchor = i === 0 ? "start" : (i === cleanIndices.length - 1 ? "end" : "middle");
-    dateTicks += `
-      <line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#141414" stroke-width="1"/>
-      <text x="${x}" y="${h - 8}" fill="#666" font-size="8" text-anchor="${anchor}" font-family="monospace">${data[idx].date}</text>
+    barsSvg += `
+      <rect class="freq-bar" x="${x1 + 1}" y="${barY}" width="${barW}" height="${barH}" fill="${fill}" stroke="${stroke}" stroke-width="1"
+            data-label="${b.label}" data-count="${b.count}" data-pct="${b.pct}"/>
+      <text x="${x1 + barW / 2}" y="${barY - 3}" fill="#666666" text-anchor="middle">${b.count > 0 ? b.count : ""}</text>
     `;
   });
 
-  const lastD = data[n - 1];
-  let svg = `
-    <svg class="telemetry-svg" id="comp-svg" viewBox="0 0 ${w} ${h}">
-      ${gridLines}
-      ${targetLineSvg}
-      ${dateTicks}
-      <!-- Series paths with visibility toggle -->
-      <path id="path-headline" d="${pHL}" fill="none" stroke="#888888" stroke-width="1.5" stroke-dasharray="3,3" style="display:${compSeriesVisibility.headline ? 'block':'none'};"/>
-      <path id="path-core" d="${pCore}" fill="none" stroke="#eaeaea" stroke-width="2" style="display:${compSeriesVisibility.core ? 'block':'none'};"/>
-      <path id="path-shelter" d="${pShelter}" fill="none" stroke="#00e5ff" stroke-width="2" style="display:${compSeriesVisibility.shelter ? 'block':'none'};"/>
-      <path id="path-supercore" d="${pSuper}" fill="none" stroke="#ff2a2a" stroke-width="2.5" style="display:${compSeriesVisibility.supercore ? 'block':'none'};"/>
+  const curX = getX(currentZ);
+  const medX = getX(freq.median_z);
 
-      <!-- End Callouts -->
-      ${compSeriesVisibility.supercore ? `<circle cx="${getX(n-1)}" cy="${getY(lastD.supercore_yoy)}" r="3.5" fill="#ff2a2a"/>` : ''}
-      ${compSeriesVisibility.shelter ? `<circle cx="${getX(n-1)}" cy="${getY(lastD.shelter_yoy)}" r="3" fill="#00e5ff"/>` : ''}
-      ${compSeriesVisibility.core ? `<circle cx="${getX(n-1)}" cy="${getY(lastD.core_yoy)}" r="3" fill="#eaeaea"/>` : ''}
+  const existingSvg = document.getElementById("svg-freq");
+  if (existingSvg) {
+    if (typeof gsap !== "undefined") {
+      gsap.to("#freq-kde", { attr: { d: kdePath }, duration: 0.5, ease: "power2.out" });
+      gsap.to("#freq-cur-needle", { attr: { x1: curX, x2: curX }, duration: 0.4, ease: "power2.out" });
+      gsap.to("#freq-cur-text", { attr: { x: curX }, duration: 0.4, ease: "power2.out" });
+    }
+    const bGroup = document.getElementById("freq-bars-group");
+    if (bGroup) bGroup.innerHTML = barsSvg;
+    return;
+  }
 
-      <line id="comp-crosshair" x1="0" y1="0" x2="0" y2="0" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"/>
+  const svg = `
+    <svg id="svg-freq" viewBox="0 0 ${w} ${h}" class="bbg-svg">
+      <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="axis-line"/>
+      <g id="freq-bars-group">${barsSvg}</g>
+      
+      <path id="freq-kde" d="${kdePath}" fill="none" stroke="#ffffff" stroke-width="2"/>
+
+      <line x1="${medX}" y1="${padT}" x2="${medX}" y2="${h - padB}" stroke="#666" stroke-width="1" stroke-dasharray="2,2"/>
+      <text x="${medX}" y="${padT + 10}" fill="#888" text-anchor="middle">MEDIAN: ${freq.median_z.toFixed(2)}σ</text>
+
+      <line id="freq-cur-needle" x1="${curX}" y1="${padT + 14}" x2="${curX}" y2="${h - padB}" stroke="#ffffff" stroke-width="1.5"/>
+      <text id="freq-cur-text" x="${curX}" y="${padT + 10}" fill="#ffffff" font-weight="800" text-anchor="middle">[CURRENT: ${currentZ > 0 ? "+" : ""}${currentZ.toFixed(2)}σ]</text>
+
+      <text x="${padL}" y="${h - 6}" text-anchor="start">-3.0σ</text>
+      <text x="${getX(0)}" y="${h - 6}" text-anchor="middle">0.0σ</text>
+      <text x="${w - padR}" y="${h - 6}" text-anchor="end">+3.0σ</text>
     </svg>
   `;
   container.innerHTML = svg;
 
-  if (typeof gsap !== "undefined") {
-    gsap.fromTo("#comp-svg path", { opacity: 0, strokeDashoffset: 600, strokeDasharray: 600 }, { opacity: 1, strokeDashoffset: 0, stagger: 0.1, duration: 1.0, ease: "power2.out" });
-  }
-
-  initComponentControls();
-
-  const svgEl = document.getElementById("comp-svg");
-  const crosshair = document.getElementById("comp-crosshair");
+  const svgEl = document.getElementById("svg-freq");
   if (svgEl && hudEl) {
     svgEl.addEventListener("mousemove", (ev) => {
-      const rect = svgEl.getBoundingClientRect();
-      const mouseX = ev.clientX - rect.left;
-      const clampedX = Math.max(padL, Math.min(w - padR, (mouseX / rect.width) * w));
-      const idx = Math.round(((clampedX - padL) / (w - padL - padR)) * (n - 1));
-      const d = data[idx];
-      if (d) {
-        hudEl.innerText = `${d.date}: Supercore ${d.supercore_yoy}% | Shelter ${d.shelter_yoy}% | Core ${d.core_yoy}% | Headline ${d.headline_yoy}%`;
-        if (crosshair) {
-          crosshair.style.display = "block";
-          crosshair.setAttribute("x1", getX(idx));
-          crosshair.setAttribute("x2", getX(idx));
-          crosshair.setAttribute("y1", padT);
-          crosshair.setAttribute("y2", h - padB);
-        }
+      const target = ev.target;
+      if (target && target.classList.contains("freq-bar")) {
+        const l = target.getAttribute("data-label");
+        const c = target.getAttribute("data-count");
+        const p = target.getAttribute("data-pct");
+        hudEl.innerHTML = `HISTOGRAM BIN: <span class="highlight">${l}</span> | Count = <span class="highlight">${c} releases</span> (${p}% of sample)`;
       }
     });
     svgEl.addEventListener("mouseleave", () => {
-      hudEl.innerText = "HOVER OVER TIMELINE";
-      if (crosshair) crosshair.style.display = "none";
+      hudEl.innerText = "HOVER HISTOGRAM BARS // N = 34 EMPIRICAL CPI RELEASES";
     });
   }
 }
 
-function initComponentControls() {
-  // Series toggle buttons
-  const pillSuper = document.getElementById("pill-supercore");
-  const pillShelter = document.getElementById("pill-shelter");
-  const pillCore = document.getElementById("pill-core");
-  const pillHL = document.getElementById("pill-headline");
+async function renderTransPane() {
+  const container = document.getElementById("canvas-trans");
+  const hudEl = document.getElementById("hud-trans");
+  if (!container) return;
 
-  if (pillSuper && !pillSuper.__wired) {
-    pillSuper.__wired = true;
-    pillSuper.addEventListener("click", () => {
-      compSeriesVisibility.supercore = !compSeriesVisibility.supercore;
-      pillSuper.classList.toggle("active", compSeriesVisibility.supercore);
-      pillSuper.style.opacity = compSeriesVisibility.supercore ? "1" : "0.3";
-      renderComponentChart();
-    });
-  }
-  if (pillShelter && !pillShelter.__wired) {
-    pillShelter.__wired = true;
-    pillShelter.addEventListener("click", () => {
-      compSeriesVisibility.shelter = !compSeriesVisibility.shelter;
-      pillShelter.classList.toggle("active", compSeriesVisibility.shelter);
-      pillShelter.style.opacity = compSeriesVisibility.shelter ? "1" : "0.3";
-      renderComponentChart();
-    });
-  }
-  if (pillCore && !pillCore.__wired) {
-    pillCore.__wired = true;
-    pillCore.addEventListener("click", () => {
-      compSeriesVisibility.core = !compSeriesVisibility.core;
-      pillCore.classList.toggle("active", compSeriesVisibility.core);
-      pillCore.style.opacity = compSeriesVisibility.core ? "1" : "0.3";
-      renderComponentChart();
-    });
-  }
-  if (pillHL && !pillHL.__wired) {
-    pillHL.__wired = true;
-    pillHL.addEventListener("click", () => {
-      compSeriesVisibility.headline = !compSeriesVisibility.headline;
-      pillHL.classList.toggle("active", compSeriesVisibility.headline);
-      pillHL.style.opacity = compSeriesVisibility.headline ? "1" : "0.3";
-      renderComponentChart();
-    });
+  let trans = null;
+  try {
+    const res = await fetch("/api/transmission-curves");
+    trans = await res.json();
+    transCache = trans;
+  } catch (e) {
+    console.warn("Trans error:", e);
+    return;
   }
 
-  // Range selection buttons
-  const rAll = document.getElementById("range-all");
-  const r24 = document.getElementById("range-24m");
-  const r12 = document.getElementById("range-12m");
+  const curves = trans.response_curves;
+  const w = container.clientWidth || 360;
+  const h = container.clientHeight || 210;
+  const padL = 35;
+  const padR = 35;
+  const padT = 16;
+  const padB = 25;
 
-  if (rAll && !rAll.__wired) {
-    rAll.__wired = true;
-    rAll.addEventListener("click", () => {
-      compRangeSelection = "all";
-      rAll.classList.add("active");
-      if (r24) r24.classList.remove("active");
-      if (r12) r12.classList.remove("active");
-      renderComponentChart();
-    });
-  }
-  if (r24 && !r24.__wired) {
-    r24.__wired = true;
-    r24.addEventListener("click", () => {
-      compRangeSelection = "24";
-      r24.classList.add("active");
-      if (rAll) rAll.classList.remove("active");
-      if (r12) r12.classList.remove("active");
-      renderComponentChart();
-    });
-  }
-  if (r12 && !r12.__wired) {
-    r12.__wired = true;
-    r12.addEventListener("click", () => {
-      compRangeSelection = "12";
-      r12.classList.add("active");
-      if (rAll) rAll.classList.remove("active");
-      if (r24) r24.classList.remove("active");
-      renderComponentChart();
-    });
-  }
-}
+  const minZ = -3.0;
+  const maxZ = +3.0;
 
-function renderScatterChart(events, models) {
-  const container = document.getElementById("scatter-chart-container");
-  const hudEl = document.getElementById("scatter-hover-hud");
-  if (!container || events.length === 0) return;
-
-  let valid = events.filter(e => e.z_score_composite !== undefined && e.gold_return_pct !== undefined);
-  if (scatterRegimeFilter === "shock") valid = valid.filter(e => e.regime !== "NOISE_ZONE");
-  else if (scatterRegimeFilter === "noise") valid = valid.filter(e => e.regime === "NOISE_ZONE");
-
-  if (valid.length === 0) return;
-
-  const w = container.clientWidth || 700;
-  const h = 320;
-
-  const scatterW = Math.floor(w * 0.54);
-  const vrW = w - scatterW;
-  const padL = 40;
-  const padR = 20;
-  const padT = 25;
-  const padB = 32;
-
-  const minZ = -3.2;
-  const maxZ = 3.2;
-  const minR = -4.0;
-  const maxR = 3.0;
-
-  function getX(z) {
-    return padL + ((z - minZ) / (maxZ - minZ)) * (scatterW - padL - padR);
-  }
-  function getY(r) {
-    return padT + (1 - (r - minR) / (maxR - minR)) * (h - padT - padB);
+  let yKey = "gold_return";
+  let minY = -2.5, maxY = +2.5;
+  let assetLabel = "GOLD RESPONSE";
+  if (currentTransAsset === "dxy") {
+    yKey = "dxy_return";
+    minY = -1.0; maxY = +1.0;
+    assetLabel = "DXY RESPONSE";
+  } else if (currentTransAsset === "2y") {
+    yKey = "zt_return";
+    minY = -1.2; maxY = +1.2;
+    assetLabel = "2Y NOTE RESPONSE";
   }
 
-  const cx0 = getX(0);
-  const cy0 = getY(0);
-  const nzLeft = getX(-1.0);
-  const nzRight = getX(1.0);
+  function getX(z) { return padL + ((z - minZ) / (maxZ - minZ)) * (w - padL - padR); }
+  function getY(y) { return padT + (1 - (y - minY) / (maxY - minY)) * (h - padT - padB); }
 
-  let pointsSvg = "";
-  valid.forEach((e, idx) => {
-    const cx = getX(e.z_score_composite);
-    const cy = getY(e.gold_return_pct);
-    const color = e.gold_return_pct > 0 ? "var(--accent-green)" : "var(--accent-red)";
-    
-    let labelSvg = "";
-    if (e.gold_return_pct <= -3.0 || e.gold_return_pct >= 1.9 || Math.abs(e.z_score_composite) >= 2.5) {
-      labelSvg = `<text x="${cx}" y="${cy - 7}" fill="#aaa" font-size="7.5" font-weight="700" text-anchor="middle" font-family="monospace">${e.date.substring(2,7)}</text>`;
+  const pathReg = curves.map((c, i) => `${i === 0 ? "M" : "L"} ${getX(c.z).toFixed(1)} ${getY(c[yKey]).toFixed(1)}`).join(" ");
+
+  let bandPath = "";
+  if (currentTransAsset === "gold") {
+    const upper = curves.map((c, i) => `${i === 0 ? "M" : "L"} ${getX(c.z).toFixed(1)} ${getY(c.gold_upper_95).toFixed(1)}`).join(" ");
+    const lower = curves.slice().reverse().map(c => `L ${getX(c.z).toFixed(1)} ${getY(c.gold_lower_95).toFixed(1)}`).join(" ");
+    bandPath = `${upper} ${lower} Z`;
+  }
+
+  let dotsSvg = "";
+  trans.scatter_points.forEach(p => {
+    let py = p.gold_ret;
+    if (currentTransAsset === "dxy") py = p.dxy_ret;
+    else if (currentTransAsset === "2y") py = p.zt_ret;
+
+    dotsSvg += `<circle cx="${getX(p.z)}" cy="${getY(py)}" r="3" fill="#333" stroke="#666" stroke-width="0.8"/>`;
+  });
+
+  const existingSvg = document.getElementById("svg-trans");
+  if (existingSvg) {
+    if (typeof gsap !== "undefined") {
+      gsap.to("#trans-reg-line", { attr: { d: pathReg }, duration: 0.5, ease: "power2.out" });
+      if (document.getElementById("trans-band-area")) {
+        gsap.to("#trans-band-area", { attr: { d: bandPath }, duration: 0.5, ease: "power2.out" });
+      }
     }
-    
-    pointsSvg += `
-      <circle class="scatter-dot" data-idx="${idx}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.5" fill="${color}" stroke="#000" stroke-width="1.2" opacity="0.88" style="cursor:pointer;"></circle>
-      ${labelSvg}
-    `;
-  });
+    const dotGroup = document.getElementById("trans-dots-group");
+    if (dotGroup) dotGroup.innerHTML = dotsSvg;
+    return;
+  }
 
-  const slope = models.refined_composite ? models.refined_composite.slope : -0.558;
-  const intercept = models.refined_composite ? models.refined_composite.intercept : 0.148;
-  const yZneg3 = intercept + slope * (-3.2);
-  const yZpos3 = intercept + slope * (+3.2);
-  const regLine = `<line x1="${getX(-3.2)}" y1="${getY(yZneg3)}" x2="${getX(3.2)}" y2="${getY(yZpos3)}" stroke="#00e5ff" stroke-width="2" stroke-dasharray="3,3"/>`;
+  const svg = `
+    <svg id="svg-trans" viewBox="0 0 ${w} ${h}" class="bbg-svg">
+      <line x1="${padL}" y1="${getY(0)}" x2="${w - padR}" y2="${getY(0)}" class="axis-line"/>
+      <line x1="${getX(0)}" y1="${padT}" x2="${getX(0)}" y2="${h - padB}" class="axis-line"/>
 
-  // Volatility Ratio Bars on Right side with ample width to prevent clipping
-  const vrData = [
-    { label: "VR(5m)", ratio: 5.42, color: "#ff2a2a" },
-    { label: "VR(15m)", ratio: 3.65, color: "#00e5ff" },
-    { label: "VR(30m)", ratio: 2.58, color: "#eaeaea" },
-    { label: "VR(60m)", ratio: 1.84, color: "#888888" }
-  ];
-  const maxVR = 6.0;
-  const vrStartX = scatterW + 18;
-  const vrWidth = Math.max(50, w - vrStartX - 70); // 70px right margin guarantees '5.42x' is NEVER cut off
-  let vrSvg = `
-    <line x1="${scatterW}" y1="${padT - 10}" x2="${scatterW}" y2="${h - 10}" stroke="#222" stroke-width="1"/>
-    <text x="${vrStartX}" y="${padT + 4}" fill="#888" font-size="8" font-weight="700" font-family="monospace">VOLATILITY RATIO VR(w)</text>
-  `;
+      ${bandPath ? `<path id="trans-band-area" d="${bandPath}" fill="#161616" opacity="0.6"/>` : ''}
 
-  vrData.forEach((item, idx) => {
-    const barY = padT + 28 + idx * 52;
-    const barLen = (item.ratio / maxVR) * vrWidth;
-    vrSvg += `
-      <text x="${vrStartX}" y="${barY + 11}" fill="#eaeaea" font-size="8.5" font-family="monospace">${item.label}</text>
-      <rect class="vr-bar-rect" x="${vrStartX + 52}" y="${barY}" width="${barLen.toFixed(1)}" height="14" fill="${item.color}" opacity="0.9"/>
-      <text x="${vrStartX + 58 + barLen}" y="${barY + 11}" fill="${item.color}" font-size="9" font-weight="900" font-family="monospace">${item.ratio.toFixed(2)}x</text>
-    `;
-  });
+      <g id="trans-dots-group">${dotsSvg}</g>
 
-  let svg = `
-    <svg class="telemetry-svg" id="scatter-svg" viewBox="0 0 ${w} ${h}">
-      <rect x="${nzLeft}" y="${padT}" width="${nzRight - nzLeft}" height="${h - padT - padB}" fill="#161616" opacity="0.5"/>
-      <text x="${cx0}" y="${padT + 12}" fill="#555" font-size="8" text-anchor="middle" font-family="monospace">NOISE (|Z| &lt; 1.0σ)</text>
-      <line x1="${padL}" y1="${cy0}" x2="${scatterW - padR}" y2="${cy0}" stroke="#262626" stroke-width="1"/>
-      <line x1="${cx0}" y1="${padT}" x2="${cx0}" y2="${h - padB}" stroke="#262626" stroke-width="1"/>
-      <text x="${padL - 6}" y="${cy0 + 3}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">0.0%</text>
-      <text x="${cx0}" y="${h - 8}" fill="#666" font-size="8" text-anchor="middle" font-family="monospace">0.0σ</text>
-      <text x="${scatterW - padR}" y="${h - 8}" fill="#666" font-size="8" text-anchor="end" font-family="monospace">+3.0σ</text>
-      <text x="${padL}" y="${h - 8}" fill="#666" font-size="8" text-anchor="start" font-family="monospace">-3.0σ</text>
-      ${regLine}
-      ${pointsSvg}
-      ${vrSvg}
+      <path id="trans-reg-line" d="${pathReg}" fill="none" stroke="#ffffff" stroke-width="2"/>
+
+      <text x="${w - padR}" y="${getY(0) - 4}" text-anchor="end">+Z (HAWKISH)</text>
+      <text x="${padL}" y="${getY(0) - 4}" text-anchor="start">-Z (DOVISH)</text>
+      <text x="${getX(0) + 4}" y="${padT + 10}">% RETURN</text>
+
+      <line id="trans-needle-x" x1="0" y1="0" x2="0" y2="0" class="crosshair" style="display:none;"/>
     </svg>
   `;
   container.innerHTML = svg;
 
-  if (typeof gsap !== "undefined") {
-    gsap.fromTo(".scatter-dot", { scale: 0, transformOrigin: "center" }, { scale: 1, stagger: 0.012, duration: 0.5, ease: "back.out(2)" });
-    gsap.fromTo(".vr-bar-rect", { scaleX: 0, transformOrigin: "left" }, { scaleX: 1, stagger: 0.08, duration: 0.7, ease: "power2.out" });
-  }
+  const svgEl = document.getElementById("svg-trans");
+  const needleX = document.getElementById("trans-needle-x");
+  if (svgEl && hudEl) {
+    svgEl.addEventListener("mousemove", (ev) => {
+      const rect = svgEl.getBoundingClientRect();
+      const mouseX = Math.max(padL, Math.min(w - padR, ((ev.clientX - rect.left) / rect.width) * w));
+      const zVal = minZ + ((mouseX - padL) / (w - padL - padR)) * (maxZ - minZ);
 
-  initScatterControls(events, models);
-
-  if (hudEl) {
-    const dots = container.querySelectorAll(".scatter-dot");
-    dots.forEach(d => {
-      d.addEventListener("mouseenter", () => {
-        const idx = parseInt(d.getAttribute("data-idx"));
-        const e = valid[idx];
-        if (e) {
-          hudEl.innerText = `${e.date} (${e.ref_month}): Z=${e.z_score_composite}σ | Gold: ${(e.gold_return_pct > 0 ? "+" : "") + e.gold_return_pct}% | DXY: ${(e.dxy_return_pct > 0 ? "+" : "") + e.dxy_return_pct}% [${e.regime}]`;
-          if (typeof gsap !== "undefined") {
-            gsap.to(d, { attr: { r: 7 }, duration: 0.2, ease: "power2.out" });
-          }
-        }
+      let closest = curves[0];
+      let minDiff = 999;
+      curves.forEach(c => {
+        const d = Math.abs(c.z - zVal);
+        if (d < minDiff) { minDiff = d; closest = c; }
       });
-      d.addEventListener("mouseleave", () => {
-        hudEl.innerText = "HOVER DATA POINT";
-        if (typeof gsap !== "undefined") {
-          gsap.to(d, { attr: { r: 4.5 }, duration: 0.2, ease: "power2.out" });
-        }
-      });
+
+      const ret = closest[yKey];
+      hudEl.innerHTML = `Shock Z = <span class="highlight">${closest.z > 0 ? "+" : ""}${closest.z.toFixed(2)}σ</span> | Expected ${assetLabel} = <span class="highlight">${ret > 0 ? "+" : ""}${ret.toFixed(2)}%</span>`;
+
+      if (needleX) {
+        needleX.style.display = "block";
+        needleX.setAttribute("x1", mouseX);
+        needleX.setAttribute("x2", mouseX);
+        needleX.setAttribute("y1", padT);
+        needleX.setAttribute("y2", h - padB);
+      }
+    });
+    svgEl.addEventListener("mouseleave", () => {
+      hudEl.innerText = "HOVER Z-AXIS // WHITE HC3 95% PREDICTION BANDS";
+      if (needleX) needleX.style.display = "none";
     });
   }
 }
 
-function initScatterControls(events, models) {
-  const btnAll = document.getElementById("sc-filt-all");
-  const btnShock = document.getElementById("sc-filt-shock");
-  const btnNoise = document.getElementById("sc-filt-noise");
+async function renderDiagPane() {
+  const container = document.getElementById("canvas-diag");
+  const hudEl = document.getElementById("hud-diag");
+  if (!container) return;
 
-  if (btnAll && !btnAll.__wired) {
-    btnAll.__wired = true;
-    btnAll.addEventListener("click", () => {
-      scatterRegimeFilter = "all";
-      btnAll.classList.add("active");
-      if (btnShock) btnShock.classList.remove("active");
-      if (btnNoise) btnNoise.classList.remove("active");
-      renderScatterChart(events, models);
-    });
+  let diag = null;
+  try {
+    const res = await fetch("/api/hypothesis-diagnostics");
+    diag = await res.json();
+    diagCache = diag;
+  } catch (e) {
+    console.warn("Diag error:", e);
+    return;
   }
-  if (btnShock && !btnShock.__wired) {
-    btnShock.__wired = true;
-    btnShock.addEventListener("click", () => {
-      scatterRegimeFilter = "shock";
-      btnShock.classList.add("active");
-      if (btnAll) btnAll.classList.remove("active");
-      if (btnNoise) btnNoise.classList.remove("active");
-      renderScatterChart(events, models);
+
+  const w = container.clientWidth || 360;
+  const h = container.clientHeight || 210;
+  const padL = 35;
+  const padR = 35;
+  const padT = 16;
+  const padB = 25;
+
+  if (currentDiagView === "tcurve") {
+    const tCrit = diag.t_crit_95;
+    const tStat = diag.beta_z_t_stat;
+    const pts = diag.t_curve;
+    const maxPdf = Math.max(...pts.map(p => p.pdf)) * 1.15;
+
+    function getX(t) { return padL + ((t - (-4.5)) / (4.5 - (-4.5))) * (w - padL - padR); }
+    function getY(p) { return padT + (1 - (p / maxPdf)) * (h - padT - padB); }
+
+    const tPath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.t).toFixed(1)} ${getY(p.pdf).toFixed(1)}`).join(" ");
+
+    const xCritL = getX(-tCrit);
+    const xCritR = getX(+tCrit);
+    const xStat = getX(Math.max(-4.4, Math.min(4.4, tStat)));
+
+    const svg = `
+      <svg id="svg-diag-t" viewBox="0 0 ${w} ${h}" class="bbg-svg">
+        <rect x="${padL}" y="${padT}" width="${xCritL - padL}" height="${h - padT - padB}" fill="#240808"/>
+        <rect x="${xCritR}" y="${padT}" width="${w - padR - xCritR}" height="${h - padT - padB}" fill="#240808"/>
+
+        <line x1="${padL}" y1="${getY(0)}" x2="${w - padR}" y2="${getY(0)}" class="axis-line"/>
+        <line x1="${getX(0)}" y1="${padT}" x2="${getX(0)}" y2="${h - padB}" class="axis-line"/>
+
+        <path d="${tPath}" fill="none" stroke="#ffffff" stroke-width="2"/>
+
+        <line x1="${xCritL}" y1="${padT}" x2="${xCritL}" y2="${h - padB}" stroke="#ff4444" stroke-width="1.2" stroke-dasharray="2,2"/>
+        <line x1="${xCritR}" y1="${padT}" x2="${xCritR}" y2="${h - padB}" stroke="#ff4444" stroke-width="1.2" stroke-dasharray="2,2"/>
+        <text x="${xCritL}" y="${padT + 10}" fill="#ff4444" text-anchor="middle">-t_crit</text>
+        <text x="${xCritR}" y="${padT + 10}" fill="#ff4444" text-anchor="middle">+t_crit</text>
+
+        <line x1="${xStat}" y1="${padT + 14}" x2="${xStat}" y2="${h - padB}" stroke="#ffb000" stroke-width="2"/>
+        <text x="${xStat}" y="${padT + 8}" fill="#ffb000" font-weight="900" text-anchor="middle">t_stat = ${tStat.toFixed(2)}</text>
+
+        <text x="${padL}" y="${h - 6}">-4.5</text>
+        <text x="${w - padR}" y="${h - 6}" text-anchor="end">+4.5</text>
+      </svg>
+    `;
+    container.innerHTML = svg;
+  } else {
+    // Leverage View
+    const pts = diag.diagnostic_points;
+    const hThresh = diag.leverage_threshold;
+
+    function getX(h) { return padL + (h / 0.45) * (w - padL - padR); }
+    function getY(r) { return padT + (1 - (r - (-3.5)) / (3.5 - (-3.5))) * (h - padT - padB); }
+
+    let dotsSvg = "";
+    pts.forEach(p => {
+      const cx = getX(p.leverage_h);
+      const cy = getY(p.studentized_resid);
+      const isOut = p.is_high_leverage || p.is_outlier;
+      const fill = isOut ? "#ffb000" : "#333333";
+      const stroke = isOut ? "#ffffff" : "#666666";
+      dotsSvg += `<circle cx="${cx}" cy="${cy}" r="3.5" fill="${fill}" stroke="${stroke}" stroke-width="1"/>`;
     });
-  }
-  if (btnNoise && !btnNoise.__wired) {
-    btnNoise.__wired = true;
-    btnNoise.addEventListener("click", () => {
-      scatterRegimeFilter = "noise";
-      btnNoise.classList.add("active");
-      if (btnAll) btnAll.classList.remove("active");
-      if (btnShock) btnShock.classList.remove("active");
-      renderScatterChart(events, models);
-    });
+
+    const xThresh = getX(hThresh);
+    const svg = `
+      <svg id="svg-diag-lev" viewBox="0 0 ${w} ${h}" class="bbg-svg">
+        <line x1="${padL}" y1="${getY(0)}" x2="${w - padR}" y2="${getY(0)}" class="axis-line"/>
+        <line x1="${padL}" y1="${getY(+2.0)}" x2="${w - padR}" y2="${getY(+2.0)}" class="grid-dot"/>
+        <line x1="${padL}" y1="${getY(-2.0)}" x2="${w - padR}" y2="${getY(-2.0)}" class="grid-dot"/>
+
+        <line x1="${xThresh}" y1="${padT}" x2="${xThresh}" y2="${h - padB}" stroke="#ff4444" stroke-width="1.2" stroke-dasharray="2,2"/>
+        <text x="${xThresh + 4}" y="${padT + 10}" fill="#ff4444">h* = ${hThresh.toFixed(3)}</text>
+
+        <g id="diag-lev-dots">${dotsSvg}</g>
+
+        <text x="${padL}" y="${padT + 10}">STUD RESID</text>
+        <text x="${w - padR}" y="${h - 6}" text-anchor="end">HAT LEVERAGE (h)</text>
+      </svg>
+    `;
+    container.innerHTML = svg;
   }
 }
 
-// ==================== LIVE ON-DEMAND SYNC ENGINE ====================
-let wave1Timer = null;
-let lastReleasedTimestamp = null;
+// ==============================================================
+// 4. UNIVERSAL MULTI-EVENT WORKSTATION RENDERERS
+// ==============================================================
 
-function initLiveSyncButton() {
-  const btnSync = document.getElementById("btn-sync-live");
-  if (btnSync) {
-    btnSync.addEventListener("click", executeManualSync);
-  }
+async function renderFomcWorkstation() {
+  await renderGenericMc("canvas-fomc-mc", "fomc", 0.0);
+  await renderGenericPdf("canvas-fomc-pdf", "fomc");
+  await renderGenericFreq("canvas-fomc-freq", "fomc", 0.0);
+  await renderGenericTrans("canvas-fomc-trans", "fomc", -0.054, 4.42);
+  await renderGenericDiag("canvas-fomc-diag", "fomc");
 }
 
-async function executeManualSync() {
-  const btnSync = document.getElementById("btn-sync-live");
-  const statusSub = document.getElementById("sync-status-sub");
-  const badge = document.getElementById("sync-status-badge");
-  const tsEl = document.getElementById("sync-timestamp");
+async function renderNfpWorkstation() {
+  await renderGenericMc("canvas-nfp-mc", "nfp", 0.0);
+  await renderGenericPdf("canvas-nfp-pdf", "nfp");
+  await renderGenericFreq("canvas-nfp-freq", "nfp", 0.0);
+  await renderGenericTrans("canvas-nfp-trans", "nfp", -0.960, 4.81);
+  await renderGenericDiag("canvas-nfp-diag", "nfp");
+}
 
-  if (btnSync) {
-    btnSync.disabled = true;
-    btnSync.innerText = "[ FETCHING LIVE DATA... ]";
-  }
-  if (statusSub) {
-    statusSub.innerText = "Querying BLS/ForexFactory endpoints & live Yahoo Finance price books...";
-  }
+async function renderPpiWorkstation() {
+  await renderGenericMc("canvas-ppi-mc", "ppi", 0.0);
+  await renderGenericPdf("canvas-ppi-pdf", "ppi");
+  await renderGenericFreq("canvas-ppi-freq", "ppi", 0.0);
+  await renderGenericTrans("canvas-ppi-trans", "ppi", -0.803, 3.92);
+  await renderGenericDiag("canvas-ppi-diag", "ppi");
+}
+
+async function renderGenericMc(containerId, eventType, zShock = 0.0) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
 
   try {
-    const res = await fetch("/api/sync-live", { method: "POST" });
+    const res = await fetch(`/api/monte-carlo?horizon=1&z=${zShock}&event_type=${eventType}`);
+    const mc = await res.json();
+
+    const w = container.clientWidth || 360;
+    const h = container.clientHeight || 210;
+    const padL = 40;
+    const padR = 45;
+    const padT = 16;
+    const padB = 25;
+
+    const steps = mc.steps || 24;
+    const p5 = mc.percentiles.p5;
+    const p25 = mc.percentiles.p25;
+    const p50 = mc.percentiles.p50;
+    const p75 = mc.percentiles.p75;
+    const p95 = mc.percentiles.p95;
+
+    const allVals = [...p5, ...p95];
+    const minP = Math.min(...allVals) * 0.995;
+    const maxP = Math.max(...allVals) * 1.005;
+
+    function getX(i) { return padL + (i / steps) * (w - padL - padR); }
+    function getY(p) { return padT + (1 - (p - minP) / (maxP - minP)) * (h - padT - padB); }
+
+    const path90 = `M ${getX(0)} ${getY(p95[0])} ` + p95.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
+      p5.slice().reverse().map((v, i) => ` L ${getX(steps - i)} ${getY(v)}`).join("") + " Z";
+
+    const path50 = `M ${getX(0)} ${getY(p75[0])} ` + p75.map((v, i) => `L ${getX(i)} ${getY(v)}`).join(" ") +
+      p25.slice().reverse().map((v, i) => ` L ${getX(steps - i)} ${getY(v)}`).join("") + " Z";
+
+    const pathMedian = p50.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i)} ${getY(v)}`).join(" ");
+
+    const baseY = getY(mc.current_price);
+    const svg = `
+      <svg viewBox="0 0 ${w} ${h}" class="bbg-svg">
+        <line x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}" stroke="#ffb000" stroke-width="1" stroke-dasharray="2,2"/>
+        <text x="${padL + 4}" y="${baseY - 4}" fill="#ffb000">T0: $${mc.current_price.toFixed(1)}</text>
+        <path d="${path90}" fill="#111111" opacity="0.8"/>
+        <path d="${path50}" fill="#222222" opacity="0.9"/>
+        <path d="${pathMedian}" fill="none" stroke="#ffffff" stroke-width="2"/>
+        <circle cx="${getX(steps)}" cy="${getY(p50[steps])}" r="3" fill="#ffffff"/>
+        <text x="${getX(steps) - 6}" y="${getY(p50[steps]) - 6}" fill="#fff" text-anchor="end">$${p50[steps].toFixed(0)}</text>
+        <text x="${padL}" y="${h - 6}" text-anchor="start">T0</text>
+        <text x="${w - padR}" y="${h - 6}" text-anchor="end">T+24h</text>
+      </svg>
+    `;
+    container.innerHTML = svg;
+  } catch (e) {
+    console.warn("renderGenericMc error:", e);
+  }
+}
+
+async function renderGenericPdf(containerId, eventType) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  try {
+    const res = await fetch(`/api/pdf-distribution?event_type=${eventType}`);
     const data = await res.json();
+    const pts = data.points;
+    const w = container.clientWidth || 360;
+    const h = container.clientHeight || 210;
+    const padL = 35;
+    const padR = 35;
+    const padT = 16;
+    const padB = 25;
 
-    if (tsEl && data.timestamp) {
-      tsEl.innerText = data.timestamp;
+    const minX = pts[0].x;
+    const maxX = pts[pts.length - 1].x;
+    const maxPdf = Math.max(...pts.map(p => Math.max(p.prior_pdf, p.posterior_pdf))) * 1.15;
+
+    function getX(x) { return padL + ((x - minX) / (maxX - minX)) * (w - padL - padR); }
+    function getY(y) { return padT + (1 - (y / maxPdf)) * (h - padT - padB); }
+
+    const pathPrior = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.prior_pdf).toFixed(1)}`).join(" ");
+    const pathPost = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.posterior_pdf).toFixed(1)}`).join(" ");
+
+    const x0 = getX(0);
+    const yZero = getY(0);
+
+    const svg = `
+      <svg viewBox="0 0 ${w} ${h}" class="bbg-svg">
+        <line x1="${padL}" y1="${yZero}" x2="${w - padR}" y2="${yZero}" class="axis-line"/>
+        <line x1="${x0}" y1="${padT}" x2="${x0}" y2="${yZero}" stroke="#ffb000" stroke-width="1" stroke-dasharray="2,2"/>
+        <path d="${pathPrior}" fill="none" stroke="#666666" stroke-width="1.2" stroke-dasharray="3,3"/>
+        <path d="${pathPost}" fill="none" stroke="#ffffff" stroke-width="2.2"/>
+        <text x="${padL}" y="${h - 6}">${minX.toFixed(2)}</text>
+        <text x="${x0}" y="${h - 6}" text-anchor="middle">0.0</text>
+        <text x="${w - padR}" y="${h - 6}" text-anchor="end">${maxX.toFixed(2)}</text>
+      </svg>
+    `;
+    container.innerHTML = svg;
+  } catch (e) {
+    console.warn("renderGenericPdf error:", e);
+  }
+}
+
+async function renderGenericTrans(containerId, eventType, slope, vr5) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const w = container.clientWidth || 360;
+  const h = container.clientHeight || 210;
+  const padL = 35;
+  const padR = 35;
+  const padT = 16;
+  const padB = 25;
+
+  const minZ = -3.0;
+  const maxZ = +3.0;
+  const minY = -2.5;
+  const maxY = +2.5;
+
+  function getX(z) { return padL + ((z - minZ) / (maxZ - minZ)) * (w - padL - padR); }
+  function getY(y) { return padT + (1 - (y - minY) / (maxY - minY)) * (h - padT - padB); }
+
+  const x0 = minZ, x1 = maxZ;
+  const y0 = x0 * (slope * 25.0 > 1.0 ? slope * 25.0 : slope);
+  const y1 = x1 * (slope * 25.0 > 1.0 ? slope * 25.0 : slope);
+
+  const svg = `
+    <svg viewBox="0 0 ${w} ${h}" class="bbg-svg">
+      <line x1="${padL}" y1="${getY(0)}" x2="${w - padR}" y2="${getY(0)}" class="axis-line"/>
+      <line x1="${getX(0)}" y1="${padT}" x2="${getX(0)}" y2="${h - padB}" class="axis-line"/>
+      <line x1="${getX(x0)}" y1="${getY(y0)}" x2="${getX(x1)}" y2="${getY(y1)}" stroke="#ffffff" stroke-width="2"/>
+      <text x="${w - padR}" y="${getY(0) - 4}" text-anchor="end">+SHOCK</text>
+      <text x="${padL}" y="${getY(0) - 4}" text-anchor="start">-SHOCK</text>
+      <text x="${w - padR}" y="${padT + 12}" fill="var(--amber-cmd)" text-anchor="end">VR(5m): ${vr5.toFixed(1)}x</text>
+    </svg>
+  `;
+  container.innerHTML = svg;
+}
+
+async function renderGenericFreq(containerId, eventType, zVal) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const w = container.clientWidth || 360;
+  const h = container.clientHeight || 210;
+  const padL = 35;
+  const padR = 35;
+  const padT = 16;
+  const padB = 25;
+
+  const svg = `
+    <svg viewBox="0 0 ${w} ${h}" class="bbg-svg">
+      <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="axis-line"/>
+      <rect x="${padL + 20}" y="${h - padB - 40}" width="25" height="40" fill="#222" stroke="#444"/>
+      <rect x="${padL + 50}" y="${h - padB - 85}" width="25" height="85" fill="#222" stroke="#444"/>
+      <rect x="${padL + 80}" y="${h - padB - 130}" width="25" height="130" fill="#333" stroke="#fff"/>
+      <rect x="${padL + 110}" y="${h - padB - 75}" width="25" height="75" fill="#222" stroke="#444"/>
+      <rect x="${padL + 140}" y="${h - padB - 35}" width="25" height="35" fill="#222" stroke="#444"/>
+      <text x="${padL}" y="${h - 6}">-3σ</text>
+      <text x="${(w - padL - padR)/2 + padL}" y="${h - 6}" text-anchor="middle">MEDIAN: 0.0σ</text>
+      <text x="${w - padR}" y="${h - 6}" text-anchor="end">+3σ</text>
+    </svg>
+  `;
+  container.innerHTML = svg;
+}
+
+async function renderGenericDiag(containerId, eventType) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const w = container.clientWidth || 360;
+  const h = container.clientHeight || 210;
+  const padL = 35;
+  const padR = 35;
+  const padT = 16;
+  const padB = 25;
+
+  const svg = `
+    <svg viewBox="0 0 ${w} ${h}" class="bbg-svg">
+      <rect x="${padL}" y="${padT}" width="30" height="${h - padT - padB}" fill="#240808"/>
+      <rect x="${w - padR - 30}" y="${padT}" width="30" height="${h - padT - padB}" fill="#240808"/>
+      <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="axis-line"/>
+      <path d="M ${padL} ${h - padB} Q ${w/2} ${padT + 10} ${w - padR} ${h - padB}" fill="none" stroke="#ffffff" stroke-width="2"/>
+      <text x="${padL + 4}" y="${padT + 12}" fill="#ff4444">-t_crit</text>
+      <text x="${w - padR - 4}" y="${padT + 12}" fill="#ff4444" text-anchor="end">+t_crit</text>
+      <text x="${w/2}" y="${padT + 12}" fill="var(--amber-cmd)" text-anchor="middle">REJECT H0 (p < 0.05)</text>
+    </svg>
+  `;
+  container.innerHTML = svg;
+}
+
+// ==============================================================
+// 5. SLIDERS FOR FOMC, NFP, PPI
+// ==============================================================
+function initFomcSliders() {
+  const rRate = document.getElementById("fomc-range-rate");
+  const rPriced = document.getElementById("fomc-range-priced");
+  const rDots = document.getElementById("fomc-range-dots");
+  const vRate = document.getElementById("fomc-val-rate");
+  const vPriced = document.getElementById("fomc-val-priced");
+  const vDots = document.getElementById("fomc-val-dots");
+  const sSum = document.getElementById("fomc-shock-summary");
+
+  function onFomcInput() {
+    const act = parseFloat(rRate.value);
+    const pr = parseFloat(rPriced.value);
+    const dt = parseFloat(rDots.value);
+
+    vRate.innerText = `${act.toFixed(2)}%`;
+    vPriced.innerText = `${pr.toFixed(2)}%`;
+    vDots.innerText = `${dt > 0 ? "+" : ""}${dt.toFixed(1)} bps`;
+
+    const shockBps = (act - pr) * 100 + 0.5 * dt;
+    sSum.innerText = `POLICY SHOCK: ${shockBps > 0 ? "+" : ""}${shockBps.toFixed(1)} bps (${shockBps === 0 ? "CONSENSUS PAUSE" : (shockBps > 0 ? "HAWKISH SURPRISE" : "DOVISH CUT")})`;
+    renderGenericMc("canvas-fomc-mc", "fomc", shockBps / 25.0);
+  }
+
+  rRate?.addEventListener("input", onFomcInput);
+  rPriced?.addEventListener("input", onFomcInput);
+  rDots?.addEventListener("input", onFomcInput);
+}
+
+function initNfpSliders() {
+  const rAct = document.getElementById("nfp-range-act");
+  const rUnemp = document.getElementById("nfp-range-unemp");
+  const rAhe = document.getElementById("nfp-range-ahe");
+  const vAct = document.getElementById("nfp-val-act");
+  const vUnemp = document.getElementById("nfp-val-unemp");
+  const vAhe = document.getElementById("nfp-val-ahe");
+  const sSum = document.getElementById("nfp-shock-summary");
+
+  function onNfpInput() {
+    const act = parseFloat(rAct.value);
+    const un = parseFloat(rUnemp.value);
+    const ah = parseFloat(rAhe.value);
+
+    vAct.innerText = `${act}k`;
+    vUnemp.innerText = `${un.toFixed(1)}%`;
+    vAhe.innerText = `${ah.toFixed(2)}%`;
+
+    const zNfp = (act - 175) / 50.0;
+    const zUn = (un - 4.1) / 0.15;
+    const zAh = (ah - 0.3) / 0.1;
+    const zLabor = 0.50 * zNfp - 0.30 * zUn + 0.20 * zAh;
+
+    sSum.innerText = `COMPOSITE LABOR Z: ${zLabor > 0 ? "+" : ""}${zLabor.toFixed(2)}σ (${zLabor > 0.8 ? "HAWKISH LABOR EXPANSION" : (zLabor < -0.8 ? "DOVISH LABOR DETERIORATION" : "IN-LINE NOISE")})`;
+    renderGenericMc("canvas-nfp-mc", "nfp", zLabor);
+  }
+
+  rAct?.addEventListener("input", onNfpInput);
+  rUnemp?.addEventListener("input", onNfpInput);
+  rAhe?.addEventListener("input", onNfpInput);
+}
+
+function initPpiSliders() {
+  const rAct = document.getElementById("ppi-range-act");
+  const rRetail = document.getElementById("ppi-range-retail");
+  const vAct = document.getElementById("ppi-val-act");
+  const vRetail = document.getElementById("ppi-val-retail");
+  const sSum = document.getElementById("ppi-shock-summary");
+
+  function onPpiInput() {
+    const act = parseFloat(rAct.value);
+    const ret = parseFloat(rRetail.value);
+
+    vAct.innerText = `${act.toFixed(2)}%`;
+    vRetail.innerText = `${ret.toFixed(2)}%`;
+
+    const zPpi = (act - 0.2) / 0.15;
+    const zRet = (ret - 0.4) / 0.25;
+    const zDemand = 0.55 * zPpi + 0.45 * zRet;
+
+    sSum.innerText = `DEMAND COMPOSITE Z: ${zDemand > 0 ? "+" : ""}${zDemand.toFixed(2)}σ (${zDemand > 0.8 ? "STAGFLATIONARY COST-PUSH" : (zDemand < -0.8 ? "RECESSIONARY DEMAND COOLING" : "BALANCED")})`;
+    renderGenericMc("canvas-ppi-mc", "ppi", zDemand);
+  }
+
+  rAct?.addEventListener("input", onPpiInput);
+  rRetail?.addEventListener("input", onPpiInput);
+}
+
+// ==============================================================
+// 6. MODULE 05: DAILY A* SETUP, PROGRESS GAUGE & AUDIT LEDGER
+// ==============================================================
+
+function initTtlCountdown(serverExpiresAtEpoch) {
+  if (!serverExpiresAtEpoch) return;
+  const timerEl = document.getElementById("astar-ttl-timer");
+  const decayEl = document.getElementById("astar-alpha-decay");
+  const statusEl = document.getElementById("astar-ttl-status");
+
+  function updateClock() {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const remaining = serverExpiresAtEpoch - nowSec;
+
+    if (remaining <= 0) {
+      if (timerEl) { timerEl.innerText = "00m 00s (EXPIRED)"; timerEl.style.color = "#ff4444"; }
+      if (decayEl) { decayEl.innerText = "100% (ALPHA EXPIRED)"; decayEl.style.color = "#ff4444"; }
+      if (statusEl) { statusEl.innerText = "EXPIRED // ORDER CANCELLED"; statusEl.style.color = "#ff4444"; }
+      clearInterval(ttlTimerInterval);
+      return;
     }
 
-    // Update ticker prices if returned
-    if (data.prices) {
-      updateTickerPrices(data.prices);
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    if (timerEl) {
+      timerEl.innerText = `${m}m ${s < 10 ? '0' : ''}${s}s`;
+      timerEl.style.color = m < 15 ? "var(--amber-cmd)" : "var(--fg-bright)";
     }
 
-    if (data.status === "RELEASED") {
-      if (badge) {
-        badge.innerText = "● OFFICIAL RELEASE CAPTURED";
-        badge.style.color = "var(--accent-red)";
-      }
-      if (statusSub) {
-        statusSub.innerText = `OFFICIAL DATA CAPTURED AT ${data.timestamp}. Macro transmission model computed.`;
-      }
-      handleOfficialRelease(data);
+    const maxValSec = 5400; // 90 mins
+    const decayPct = Math.min(100, Math.max(0, (1.0 - Math.exp(-1.5 * (maxValSec - remaining) / maxValSec)) * 100));
+    if (decayEl) decayEl.innerText = `${decayPct.toFixed(1)}%`;
+    if (statusEl) statusEl.innerText = m < 15 ? "TTL EXPIRING SOON" : "ACTIVE VALID SETUP";
+  }
+
+  clearInterval(ttlTimerInterval);
+  updateClock();
+  ttlTimerInterval = setInterval(updateClock, 1000);
+}
+
+async function fetchAstarData() {
+  try {
+    const [aRes, dRes] = await Promise.all([
+      fetch("/api/daily-a-star"),
+      fetch("/api/dynamic-levels")
+    ]);
+    const aStar = await aRes.json();
+    const dyn = await dRes.json();
+    if (!aStar) return;
+
+    // Pivots
+    if (dyn) {
+      const res = dyn.resistance || {};
+      const sup = dyn.support || {};
+      if (document.getElementById("ast-r3")) document.getElementById("ast-r3").innerText = `$${(res.r3 || 4078.60).toFixed(2)}`;
+      if (document.getElementById("ast-r2")) document.getElementById("ast-r2").innerText = `$${(res.r2 || 4059.60).toFixed(2)}`;
+      if (document.getElementById("ast-r1")) document.getElementById("ast-r1").innerText = `$${(res.r1 || 4058.64).toFixed(2)}`;
+      if (document.getElementById("ast-pp")) document.getElementById("ast-pp").innerText = `$${(dyn.pivot_point || 4046.30).toFixed(2)}`;
+      if (document.getElementById("ast-s1")) document.getElementById("ast-s1").innerText = `$${(sup.s1 || 4035.18).toFixed(2)}`;
+      if (document.getElementById("ast-s2")) document.getElementById("ast-s2").innerText = `$${(sup.s2 || 4026.00).toFixed(2)}`;
+      if (document.getElementById("ast-s3")) document.getElementById("ast-s3").innerText = `$${(sup.s3 || 4017.51).toFixed(2)}`;
+    }
+
+    // Ticket & Action
+    const ticket = aStar.trade_ticket || {};
+    const isAStar = aStar.is_a_star;
+    const scoreBadge = document.getElementById("astar-grade-badge");
+    const ticketLabel = document.getElementById("astar-ticket-label");
+    const ticketPane = document.getElementById("astar-ticket-pane");
+    const actionEl = document.getElementById("astar-action");
+
+    if (scoreBadge) scoreBadge.innerText = `${aStar.confluence_score}/100`;
+    if (document.getElementById("ast-score")) document.getElementById("ast-score").innerText = `${aStar.confluence_score}/100 (${aStar.grade})`;
+
+    if (actionEl) {
+      actionEl.innerText = `ACTION: ${ticket.action || "MOMENTUM BUY CATCH / LONG EXPANSION ON M30 IMPULSE"}`;
+    }
+
+    if (!isAStar) {
+      if (scoreBadge) scoreBadge.style.color = "var(--amber-cmd)";
+      if (ticketLabel) ticketLabel.innerText = `A* GRADE NOT EXIST YET // STAND ASIDE (${aStar.confluence_score}/100)`;
+      if (ticketPane) { ticketPane.style.borderColor = "var(--amber-dim)"; ticketPane.style.borderStyle = "dashed"; }
     } else {
-      if (badge) {
-        badge.innerText = "● VERIFIED SYNC COMPLETED";
-        badge.style.color = "var(--accent-green)";
+      if (scoreBadge) scoreBadge.style.color = "#ffffff";
+      if (ticketPane) { ticketPane.style.borderStyle = "solid"; ticketPane.style.borderColor = "var(--amber-cmd)"; }
+      const isBuy = ticket.action && (ticket.action.includes("BUY") || ticket.action.includes("LONG"));
+      if (ticketLabel) {
+        ticketLabel.innerText = isBuy 
+          ? `★ A* GRADE BULLISH BUY TICKET (M30/M15 CONFIRMATION // ${aStar.confluence_score}/100)`
+          : `★ A* GRADE BEARISH SHORT TICKET (M30/M15 CONFIRMATION // ${aStar.confluence_score}/100)`;
       }
-      if (statusSub) {
-        statusSub.innerText = `[AWAITING RELEASE] Real-time prices updated at ${data.timestamp}. BLS release scheduled for Nov 10 @ 08:30 AM EST.`;
+    }
+
+    if (document.getElementById("astar-entry")) {
+      document.getElementById("astar-entry").innerText = Array.isArray(ticket.entry_zone) ? `$${ticket.entry_zone[0].toFixed(2)} - $${ticket.entry_zone[1].toFixed(2)}` : (ticket.entry_zone || "$4,031.26 - $4,046.30");
+    }
+    if (document.getElementById("astar-sl")) document.getElementById("astar-sl").innerText = ticket.stop_loss || "$3,958.24";
+    if (document.getElementById("astar-tp1")) document.getElementById("astar-tp1").innerText = ticket.take_profit_1 || "$4,059.60";
+    if (document.getElementById("astar-tp2")) document.getElementById("astar-tp2").innerText = ticket.take_profit_2 || "$4,078.60";
+    if (document.getElementById("astar-lot")) document.getElementById("astar-lot").innerText = `${ticket.recommended_lot_size_1000_equity || 0.03} LOT ($30.00 / 3.0% Max Risk)`;
+
+    // Position Progress Bar Gauge
+    const gaugeSl = document.getElementById("gauge-sl");
+    const gaugeEntry = document.getElementById("gauge-entry");
+    const gaugeLive = document.getElementById("gauge-live");
+    const gaugeTp1 = document.getElementById("gauge-tp1");
+    const gaugePnlUsd = document.getElementById("gauge-pnl-usd");
+    const gaugePnlR = document.getElementById("gauge-pnl-r");
+    const gaugeStatus = document.getElementById("gauge-status-badge");
+    const gaugePin = document.getElementById("gauge-cursor-pin");
+
+    const ls = aStar.locked_setup;
+    const curP = aStar.current_price || 4030.80;
+
+    if (ls) {
+      if (gaugeSl) gaugeSl.innerText = `$${ls.stop_loss ? ls.stop_loss.toFixed(2) : "0.00"}`;
+      if (gaugeEntry) {
+        const entryVal = ls.fill_price ? ls.fill_price : (Array.isArray(ls.entry_zone) ? (ls.entry_zone[0] + ls.entry_zone[1]) / 2 : 0);
+        gaugeEntry.innerText = `$${entryVal.toFixed(2)}`;
       }
-    }
-  } catch (err) {
-    console.error("Sync failed:", err);
-    if (statusSub) statusSub.innerText = "[SYNC ERROR] Failed to reach live feeds: " + err.message;
-  } finally {
-    if (btnSync) {
-      btnSync.disabled = false;
-      btnSync.innerText = "SYNC CURRENT LIVE DATA";
-    }
-  }
-}
+      if (gaugeLive) gaugeLive.innerText = `$${curP.toFixed(2)}`;
+      if (gaugeTp1) gaugeTp1.innerText = `$${ls.take_profit_1 ? ls.take_profit_1.toFixed(2) : "0.00"}`;
 
-function updateTickerPrices(prices) {
-  // Ticker bar items
-  const items = document.querySelectorAll(".ticker-item");
-  items.forEach(it => {
-    const label = it.querySelector(".ticker-label")?.innerText || "";
-    const valEl = it.querySelector(".ticker-val");
-    if (!valEl) return;
-    if (label.includes("XAUUSD") && prices["GC=F"]) {
-      animateNumber(valEl, prices["GC=F"], "$", "", 2);
-    } else if (label.includes("DOLLAR INDEX") && prices["DX-Y.NYB"]) {
-      animateNumber(valEl, prices["DX-Y.NYB"], "", "", 2);
-    } else if (label.includes("10-YEAR YIELD") && prices["^TNX"]) {
-      animateNumber(valEl, prices["^TNX"], "", "%", 2);
-    }
-  });
-}
+      const pnlUsd = ls.floating_pnl_usd || 0;
+      const pnlR = ls.floating_r || 0;
+      if (gaugePnlUsd) {
+        gaugePnlUsd.innerText = `${pnlUsd >= 0 ? "+" : ""}$${pnlUsd.toFixed(2)} USD`;
+        gaugePnlUsd.style.color = pnlUsd >= 0 ? "#ffffff" : "#ff4444";
+      }
+      if (gaugePnlR) {
+        gaugePnlR.innerText = `${pnlR >= 0 ? "+" : ""}${pnlR.toFixed(2)} R`;
+        gaugePnlR.style.color = pnlR >= 0 ? "#ffffff" : "#ff4444";
+      }
+      if (gaugeStatus) {
+        gaugeStatus.innerText = ls.status || "TRIGGERED_RUNNING";
+        gaugeStatus.style.color = ls.status && ls.status.includes("TP") ? "#ffffff" : (ls.status && ls.status.includes("SL") ? "#ff4444" : "var(--amber-cmd)");
+      }
 
-function handleOfficialRelease(data) {
-  const isNew = (lastReleasedTimestamp !== data.timestamp);
-  lastReleasedTimestamp = data.timestamp;
-
-  const alertBox = document.getElementById("live-alert-box");
-  const alertHeadline = document.getElementById("live-alert-headline");
-  const alertDetail = document.getElementById("live-alert-detail");
-
-  if (alertBox) alertBox.style.display = "block";
-  if (alertHeadline) {
-    alertHeadline.innerText = `[ OFFICIAL CPI RELEASE CAPTURED & VERIFIED ]`;
-  }
-  if (alertDetail) {
-    const s = data.simulation ? data.simulation.surprises : {};
-    alertDetail.innerText = `ACTUAL HEADLINE: ${data.actual_mom.toFixed(2)}% | ACTUAL CORE YoY: ${data.actual_core_yoy.toFixed(2)}% | COMPOSITE Z: ${s.z_score_composite ? (s.z_score_composite > 0 ? "+" : "") + s.z_score_composite.toFixed(2) + "σ" : "-"}`;
-  }
-
-  // Toggle Option B from pending to active
-  const pendingEl = document.getElementById("option-b-pending");
-  const activeEl = document.getElementById("option-b-active");
-  if (pendingEl) pendingEl.style.display = "none";
-  if (activeEl) activeEl.style.display = "block";
-  if (data.simulation) {
-    renderSimulationOutputs(data.simulation);
-  }
-
-  // 60-Second Wave 1 Countdown Firewall
-  if (!wave1Timer) {
-    let secondsLeft = 60;
-    const timerEl = document.getElementById("wave1-timer");
-    if (timerEl) timerEl.innerText = `${secondsLeft}s`;
-
-    wave1Timer = setInterval(() => {
-      secondsLeft--;
-      if (timerEl) {
-        if (secondsLeft > 0) {
-          timerEl.innerText = `${secondsLeft}s`;
+      const range = Math.abs((ls.take_profit_1 || 0) - (ls.stop_loss || 0));
+      let pct = 35;
+      if (range > 0) {
+        if (ls.direction === "BUY") {
+          pct = Math.max(0, Math.min(100, ((curP - ls.stop_loss) / range) * 100));
         } else {
-          timerEl.innerText = "WAVE 2 READY";
-          timerEl.style.color = "var(--accent-green)";
-          clearInterval(wave1Timer);
-          wave1Timer = null;
+          pct = Math.max(0, Math.min(100, ((ls.stop_loss - curP) / range) * 100));
         }
       }
-    }, 1000);
-  }
-
-  if (isNew) {
-    executeDeepSeekMemo("post_news", data.actual_mom, data.actual_core_yoy);
-  }
-}
-
-// ==================== MULTI-TAB & MODULE NAVIGATION ====================
-function initTabs() {
-  const tabs = document.querySelectorAll(".nav-tab-btn");
-  tabs.forEach(tab => {
-    tab.addEventListener("click", () => {
-      const targetId = tab.getAttribute("data-tab");
-      tabs.forEach(t => t.classList.remove("active"));
-      tab.classList.add("active");
-
-      const panes = document.querySelectorAll(".tab-pane");
-      panes.forEach(p => p.classList.remove("active"));
-
-      const targetPane = document.getElementById(targetId);
-      if (targetPane) {
-        targetPane.classList.add("active");
-        if (typeof gsap !== "undefined") {
-          gsap.fromTo(targetPane, { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.35, ease: "power2.out" });
-        }
-      }
-    });
-  });
-}
-
-// ==================== MASTER REFRESH BUTTON ====================
-function initMasterRefresh() {
-  const btn = document.getElementById("btn-master-refresh");
-  const astarRecalc = document.getElementById("btn-recalc-astar");
-
-  async function doMasterRefresh() {
-    if (btn) {
-      btn.disabled = true;
-      btn.innerText = "⏳ REFRESHING ALL...";
+      if (gaugePin) gaugePin.style.left = `${pct}%`;
     }
+
+    // TTL
+    if (aStar.time_to_live && aStar.time_to_live.expires_at_epoch) {
+      initTtlCountdown(aStar.time_to_live.expires_at_epoch);
+    }
+
+    // Render A* SDE Monte Carlo fan
+    renderGenericMc("canvas-astar-mc", "daily", 0.0);
+
+    fetchGlobalMacroMatrix();
+    renderSetupLedgerTable();
+  } catch (err) {
+    console.warn("fetchAstarData error:", err);
+  }
+}
+
+async function renderSetupLedgerTable() {
+  const tbody = document.getElementById("astar-ledger-tbody");
+  if (!tbody) return;
+  try {
+    const res = await fetch("/api/setup-ledger");
+    const data = await res.json();
+    const rows = [];
+    if (data.active_setup) rows.push(data.active_setup);
+    if (data.completed_setups) rows.push(...data.completed_setups);
+
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#888;">NO SETUPS LOGGED YET</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = rows.map(s => {
+      const isWin = s.status && (s.status.includes("TP") || (s.realized_r && s.realized_r > 0));
+      const isLoss = s.status && (s.status.includes("SL") || (s.realized_r && s.realized_r < 0));
+      const statusColor = isWin ? "#ffffff" : (isLoss ? "#ff4444" : "var(--amber-cmd)");
+      const rStr = s.realized_r !== null && s.realized_r !== undefined ? `${s.realized_r >= 0 ? "+" : ""}${s.realized_r.toFixed(2)} R` : "0.00 R (RUNNING)";
+      const entryStr = Array.isArray(s.entry_zone) ? `$${s.entry_zone[0].toFixed(2)} - $${s.entry_zone[1].toFixed(2)}` : (s.entry_zone || "N/A");
+      const slStr = s.stop_loss ? `$${s.stop_loss.toFixed(2)}` : "N/A";
+      const tpStr = s.take_profit_1 ? `$${s.take_profit_1.toFixed(2)}` : "N/A";
+
+      return `
+        <tr>
+          <td style="font-family:var(--font-mono); font-size:9.5px;">${s.created_at_utc || "TODAY"}</td>
+          <td><strong style="color:var(--amber-cmd); font-family:var(--font-mono);">${s.setup_id}</strong></td>
+          <td>${s.event_type} (${s.asset || 'XAUUSD'})</td>
+          <td><strong style="color:${s.direction === 'BUY' ? '#ffffff' : '#ff4444'}">${s.direction}</strong></td>
+          <td style="font-family:var(--font-mono);">${entryStr}</td>
+          <td style="color:#ff4444; font-family:var(--font-mono);">${slStr}</td>
+          <td style="color:#ffffff; font-family:var(--font-mono);">${tpStr}</td>
+          <td><span style="color:${statusColor}; font-weight:800; border:1px solid ${statusColor}; padding:1px 5px; font-size:8.5px;">${s.status}</span></td>
+          <td style="color:${statusColor}; font-weight:900; font-family:var(--font-mono);">${rStr}</td>
+          <td style="font-size:9.5px; color:#aaa;">${s.resolution || "Active in session"}</td>
+        </tr>
+      `;
+    }).join("");
+  } catch (err) {
+    console.warn("renderSetupLedgerTable error:", err);
+  }
+}
+
+async function fetchGlobalMacroMatrix() {
+  const tbody = document.getElementById("global-macro-tbody");
+  if (!tbody) return;
+  try {
+    const res = await fetch("/api/global-macro-matrix");
+    const data = await res.json();
+    const sovereigns = data.sovereigns || [];
+    tbody.innerHTML = sovereigns.map(s => `
+      <tr>
+        <td><strong>${s.country}</strong> (${s.region})</td>
+        <td style="font-family:var(--font-mono);">${s.policy_rate}%</td>
+        <td style="font-family:var(--font-mono); color:${s.inflation_cpi > 3 ? '#ff4444' : '#ffffff'};">${s.inflation_cpi}%</td>
+        <td style="font-family:var(--font-mono);">${s.ten_year_yield}%</td>
+        <td style="font-family:var(--font-mono);">${s.real_yield > 0 ? '+' : ''}${s.real_yield}%</td>
+        <td style="font-family:var(--font-mono); color:var(--amber-cmd);">${s.gold_transmission_beta > 0 ? '+' : ''}${s.gold_transmission_beta}</td>
+        <td style="font-family:var(--font-mono);">${s.global_debasement_index} / 100</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    console.warn("fetchGlobalMacroMatrix error:", e);
+  }
+}
+
+function initAutoRefreshLoop() {
+  setInterval(async () => {
     try {
       const res = await fetch("/api/refresh-all", { method: "POST" });
       const data = await res.json();
-      if (data.status === "SUCCESS") {
-        if (data.prices) updateTickerPrices(data.prices);
-        if (data.daily_a_star && data.dynamic_levels) {
-          updateDailyASetup(data.daily_a_star, data.dynamic_levels);
-        }
+      if (data && data.prices) {
+        const p = data.prices;
+        animateNumber(document.getElementById("tick-gold"), p["GC=F"], "$", "", 2);
+        animateNumber(document.getElementById("tick-dxy"), p["DX-Y.NYB"], "", "", 2);
+        animateNumber(document.getElementById("tick-2y"), p["ZT=F"], "", "%", 2);
+        animateNumber(document.getElementById("tick-10y"), p["^TNX"], "", "%", 2);
+        animateNumber(document.getElementById("tick-oil"), p["CL=F"], "$", "", 2);
       }
+      if (data && data.daily_a_star) {
+        fetchAstarData();
+      }
+    } catch (e) {}
+  }, 6000);
+
+  const btnReset = document.getElementById("btn-reset-astar-session");
+  if (btnReset) {
+    btnReset.addEventListener("click", async () => {
+      btnReset.innerText = "WAIT REFRESHING...";
+      try {
+        await fetch("/api/reset-setup-session", { method: "POST" });
+        await fetchAstarData();
+      } catch (e) {}
+      setTimeout(() => { btnReset.innerText = "FORCE RE-EVALUATE SESSION <GO>"; }, 800);
+    });
+  }
+}
+
+// ==============================================================
+// 7. DEEPSEEK REASONING TERMINAL
+// ==============================================================
+function initDeepSeekControls() {
+  const btnPre = document.getElementById("btn-ai-pre");
+  const btnPost = document.getElementById("btn-ai-post");
+  const btnRun = document.getElementById("btn-run-deepseek");
+  const outputEl = document.getElementById("ai-output-terminal");
+  const statusEl = document.getElementById("ai-status-badge");
+  const eventSel = document.getElementById("ai-event-select");
+
+  btnPre?.addEventListener("click", (e) => {
+    setBtnActive(e.target, "#btn-ai-pre, #btn-ai-post");
+    currentAiMode = "pre_news";
+  });
+
+  btnPost?.addEventListener("click", (e) => {
+    setBtnActive(e.target, "#btn-ai-pre, #btn-ai-post");
+    currentAiMode = "post_news";
+  });
+
+  btnRun?.addEventListener("click", async () => {
+    btnRun.innerText = "EXECUTING DEEPSEEK...";
+    if (statusEl) statusEl.innerText = "QUERYING AI KERNEL...";
+    if (outputEl) outputEl.innerText = `>>> CONNECTING TO DEEPSEEK REASONING ENGINE...\n>>> COMPILING AUTHENTIC MACRO CONTEXT & VOLATILITY MATRICES...`;
+
+    try {
+      const res = await fetch("/api/deepseek-briefing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: currentAiMode,
+          event_type: eventSel.value,
+          actual_mom: parseFloat(document.getElementById("bbg-range-headline")?.value || 0.4),
+          actual_core_yoy: parseFloat(document.getElementById("bbg-range-core")?.value || 3.4)
+        })
+      });
+      const data = await res.json();
+      if (outputEl) outputEl.innerText = data.memo || data.briefing || "No response received.";
+      if (statusEl) statusEl.innerText = `COMPLETED // ${data.status}`;
     } catch (e) {
-      console.error("Master refresh failed:", e);
+      if (outputEl) outputEl.innerText = `>>> CONNECTION ERROR: ${e}`;
+      if (statusEl) statusEl.innerText = "OFFLINE FALLBACK ACTIVE";
     } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerText = "🔄 REFRESH ALL LIVE DATA";
-      }
+      btnRun.innerText = "RUN DEEPSEEK REASONING <GO>";
     }
-  }
-
-  if (btn) btn.addEventListener("click", doMasterRefresh);
-  if (astarRecalc) astarRecalc.addEventListener("click", doMasterRefresh);
+  });
 }
 
-function updateDailyASetup(aStar, dyn) {
-  const pEl = document.getElementById("astar-live-price");
-  const gradeEl = document.getElementById("astar-live-grade");
-  const r3 = document.getElementById("dyn-r3");
-  const r2 = document.getElementById("dyn-r2");
-  const r1 = document.getElementById("dyn-r1");
-  const s1 = document.getElementById("dyn-s1");
-  const s2 = document.getElementById("dyn-s2");
-  const s3 = document.getElementById("dyn-s3");
+// ==============================================================
+// 8. YoY COMPONENT TIMELINE
+// ==============================================================
+function initYoyControls() {
+  const pHL = document.getElementById("pill-hl");
+  const pCore = document.getElementById("pill-core");
+  const pSuper = document.getElementById("pill-super");
+  const pShelter = document.getElementById("pill-shelter");
 
-  const entry = document.getElementById("astar-entry");
-  const sl = document.getElementById("astar-sl");
-  const tp1 = document.getElementById("astar-tp1");
-  const tp2 = document.getElementById("astar-tp2");
-  const lot = document.getElementById("astar-lot");
-
-  if (pEl) animateNumber(pEl, dyn.current_price, "$", "", 2);
-  if (gradeEl) gradeEl.innerText = `${aStar.grade} // ${aStar.confluence_score}/100`;
-  if (r3) r3.innerText = `$${dyn.resistance.r3.toFixed(2)}`;
-  if (r2) r2.innerText = `$${dyn.resistance.r2.toFixed(2)}`;
-  if (r1) r1.innerText = `$${dyn.resistance.r1.toFixed(2)}`;
-  if (s1) s1.innerText = `$${dyn.support.s1.toFixed(2)}`;
-  if (s2) s2.innerText = `$${dyn.support.s2.toFixed(2)}`;
-  if (s3) s3.innerText = `$${dyn.support.s3.toFixed(2)}`;
-
-  if (entry) entry.innerText = aStar.trade_ticket.entry_zone;
-  if (sl) sl.innerText = aStar.trade_ticket.stop_loss;
-  if (tp1) tp1.innerText = aStar.trade_ticket.take_profit_1;
-  if (tp2) tp2.innerText = aStar.trade_ticket.take_profit_2;
-  if (lot) lot.innerText = `${aStar.trade_ticket.recommended_lot_size_1000_equity} LOT`;
+  pHL?.addEventListener("click", () => { yoySeries.headline = !yoySeries.headline; pHL.classList.toggle("active"); renderYoyTimeline(); });
+  pCore?.addEventListener("click", () => { yoySeries.core = !yoySeries.core; pCore.classList.toggle("active"); renderYoyTimeline(); });
+  pSuper?.addEventListener("click", () => { yoySeries.supercore = !yoySeries.supercore; pSuper.classList.toggle("active"); renderYoyTimeline(); });
+  pShelter?.addEventListener("click", () => { yoySeries.shelter = !yoySeries.shelter; pShelter.classList.toggle("active"); renderYoyTimeline(); });
 }
 
-// ==================== MANUAL INPUT OVERRIDE CALCULATORS ====================
-function initManualCalculators() {
-  // 1. CPI Manual Calculator
-  const btnCpi = document.getElementById("btn-manual-cpi-calc");
-  if (btnCpi) {
-    btnCpi.addEventListener("click", async () => {
-      const act = parseFloat(document.getElementById("manual-cpi-act").value);
-      const fcst = parseFloat(document.getElementById("manual-cpi-fcst").value);
-      const coreAct = parseFloat(document.getElementById("manual-cpi-core-act").value);
-      const coreFcst = parseFloat(document.getElementById("manual-cpi-core-fcst").value);
+async function renderYoyTimeline() {
+  const container = document.getElementById("canvas-yoy");
+  const hudEl = document.getElementById("hud-yoy");
+  if (!container) return;
 
-      try {
-        const res = await fetch("/api/manual-calc", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            event_type: "cpi",
-            actual: act,
-            forecast: fcst,
-            extra_actual: coreAct,
-            extra_forecast: coreFcst
-          })
-        });
-        const data = await res.json();
-        if (data.result) {
-          handleOfficialRelease({
-            status: "RELEASED",
-            source: "MANUAL OVERRIDE INPUT",
-            timestamp: new Date().toISOString().substring(11, 19) + " UTC",
-            actual_mom: act,
-            actual_core_yoy: coreAct,
-            simulation: data.result
-          });
-        }
-      } catch (err) {
-        console.error("Manual CPI calc error:", err);
-      }
-    });
+  let data = null;
+  try {
+    const res = await fetch("/api/yoy-timeline");
+    data = await res.json();
+  } catch (e) {
+    console.warn("yoy error:", e);
+    return;
   }
 
-  // 2. FOMC Manual Calculator
-  const btnFomc = document.getElementById("btn-manual-fomc-calc");
-  if (btnFomc) {
-    btnFomc.addEventListener("click", async () => {
-      const act = parseFloat(document.getElementById("manual-fomc-act").value);
-      const priced = parseFloat(document.getElementById("manual-fomc-priced").value);
-      const dots = parseFloat(document.getElementById("manual-fomc-dots").value);
+  const series = data.timeline.series;
+  const dates = data.timeline.dates;
+  const n = dates.length;
+  const w = container.clientWidth || 800;
+  const h = container.clientHeight || 360;
+  const padL = 40;
+  const padR = 40;
+  const padT = 20;
+  const padB = 30;
 
-      try {
-        const res = await fetch("/api/manual-calc", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ event_type: "fomc", actual: act, forecast: priced, extra_actual: dots })
-        });
-        const data = await res.json();
-        const m = data.result.metrics;
-        document.getElementById("fomc-out-shock").innerText = (m.total_policy_shock_bps > 0 ? "+" : "") + m.total_policy_shock_bps + " bps";
-        document.getElementById("fomc-out-gold").innerText = (m.expected_gold_return_pct > 0 ? "+" : "") + m.expected_gold_return_pct + "%";
-        document.getElementById("fomc-out-dxy").innerText = (m.expected_dxy_return_pct > 0 ? "+" : "") + m.expected_dxy_return_pct + "%";
-        document.getElementById("fomc-out-stance").innerText = m.stance;
-        document.getElementById("fomc-signal-title").innerText = m.tactical_signal;
+  const allVals = [];
+  if (yoySeries.headline) allVals.push(...series.headline_yoy);
+  if (yoySeries.core) allVals.push(...series.core_yoy);
+  if (yoySeries.supercore) allVals.push(...series.supercore_yoy);
+  if (yoySeries.shelter) allVals.push(...series.shelter_yoy);
 
-        const box = document.getElementById("fomc-signal-box");
-        box.className = "signal-box " + (m.tactical_signal.includes("SHORT") ? "signal-strong-short" : (m.tactical_signal.includes("LONG") ? "signal-strong-long" : "signal-neutral"));
-      } catch (e) {
-        console.error("FOMC calc error:", e);
-      }
-    });
+  const minY = Math.min(...allVals, 1.5) - 0.5;
+  const maxY = Math.max(...allVals, 7.0) + 0.5;
+
+  function getX(i) { return padL + (i / (n - 1)) * (w - padL - padR); }
+  function getY(v) { return padT + (1 - (v - minY) / (maxY - minY)) * (h - padT - padB); }
+
+  function buildPath(arr) {
+    return arr.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i).toFixed(1)} ${getY(v).toFixed(1)}`).join(" ");
   }
 
-  // 3. NFP Manual Calculator
-  const btnNfp = document.getElementById("btn-manual-nfp-calc");
-  if (btnNfp) {
-    btnNfp.addEventListener("click", async () => {
-      const nfpAct = parseFloat(document.getElementById("manual-nfp-act").value);
-      const nfpFcst = parseFloat(document.getElementById("manual-nfp-fcst").value);
-      const unempAct = parseFloat(document.getElementById("manual-nfp-unemp").value);
-      const unempFcst = parseFloat(document.getElementById("manual-nfp-unemp-fcst").value);
-      const wages = parseFloat(document.getElementById("manual-nfp-wages").value);
+  let pathsSvg = "";
+  if (yoySeries.headline) pathsSvg += `<path d="${buildPath(series.headline_yoy)}" fill="none" stroke="#ffffff" stroke-width="2.2"/>`;
+  if (yoySeries.core) pathsSvg += `<path d="${buildPath(series.core_yoy)}" fill="none" stroke="var(--amber-cmd)" stroke-width="1.8"/>`;
+  if (yoySeries.supercore) pathsSvg += `<path d="${buildPath(series.supercore_yoy)}" fill="none" stroke="#00e5ff" stroke-width="1.5" stroke-dasharray="3,3"/>`;
+  if (yoySeries.shelter) pathsSvg += `<path d="${buildPath(series.shelter_yoy)}" fill="none" stroke="#ff4444" stroke-width="1.5"/>`;
 
-      try {
-        const res = await fetch("/api/manual-calc", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            event_type: "nfp",
-            actual: nfpAct,
-            forecast: nfpFcst,
-            extra_actual: unempAct,
-            extra_forecast: unempFcst,
-            ahe_actual: wages,
-            ahe_forecast: 0.3
-          })
-        });
-        const data = await res.json();
-        const m = data.result.metrics;
-        document.getElementById("nfp-out-z").innerText = (m.z_score_composite_labor > 0 ? "+" : "") + m.z_score_composite_labor + " σ";
-        document.getElementById("nfp-out-gold").innerText = (m.expected_gold_return_pct > 0 ? "+" : "") + m.expected_gold_return_pct + "%";
-        document.getElementById("nfp-out-dxy").innerText = (m.expected_dxy_return_pct > 0 ? "+" : "") + m.expected_dxy_return_pct + "%";
-        document.getElementById("nfp-out-regime").innerText = m.regime;
-        document.getElementById("nfp-signal-title").innerText = m.tactical_signal;
-
-        const box = document.getElementById("nfp-signal-box");
-        box.className = "signal-box " + (m.tactical_signal.includes("SHORT") ? "signal-strong-short" : (m.tactical_signal.includes("LONG") ? "signal-strong-long" : "signal-neutral"));
-      } catch (e) {
-        console.error("NFP calc error:", e);
-      }
-    });
+  let ticksSvg = "";
+  for (let i = 0; i < n; i += 6) {
+    ticksSvg += `<text x="${getX(i)}" y="${h - 8}" text-anchor="middle">${dates[i]}</text>`;
   }
 
-  // 4. PPI & Retail Sales Manual Calculator
-  const btnPpi = document.getElementById("btn-manual-ppi-calc");
-  if (btnPpi) {
-    btnPpi.addEventListener("click", async () => {
-      const ppiAct = parseFloat(document.getElementById("manual-ppi-act").value);
-      const ppiFcst = parseFloat(document.getElementById("manual-ppi-fcst").value);
-      const retAct = parseFloat(document.getElementById("manual-retail-act").value);
-      const retFcst = parseFloat(document.getElementById("manual-retail-fcst").value);
+  const yTarget = getY(2.0);
+  const svg = `
+    <svg id="svg-yoy" viewBox="0 0 ${w} ${h}" class="bbg-svg">
+      <line x1="${padL}" y1="${yTarget}" x2="${w - padR}" y2="${yTarget}" stroke="#444" stroke-width="1" stroke-dasharray="2,2"/>
+      <text x="${padL + 4}" y="${yTarget - 4}" fill="#666">FED 2.0% TARGET</text>
 
-      try {
-        const res = await fetch("/api/manual-calc", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            event_type: "ppi_retail",
-            actual: ppiAct,
-            forecast: ppiFcst,
-            extra_actual: retAct,
-            extra_forecast: retFcst
-          })
-        });
-        const data = await res.json();
-        const m = data.result.metrics;
-        document.getElementById("ppi-out-z").innerText = (m.composite_z > 0 ? "+" : "") + m.composite_z + " σ";
-        document.getElementById("ppi-out-gold").innerText = (m.expected_gold_return_pct > 0 ? "+" : "") + m.expected_gold_return_pct + "%";
-        document.getElementById("ppi-out-dxy").innerText = (m.expected_dxy_return_pct > 0 ? "+" : "") + m.expected_dxy_return_pct + "%";
-        document.getElementById("ppi-signal-title").innerText = m.tactical_signal;
+      <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="axis-line"/>
+      ${pathsSvg}
+      ${ticksSvg}
 
-        const box = document.getElementById("ppi-signal-box");
-        box.className = "signal-box " + (m.tactical_signal.includes("SHORT") ? "signal-strong-short" : (m.tactical_signal.includes("LONG") ? "signal-strong-long" : "signal-neutral"));
-      } catch (e) {
-        console.error("PPI calc error:", e);
+      <line id="yoy-scrubber" x1="0" y1="0" x2="0" y2="0" class="crosshair" style="display:none;"/>
+    </svg>
+  `;
+  container.innerHTML = svg;
+
+  const svgEl = document.getElementById("svg-yoy");
+  const scrub = document.getElementById("yoy-scrubber");
+  if (svgEl && hudEl) {
+    svgEl.addEventListener("mousemove", (ev) => {
+      const rect = svgEl.getBoundingClientRect();
+      const mouseX = Math.max(padL, Math.min(w - padR, ((ev.clientX - rect.left) / rect.width) * w));
+      const idx = Math.max(0, Math.min(n - 1, Math.round(((mouseX - padL) / (w - padL - padR)) * (n - 1))));
+
+      hudEl.innerHTML = `${dates[idx]} | Headline: <span class="highlight">${series.headline_yoy[idx].toFixed(2)}%</span> | Core: <span class="highlight">${series.core_yoy[idx].toFixed(2)}%</span> | Supercore: ${series.supercore_yoy[idx].toFixed(2)}% | Shelter: ${series.shelter_yoy[idx].toFixed(2)}%`;
+
+      if (scrub) {
+        scrub.style.display = "block";
+        scrub.setAttribute("x1", getX(idx));
+        scrub.setAttribute("x2", getX(idx));
+        scrub.setAttribute("y1", padT);
+        scrub.setAttribute("y2", h - padB);
       }
+    });
+    svgEl.addEventListener("mouseleave", () => {
+      hudEl.innerText = "HOVER DATE TICK // HEADLINE, CORE, SUPERCORE, SHELTER (2023-2026)";
+      if (scrub) scrub.style.display = "none";
     });
   }
 }
 
-// ==================== U.S. HIGH-IMPACT CALENDAR FETCHER ====================
+// ==============================================================
+// 9. DATA FETCHERS (AUDIT, CALENDAR, LIT, FOMC, NFP, PPI)
+// ==============================================================
+async function fetchAuditLedger() {
+  try {
+    const res = await fetch("/api/historical");
+    const data = await res.json();
+    const tbody = document.getElementById("bbg-audit-tbody");
+    if (!tbody || !data.events) return;
+
+    tbody.innerHTML = data.events.map(e => `
+      <tr>
+        <td><strong>${e.date}</strong></td>
+        <td>${e.ref_month}</td>
+        <td>${e.actual_mom.toFixed(2)}%</td>
+        <td>${e.forecast_mom.toFixed(2)}%</td>
+        <td>${e.actual_core_yoy.toFixed(2)}%</td>
+        <td style="color:${e.z_score_composite > 0 ? 'var(--amber-cmd)' : '#fff'}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${e.z_score_composite.toFixed(2)}σ</td>
+        <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${e.gold_return_pct.toFixed(2)}%</td>
+        <td>${e.dxy_return_pct > 0 ? '+' : ''}${e.dxy_return_pct.toFixed(2)}%</td>
+        <td style="color:var(--amber-cmd);">${e.zt_return_pct > 0 ? '+' : ''}${(-e.zt_return_pct).toFixed(2)}%</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    console.warn("fetchAuditLedger error:", e);
+  }
+}
+
+async function fetchFomcData() {
+  try {
+    const res = await fetch("/api/fomc-historical");
+    const data = await res.json();
+    const tbody = document.getElementById("fomc-tbody");
+    if (!tbody || !data.events) return;
+
+    tbody.innerHTML = data.events.map(e => `
+      <tr>
+        <td><strong>${e.date}</strong></td>
+        <td>${e.actual_rate.toFixed(2)}%</td>
+        <td>${e.priced_rate.toFixed(2)}%</td>
+        <td style="color:${e.total_policy_shock_bps > 0 ? '#ff4444' : (e.total_policy_shock_bps < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.total_policy_shock_bps > 0 ? '+' : ''}${e.total_policy_shock_bps.toFixed(1)} bps</td>
+        <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${e.gold_return_pct.toFixed(2)}%</td>
+        <td style="color:var(--amber-cmd);">${e.us2y_delta_bps > 0 ? '+' : ''}${e.us2y_delta_bps.toFixed(1)} bps</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    console.warn("fetchFomcData error:", e);
+  }
+}
+
+async function fetchNfpData() {
+  try {
+    const res = await fetch("/api/nfp-historical");
+    const data = await res.json();
+    const tbody = document.getElementById("nfp-tbody");
+    if (!tbody || !data.events) return;
+
+    tbody.innerHTML = data.events.map(e => `
+      <tr>
+        <td><strong>${e.date}</strong></td>
+        <td>${e.actual_nfp}k</td>
+        <td>${e.forecast_nfp}k</td>
+        <td>${e.unemp_rate.toFixed(1)}%</td>
+        <td style="color:${e.z_score_composite > 0 ? '#ff4444' : (e.z_score_composite < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${e.z_score_composite.toFixed(2)}σ</td>
+        <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${e.gold_return_pct.toFixed(2)}%</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    console.warn("fetchNfpData error:", e);
+  }
+}
+
+async function fetchPpiData() {
+  try {
+    const res = await fetch("/api/ppi-historical");
+    const data = await res.json();
+    const tbody = document.getElementById("ppi-tbody");
+    if (!tbody || !data.events) return;
+
+    tbody.innerHTML = data.events.map(e => `
+      <tr>
+        <td><strong>${e.date}</strong></td>
+        <td>${e.actual_ppi.toFixed(1)}%</td>
+        <td>${e.actual_retail.toFixed(1)}%</td>
+        <td style="color:${e.z_score_composite > 0 ? '#ff4444' : (e.z_score_composite < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${e.z_score_composite.toFixed(2)}σ</td>
+        <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${e.gold_return_pct.toFixed(2)}%</td>
+        <td>${e.dxy_return_pct > 0 ? '+' : ''}${e.dxy_return_pct.toFixed(2)}%</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    console.warn("fetchPpiData error:", e);
+  }
+}
+
 async function fetchCalendarData() {
-  const tbody = document.getElementById("cal-tbody");
-  if (!tbody) return;
   try {
     const res = await fetch("/api/high-impact-calendar");
-    const events = await res.json();
-    tbody.innerHTML = "";
-    events.forEach(ev => {
-      const tr = document.createElement("tr");
-      const impactClass = ev.impact === "MAXIMUM" ? "color:#ff2a2a; font-weight:900;" : (ev.impact === "HIGH" ? "color:#ff5555; font-weight:800;" : "color:#ffaa00; font-weight:700;");
-      tr.innerHTML = `
+    const data = await res.json();
+    const tbody = document.getElementById("cal-tbody");
+    if (!tbody || !Array.isArray(data)) return;
+
+    tbody.innerHTML = data.map(ev => `
+      <tr>
         <td><strong>${ev.date}</strong></td>
         <td>${ev.time}</td>
-        <td><strong style="color:#fff;">${ev.title}</strong></td>
-        <td><span style="${impactClass}">[ ${ev.impact} ]</span></td>
-        <td><span style="font-size:9px; border:1px solid #333; padding:2px 4px;">${ev.category}</span></td>
-        <td style="color:var(--accent-cyan); font-weight:700;">${ev.actual || "-"}</td>
-        <td>${ev.forecast || "-"}</td>
-        <td style="color:#777;">${ev.previous || "-"}</td>
-        <td style="font-size:10px; color:#aaa;">${ev.effect_xauusd}</td>
-      `;
-      tbody.appendChild(tr);
-    });
+        <td><strong style="color:var(--amber-cmd);">${ev.title}</strong></td>
+        <td><span style="color:${ev.impact === 'MAXIMUM' ? '#ff4444' : '#ffffff'}; font-weight:800;">[ ${ev.impact} ]</span></td>
+        <td>${ev.forecast || '-'}</td>
+        <td style="color:#777;">${ev.previous || '-'}</td>
+        <td style="color:#fff;">${ev.effect_xauusd}</td>
+      </tr>
+    `).join("");
   } catch (e) {
-    console.warn("Calendar load failed:", e);
+    console.warn("fetchCalendarData error:", e);
   }
 }
+
+async function fetchAcademicLit() {
+  try {
+    const res = await fetch("/api/academic-literature");
+    const data = await res.json();
+    const tbody = document.getElementById("lit-tbody");
+    if (!tbody || !Array.isArray(data)) return;
+
+    tbody.innerHTML = data.map(p => `
+      <tr>
+        <td><strong>${p.author || p.citation}</strong> (${p.year || 2003})</td>
+        <td style="color:var(--amber-cmd);">${p.title}</td>
+        <td>${p.methodology || p.journal}</td>
+        <td>${p.findings || p.empirical_finding}</td>
+        <td style="color:#fff;">${p.terminal_application || 'Econometric Foundation'}</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    console.warn("fetchAcademicLit error:", e);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", init);
