@@ -102,7 +102,7 @@ def fetch_tradingview_live_quotes():
     alongside OANDA:XAUUSD, TVC:DXY, TVC:US10Y, TVC:US02Y, and NYMEX:CL1!.
     """
     import subprocess
-    tickers = ["FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!"]
+    tickers = ["FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!", "TVC:VIX"]
     cmd = [
         "curl", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
         "-H", "Content-Type: application/json",
@@ -151,7 +151,8 @@ def fetch_tradingview_live_quotes():
                 quotes["^TNX"] = round(float(close_p), 3)
             elif sym == "NYMEX:CL1!" and close_p is not None:
                 quotes["CL=F"] = round(float(close_p), 2)
-
+            elif sym == "TVC:VIX" and close_p is not None:
+                quotes["VIX"] = round(float(close_p), 2)
         if "GC=F" not in quotes:
             for row in data.get("data", []):
                 sym = row.get("s")
@@ -364,6 +365,7 @@ def get_live_ticks(include_astar: bool = False):
         created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
         res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(
             current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+            wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
             n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc
         )
     return res
@@ -428,7 +430,12 @@ def get_first_passage_win_prob(event_type: str = "daily", is_buy: bool = True):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
     gold = prices.get("GC=F", 4036.17)
-    astar = quant_model.calculate_daily_a_star_setup(current_price=gold)
+    astar = quant_model.calculate_daily_a_star_setup(
+        current_price=gold, atr_m30=prices.get("ATR_M30", 10.50),
+        dxy_val=prices.get("DX-Y.NYB", 102.24), us10y_val=prices.get("^TNX", 5.00), us2y_val=prices.get("ZT=F", 4.75),
+        wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
+        session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
+    )
     return astar.get("first_passage_analysis", {})
 
 @app.get("/api/algorithmic-footprint")
@@ -439,8 +446,12 @@ def get_algorithmic_footprint(event_type: str = "daily"):
 
 @app.get("/api/garch-predicted-shock")
 def get_garch_predicted_shock(event_type: str = "cpi"):
-    return quant_model.predict_garch_shock_dispersion(event_type=event_type)
-
+    live = fetch_live_macro_data()
+    snap = quant_model._load_premarket_snapshot()
+    lead = snap.get("leading_indicators", {})
+    vix_val = live.get("prices", {}).get("VIX", lead.get("vix_last", 17.5))
+    wti_22d = lead.get("wti_22d_pct", 0.0)
+    return quant_model.predict_garch_shock_dispersion(event_type=event_type, vix_val=vix_val, wti_change_pct=wti_22d)
 @app.get("/api/yoy-timeline")
 def get_yoy_timeline():
     with open(os.path.join(DATA_DIR, "cpi_yoy_timeline.json")) as f:
@@ -483,6 +494,7 @@ def get_daily_a_star(price: float = None):
     created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
     return quant_model.calculate_daily_a_star_setup(
         current_price=price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+        wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
         n_paths=10000, setup_created_epoch=created_epoch,
         session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
     )
@@ -521,6 +533,7 @@ def refresh_all():
     active_setup, completed = mgr.evaluate_live_tick(current_gold, live_high=sh, live_low=sl)
     a_star = quant_model.calculate_daily_a_star_setup(
         current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+        wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
         n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc
     )
 
@@ -654,7 +667,7 @@ def deepseek_briefing(req: DeepSeekRequest):
         dxy = prices.get("DX-Y.NYB", 102.24)
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
-        astar = quant_model.calculate_daily_a_star_setup(current_price=gold, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y)
+        astar = quant_model.calculate_daily_a_star_setup(current_price=gold, atr_m30=prices.get("ATR_M30", 10.50), dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
         ticket = astar["trade_ticket"]
         rat = astar.get("setup_rationale", {})
         gate = astar.get("data_validation_gate", {})
@@ -827,6 +840,7 @@ def get_state():
     created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
     astar = quant_model.calculate_daily_a_star_setup(
         current_price=gold_price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+        wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
         n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc
     )
     pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)

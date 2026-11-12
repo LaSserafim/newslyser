@@ -51,7 +51,7 @@ def load_data():
     return hist, tomorrow, macro
 
 def fetch_live_quotes():
-    tickers = ["FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!"]
+    tickers = ["FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!", "TVC:VIX"]
     cmd = [
         "curl", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
         "-H", "Content-Type: application/json",
@@ -86,6 +86,8 @@ def fetch_live_quotes():
                         mapping["^TNX"] = round(float(d[0]), 3)
                     elif s == "NYMEX:CL1!":
                         mapping["CL=F"] = round(float(d[0]), 2)
+                    elif s == "TVC:VIX":
+                        mapping["VIX"] = round(float(d[0]), 2)
             if "GC=F" not in mapping:
                 for row in data:
                     s = row.get("s", "")
@@ -116,7 +118,7 @@ def get_state():
     us2y = prices.get("ZT=F", 4.75)
 
     dyn = quant_model.calculate_dynamic_levels(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
-    astar = quant_model.calculate_daily_a_star_setup(current_price=gold_price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
+    astar = quant_model.calculate_daily_a_star_setup(current_price=gold_price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
     pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=gold_price, atr_m30=atr_val)
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
@@ -237,7 +239,7 @@ def get_live_ticks(include_astar: bool = False):
         dxy = prices.get("DX-Y.NYB", 102.28)
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
-        res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
+        res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
     return res
 
 @app.get("/api/pre-news-model")
@@ -324,7 +326,7 @@ def get_daily_a_star(price: float = None):
     dxy = prices.get("DX-Y.NYB", 102.28)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
-    return quant_model.calculate_daily_a_star_setup(current_price=gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, n_paths=10000, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
+    return quant_model.calculate_daily_a_star_setup(current_price=gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
 
 @app.get("/api/dynamic-levels")
 def get_dynamic_levels(price: float = None):
@@ -352,7 +354,7 @@ def refresh_all():
     dyn_levels = quant_model.calculate_dynamic_levels(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     mgr = quant_model.SetupLifecycleManager()
     mgr.evaluate_live_tick(current_gold, live_high=sh, live_low=sl)
-    a_star = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
+    a_star = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
     pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)

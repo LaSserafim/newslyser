@@ -231,7 +231,7 @@ def build_all_datasets():
     # Download Yahoo Finance daily market history strictly through today + 1 (since yfinance end is exclusive)
     end_dt = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"[YFINANCE] Downloading market history 2023-12-15 -> {end_dt}...")
-    tickers = ["GC=F", "DX-Y.NYB", "ZT=F", "ZQ=F", "^TNX", "CL=F", "HG=F"]
+    tickers = ["GC=F", "DX-Y.NYB", "ZT=F", "ZQ=F", "^TNX", "CL=F", "HG=F", "^VIX"]
     mkt = yf.download(tickers, start="2023-12-15", end=end_dt, interval="1d", progress=False, auto_adjust=False)
     dgs2_df = fred["DGS2"].dropna() if "DGS2" in fred else None
     tips_df = fred["DFII10"].dropna() if "DFII10" in fred else None
@@ -595,6 +595,7 @@ def build_all_datasets():
 
     wti_last, wti_22d = _pct22("CL=F")
     hg_last, hg_22d = _pct22("HG=F")
+    vix_last, _ = _pct22("^VIX")
     zq_s = mkt["Close"]["ZQ=F"].dropna() if ("Close" in mkt and "ZQ=F" in mkt["Close"]) else pd.Series(dtype=float)
     zq_implied = round(100.0 - float(zq_s.iloc[-1]), 3) if not zq_s.empty else 4.00
     taru_last = round(float(fred["DFEDTARU"]["DFEDTARU"].dropna().iloc[-1]), 2) if "DFEDTARU" in fred else 4.00
@@ -651,6 +652,7 @@ def build_all_datasets():
         "leading_indicators": {
             "wti_last": wti_last,
             "wti_22d_pct": wti_22d,
+            "vix_last": vix_last if vix_last > 0 else 17.5,
             "copper_last": hg_last,
             "copper_22d_pct": hg_22d,
             "t10yie_last": t10_last,

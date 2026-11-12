@@ -910,7 +910,7 @@ class SetupLifecycleManager:
         self._save(data)
         return active, data.get("completed_setups", [])
 
-def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.20, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None):
+def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None):
     """
     INSTITUTIONAL QUANTITATIVE A* SETUP ENGINE (10,000-PATH MONTE CARLO & REAL DATA GATES):
     Integrates 10,000-Path Monte Carlo First-Passage Time Win Probability P(Win),
@@ -940,13 +940,17 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     mgr = SetupLifecycleManager()
     active_locked, completed_list = mgr.evaluate_live_tick(current_price)
 
-    # 1. Fundamental Macro Transmission
+    # 1. Fundamental Macro Transmission (Synced to live snapshot T10YIE & WTI)
+    snap = _load_premarket_snapshot()
+    lead = snap.get("leading_indicators", {})
+    t10yie_live = float(lead.get("t10yie_last", 2.20))
+    wti_22d_live = float(lead.get("wti_22d_pct", 0.0))
+    vix_live = float(vix_val if vix_val is not None else lead.get("vix_last", 17.5))
     yield_spread = round(us10y_val - us2y_val, 3)
-    tips_real_proxy = round(us10y_val - 2.23, 2)
+    tips_real_proxy = round(us10y_val - t10yie_live, 2)
     dxy_z = round((dxy_val - 102.00) / 0.80, 2)
     oil_shift = round(((wti_val - 85.00) / 10.00) * 0.142, 3)
     macro_drift = (-0.38 * dxy_z - 0.25 * (yield_spread - 0.20) + 0.18 * oil_shift) / 100.0
-
     # 2. Quantitative Momentum Vector
     price_displacement = round(current_price - PP, 2)
     m30_velocity = round(price_displacement / max(1.0, atr_m30), 2)
@@ -1000,9 +1004,9 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             ticket_type = "BULLISH_MONTE_CARLO_MOMENTUM"
             entry_low = round(current_price - 0.15 * atr_m30, 2)
             entry_high = round(current_price + 0.15 * atr_m30, 2)
-            sl_val = round(entry_low - 0.85 * atr_m30, 2)
-            tp1_val = round(entry_high + 1.50 * atr_m30, 2)
-            tp2_val = round(entry_high + 2.60 * atr_m30, 2)
+            sl_val = round(entry_low - 0.70 * atr_m30, 2)
+            tp1_val = round(entry_high + 1.75 * atr_m30, 2)
+            tp2_val = round(entry_high + 2.80 * atr_m30, 2)
             risk = max(1.0, entry_high - sl_val)
             reward = tp1_val - entry_high
             rr = round(reward / risk, 2)
@@ -1012,9 +1016,9 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             ticket_type = "BEARISH_MONTE_CARLO_MOMENTUM"
             entry_low = round(current_price - 0.15 * atr_m30, 2)
             entry_high = round(current_price + 0.15 * atr_m30, 2)
-            sl_val = round(entry_high + 0.85 * atr_m30, 2)
-            tp1_val = round(entry_low - 1.50 * atr_m30, 2)
-            tp2_val = round(entry_low - 2.60 * atr_m30, 2)
+            sl_val = round(entry_high + 0.70 * atr_m30, 2)
+            tp1_val = round(entry_low - 1.75 * atr_m30, 2)
+            tp2_val = round(entry_low - 2.80 * atr_m30, 2)
             risk = max(1.0, sl_val - entry_low)
             reward = entry_low - tp1_val
             rr = round(reward / risk, 2)
@@ -1024,14 +1028,14 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         fp_analysis = calculate_first_passage_win_probability(current_price, mid_entry, sl_val, tp1_val, drift_pct=macro_drift*100, atr_m30=atr_m30, is_buy=is_bullish, n_paths=n_paths)
         p_win = fp_analysis["win_probability_pct"]
 
-    # 5. Algorithmic Footprint & GARCH-X Predicted Shock
+    # 5. Algorithmic Footprint & GARCH-X Predicted Shock (Live VIX & WTI 22D%)
     footprint = compute_algorithmic_footprint("daily", current_price, atr_m30)
-    garch_shock = predict_garch_shock_dispersion("daily", 0.45, 19.46, 12.11)
+    garch_shock = predict_garch_shock_dispersion("daily", 0.45, vix_live, wti_22d_live)
     ttl = calculate_time_to_live_status("daily", setup_created_epoch=setup_created_epoch)
 
-    # 6. Empirical Confluence Scoring
+    # 6. Empirical Confluence Scoring (Pillar 2 tied strictly to First-Passage P(Win))
     macro_score = 24 if abs(macro_drift) > 0.0005 else (20 if abs(macro_drift) > 0.0002 else 16)
-    mc_prob_score = min(25, int(round(max(p_up, p_down) * 0.40)))
+    mc_prob_score = 25 if p_win >= 68.0 else (21 if p_win >= 60.0 else (16 if p_win >= 50.0 else 10))
     vol_score = 24 if footprint["is_algorithmic_flow"] else 18
     cross_score = 24 if (abs(yield_spread) >= 0.15 and abs(dxy_z) >= 0.30) else 19
     total_confluence = macro_score + mc_prob_score + vol_score + cross_score
@@ -1110,8 +1114,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         max_risk_usd = f"${round(safe_lot * 100.0 * risk_dist_dollars, 2):.2f} (<= $30.00 Cap)"
         bias_reason = f"{bias}: Spot ${current_price:.2f} vs Pivot ${PP:.2f}; {n_paths:,}-Path MC P(Win)={p_win}%, P(Up)={p_up}%, P(Down)={p_down}%."
         entry_reason = f"Entry zone ${entry_low:.2f} - ${entry_high:.2f} brackets M30 momentum corridor ({m30_velocity:+.2f} ATR)."
-        sl_reason = f"Stop loss ${sl_val:.2f} anchored to 0.85 ATR structural invalidation."
-        tp_reason = f"TP1 ${tp1_val:.2f} (1.50 ATR) & TP2 ${tp2_val:.2f} (2.60 ATR)."
+        sl_reason = f"Stop loss ${sl_val:.2f} anchored to 0.70 ATR structural invalidation."
+        tp_reason = f"TP1 ${tp1_val:.2f} (1.75 ATR) & TP2 ${tp2_val:.2f} (2.80 ATR)."
 
     rationale = {
         "bias_reason": bias_reason,

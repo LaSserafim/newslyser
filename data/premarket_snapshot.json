@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-11-12 02:22:10 UTC",
+  "generated_at_utc": "2026-11-12 02:41:49 UTC",
   "snapshot_policy": "FROZEN_MACRO_CONDITION (UPDATES ONLY ON STARTUP / SYNC LIVE / OFFICIAL RELEASE)",
   "global_macro": {
     "global_surprise_index_gsi": 0.82,
@@ -8,10 +8,11 @@
     "us_minus_g7_rate_spread_pct": 1.53
   },
   "leading_indicators": {
-    "wti_last": 85.96,
-    "wti_22d_pct": -8.69,
-    "copper_last": 6.272,
-    "copper_22d_pct": -6.08,
+    "wti_last": 85.9,
+    "wti_22d_pct": -8.75,
+    "vix_last": 17.49,
+    "copper_last": 6.267,
+    "copper_22d_pct": -6.15,
     "t10yie_last": 2.2,
     "t10yie_22d_chg": -0.13,
     "zq_implied_rate_pct": 4.175,

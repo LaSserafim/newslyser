@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-11 00:00:00 UTC",
+  "timestamp": "2026-11-12 02:40:00 UTC",
   "benchmark": "XAUUSD GOLD SPOT / MULTILATERAL SOVEREIGN DISCOUNT",
   "global_surprise_index_gsi": 0.82,
   "global_fiat_debasement_score": 84.5,
@@ -7,11 +7,11 @@
     "USD": {
       "country": "United States",
       "currency": "USD",
-      "headline_cpi_yoy": 3.1,
+      "headline_cpi_yoy": 3.7,
       "core_cpi_yoy": 2.8,
-      "policy_rate": 5.0,
-      "real_policy_rate": 2.2,
-      "tips_10y_real_yield": 2.77,
+      "policy_rate": 4.0,
+      "real_policy_rate": 1.23,
+      "tips_10y_real_yield": 2.66,
       "dxy_weight_pct": 0.0,
       "gold_transmission_beta": -0.85,
       "regime": "RESTRICTIVE_HOLD",
