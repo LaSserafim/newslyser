@@ -932,21 +932,54 @@ def build_all_datasets():
         req_ff = urllib.request.Request("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req_ff, timeout=4.0) as r_ff:
             ff_week = json.loads(r_ff.read().decode("utf-8"))
-        for row_c in cal_rows:
-            if "jobless" in row_c["title"].lower() or "unemployment" in row_c["title"].lower():
-                for it in ff_week:
-                    if it.get("country") == "USD" and "unemployment claims" in it.get("title", "").lower():
-                        row_c["date"] = str(it.get("date", row_c["date"]))[:10]
-                        if it.get("forecast"): row_c["forecast"] = it["forecast"]
-                        if it.get("previous"): row_c["previous"] = it["previous"]
-                        if it.get("actual"): row_c["actual"] = it["actual"]
-                        if it.get("impact"): row_c["impact"] = str(it["impact"]).upper()
-                        break
+        for it in ff_week:
+            if it.get("country") != "USD":
+                continue
+            imp = str(it.get("impact", "")).upper()
+            if imp not in ["MEDIUM", "HIGH", "MAXIMUM"]:
+                continue
+            dt_full = str(it.get("date", ""))
+            dt_day = dt_full[:10]
+            title_ff = it.get("title", "")
+            title_l = title_ff.lower()
+            matched = False
+            for row_c in cal_rows:
+                rc_l = row_c["title"].lower()
+                if row_c["date"] == dt_day and (
+                    ("unemployment" in rc_l and "unemployment claims" in title_l) or
+                    ("core cpi" in rc_l and "core cpi" in title_l) or
+                    ("cpi" in rc_l and "core" not in rc_l and "cpi m/m" in title_l and "core" not in title_l) or
+                    ("ppi" in rc_l and "core" not in rc_l and "ppi m/m" in title_l and "core" not in title_l)
+                ):
+                    if it.get("forecast"): row_c["forecast"] = it["forecast"]
+                    if it.get("previous"): row_c["previous"] = it["previous"]
+                    if it.get("actual"): row_c["actual"] = it["actual"]
+                    row_c["impact"] = imp
+                    matched = True
+                    break
+            if not matched:
+                hr = int(dt_full[11:13]) if len(dt_full) >= 13 and dt_full[11:13].isdigit() else 8
+                mn = dt_full[14:16] if len(dt_full) >= 16 else "30"
+                wib_hr = (hr + 12) % 24
+                sess = "LONDON/EARLY NY" if hr < 8 else ("NY PRE-MARKET / US OPEN" if hr == 8 else ("NY CASH SESSION" if hr < 13 else "NY AFTERNOON"))
+                cal_rows.append({
+                    "event_id": f"ff_{dt_day}_{abs(hash(title_ff)) % 10000}",
+                    "title": title_ff,
+                    "country": "USD",
+                    "date": dt_day,
+                    "time": f"{hr:02d}:{mn} EST ({wib_hr:02d}:{mn} WIB) [{sess}]",
+                    "impact": imp,
+                    "actual": it.get("actual") or "",
+                    "forecast": it.get("forecast") or "",
+                    "previous": it.get("previous") or "",
+                    "category": "FED_SPEAK" if "fomc" in title_l or "speaks" in title_l else "MACRO_WEEKLY",
+                    "effect_xauusd": f"{imp}-IMPACT USD RELEASE ({sess})"
+                })
+        cal_rows.sort(key=lambda r: (r.get("date", ""), r.get("time", "")))
     except Exception:
         pass
     with open(os.path.join(DATA_DIR, "high_impact_calendar.json"), "w") as f:
         json.dump(cal_rows, f, indent=2)
-
     # Refresh macro_summary.json with authentic latest FRED tails
     macro_summary = {}
     summary_map = {

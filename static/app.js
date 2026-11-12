@@ -386,6 +386,30 @@ function initAllControls() {
     window.SELECTED_CONFIDENCE = parseInt(e.target.value || "95", 10);
     ["cpi", "fomc", "nfp", "ppi"].forEach(ev => renderEventMcPane(ev));
   });
+  // Update All Economy & Statistics Data <GO>
+  async function runFullDataUpdate(btnEl, defaultLabel) {
+    if (btnEl) btnEl.innerText = "UPDATING ALL DATA...";
+    try { await fetch("/api/update-all-data", { method: "POST" }); } catch (e) {}
+    yoyTimelineCache = null;
+    await Promise.all([fetchPremarketSnapshot(false), fetchState(), fetchAuditLedger(), fetchFomcData(), fetchNfpData(), fetchPpiData(), fetchCalendarData(), fetchAstarData()]);
+    const mod = getActiveModuleId();
+    if (mod === "mod-cpi") renderWorkstation("cpi");
+    else if (mod === "mod-fomc") renderWorkstation("fomc");
+    else if (mod === "mod-nfp") renderWorkstation("nfp");
+    else if (mod === "mod-ppi") renderWorkstation("ppi");
+    else if (mod === "mod-cal") fetchCalendarData();
+    else if (mod === "mod-yoy") renderYoyTimeline();
+    if (btnEl) setTimeout(() => { btnEl.innerText = defaultLabel; }, 600);
+  }
+  document.getElementById("btn-update-all-data")?.addEventListener("click", (e) => {
+    runFullDataUpdate(e.target, "UPDATE ALL DATA <GO>");
+  });
+  document.querySelectorAll(".btn-update-history").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      runFullDataUpdate(btn, "UPDATE HISTORY <GO>");
+    });
+  });
 
 
   // CPI PDF event toggle buttons (CPI / FOMC / NFP)
@@ -1560,15 +1584,33 @@ async function renderSetupLedgerTable() {
     if (data.active_setup) rows.push(data.active_setup);
     if (data.completed_setups) rows.push(...data.completed_setups);
     if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#888;">NO SETUPS LOGGED YET</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#888;">NO SETUPS LOGGED YET</td></tr>`;
       return;
     }
+    let sumAbsPips = 0, sumSignedPips = 0, pipCnt = 0;
     tbody.innerHTML = rows.map(s => {
       const isWin = s.status && (s.status.includes("TP") || (s.realized_r && s.realized_r > 0));
       const isLoss = s.status && (s.status.includes("SL") || (s.realized_r && s.realized_r < 0));
       const c = isWin ? "#ffffff" : (isLoss ? "#ff4444" : "var(--amber-cmd)");
       const rStr = s.realized_r !== null && s.realized_r !== undefined ? `${s.realized_r >= 0 ? "+" : ""}${s.realized_r.toFixed(2)} R` : "0.00 R";
       const eStr = Array.isArray(s.entry_zone) ? `$${s.entry_zone[0].toFixed(2)} - $${s.entry_zone[1].toFixed(2)}` : (s.entry_zone || "N/A");
+      const entryRef = s.fill_price || (Array.isArray(s.entry_zone) ? (s.entry_zone[0] + s.entry_zone[1]) / 2.0 : null);
+      const exitRef = s.exit_price || (s.status && s.status.includes("TP") ? s.take_profit_1 : (s.status && s.status.includes("SL") ? s.stop_loss : null));
+      let pipsMoved = null;
+      if (entryRef && exitRef) {
+        pipsMoved = (s.direction === "BUY" ? (exitRef - entryRef) : (entryRef - exitRef)) * 10.0;
+      } else if (entryRef && s.realized_r && s.stop_loss) {
+        pipsMoved = s.realized_r * Math.abs(entryRef - s.stop_loss) * 10.0;
+      } else if (s.floating_r && entryRef && s.stop_loss) {
+        pipsMoved = s.floating_r * Math.abs(entryRef - s.stop_loss) * 10.0;
+      }
+      if (pipsMoved !== null && !isNaN(pipsMoved)) {
+        sumAbsPips += Math.abs(pipsMoved);
+        sumSignedPips += pipsMoved;
+        pipCnt += 1;
+      }
+      const pipStr = pipsMoved !== null ? `${pipsMoved >= 0 ? "+" : ""}${pipsMoved.toFixed(1)} pips` : "--";
+      const pipColor = pipsMoved === null ? "#888" : (pipsMoved >= 0 ? "#00e5ff" : "#ff4444");
       return `
         <tr>
           <td>${s.created_at_utc || "TODAY"}</td>
@@ -1579,11 +1621,18 @@ async function renderSetupLedgerTable() {
           <td style="color:#ff4444;">${s.stop_loss ? `$${s.stop_loss.toFixed(2)}` : "N/A"}</td>
           <td>${s.take_profit_1 ? `$${s.take_profit_1.toFixed(2)}` : "N/A"}</td>
           <td><span style="color:${c}; border:1px solid ${c}; padding:1px 4px; font-size:8.5px;">${s.status}</span></td>
+          <td style="color:${pipColor}; font-weight:800;">${pipStr}</td>
           <td style="color:${c}; font-weight:900;">${rStr}</td>
           <td style="color:#aaa;">${s.resolution || "Active"}</td>
         </tr>
       `;
     }).join("");
+    const astAvgEl = document.getElementById("astar-avg-pips");
+    if (astAvgEl && pipCnt > 0) {
+      const avgAbs = (sumAbsPips / pipCnt).toFixed(1);
+      const avgSig = (sumSignedPips / pipCnt).toFixed(1);
+      astAvgEl.innerText = `AVG PIPS: |Δ| ${avgAbs} pips (NET: ${avgSig >= 0 ? "+" : ""}${avgSig} pips)`;
+    }
   } catch (e) {}
 }
 
@@ -2059,6 +2108,13 @@ function computeMeanAndSd(events) {
   const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, rets.length - 1);
   return { mean, sd: Math.max(0.01, Math.sqrt(variance)) };
 }
+function computeAvgPips(events) {
+  const pips = events.map(e => (Number(e.gold_close || 0) - Number(e.gold_open || 0)) * 10.0);
+  const avgAbs = pips.reduce((a, b) => a + Math.abs(b), 0) / Math.max(1, pips.length);
+  const avgSigned = pips.reduce((a, b) => a + b, 0) / Math.max(1, pips.length);
+  return { avgAbs: avgAbs.toFixed(1), avgSigned: avgSigned.toFixed(1) };
+}
+
 
 async function fetchAuditLedger() {
   try {
@@ -2069,8 +2125,12 @@ async function fetchAuditLedger() {
     const cpiTit = document.getElementById("audit-title-cpi");
     if (cpiTit && data.count) cpiTit.innerText = `[ 07 // AUDIT <GO> : ${data.count}-RELEASE EMPIRICAL POST-NEWS PRICE MOVEMENT RECORD ]`;
     const { mean, sd } = computeMeanAndSd(data.events);
+    const { avgAbs, avgSigned } = computeAvgPips(data.events);
+    const cpiAvgEl = document.getElementById("cpi-avg-pips");
+    if (cpiAvgEl) cpiAvgEl.innerText = `AVG PIPS: |Δ| ${avgAbs} pips (SIGNED: ${avgSigned >= 0 ? "+" : ""}${avgSigned} pips)`;
     tbody.innerHTML = data.events.map(e => {
       const distSd = (e.gold_return_pct - mean) / sd;
+      const pips = (Number(e.gold_close) - Number(e.gold_open)) * 10.0;
       return `
         <tr>
           <td><strong>${e.date}</strong></td>
@@ -2080,6 +2140,7 @@ async function fetchAuditLedger() {
           <td>${e.actual_core_yoy.toFixed(2)}%</td>
           <td style="color:${e.z_score_composite > 0 ? 'var(--amber-cmd)' : '#fff'}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${e.z_score_composite.toFixed(2)}σ</td>
           <td>$${Number(e.gold_open).toFixed(1)} → $${Number(e.gold_close).toFixed(1)}</td>
+          <td style="color:${pips >= 0 ? '#00e5ff' : '#ff4444'}; font-weight:800;">${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips</td>
           <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${e.gold_return_pct.toFixed(2)}%</td>
           <td style="color:${Math.abs(distSd) >= 1.0 ? 'var(--amber-cmd)' : '#999'};">${distSd >= 0 ? '+' : ''}${distSd.toFixed(2)}σ</td>
           <td>${e.dxy_return_pct > 0 ? '+' : ''}${e.dxy_return_pct.toFixed(2)}%</td>
@@ -2098,8 +2159,12 @@ async function fetchFomcData() {
     const fomcTit = document.getElementById("audit-title-fomc");
     if (fomcTit && data.count) fomcTit.innerText = `[ 07 // AUDIT <GO> : ${data.count}-MEETING FOMC POST-NEWS PRICE MOVEMENT RECORD ]`;
     const { mean, sd } = computeMeanAndSd(data.events);
+    const { avgAbs, avgSigned } = computeAvgPips(data.events);
+    const fomcAvgEl = document.getElementById("fomc-avg-pips");
+    if (fomcAvgEl) fomcAvgEl.innerText = `AVG PIPS: |Δ| ${avgAbs} pips (SIGNED: ${avgSigned >= 0 ? "+" : ""}${avgSigned} pips)`;
     tbody.innerHTML = data.events.map(e => {
       const distSd = (e.gold_return_pct - mean) / sd;
+      const pips = (Number(e.gold_close) - Number(e.gold_open)) * 10.0;
       return `
         <tr>
           <td><strong>${e.date}</strong></td>
@@ -2107,6 +2172,7 @@ async function fetchFomcData() {
           <td>${Number(e.priced_rate).toFixed(2)}%</td>
           <td style="color:${e.total_policy_shock_bps > 0 ? '#ff4444' : (e.total_policy_shock_bps < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.total_policy_shock_bps > 0 ? '+' : ''}${Number(e.total_policy_shock_bps).toFixed(1)} bps</td>
           <td>$${Number(e.gold_open).toFixed(1)} → $${Number(e.gold_close).toFixed(1)}</td>
+          <td style="color:${pips >= 0 ? '#00e5ff' : '#ff4444'}; font-weight:800;">${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips</td>
           <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${Number(e.gold_return_pct).toFixed(2)}%</td>
           <td style="color:${Math.abs(distSd) >= 1.0 ? 'var(--amber-cmd)' : '#999'};">${distSd >= 0 ? '+' : ''}${distSd.toFixed(2)}σ</td>
           <td style="color:var(--amber-cmd);">${e.us2y_delta_bps > 0 ? '+' : ''}${Number(e.us2y_delta_bps).toFixed(1)} bps</td>
@@ -2127,8 +2193,12 @@ async function fetchNfpData() {
     const nfpTit = document.getElementById("audit-title-nfp");
     if (nfpTit && data.count) nfpTit.innerText = `[ 07 // AUDIT <GO> : ${data.count}-RELEASE NFP POST-NEWS PRICE MOVEMENT RECORD ]`;
     const { mean, sd } = computeMeanAndSd(data.events);
+    const { avgAbs, avgSigned } = computeAvgPips(data.events);
+    const nfpAvgEl = document.getElementById("nfp-avg-pips");
+    if (nfpAvgEl) nfpAvgEl.innerText = `AVG PIPS: |Δ| ${avgAbs} pips (SIGNED: ${avgSigned >= 0 ? "+" : ""}${avgSigned} pips)`;
     tbody.innerHTML = data.events.map(e => {
       const distSd = (e.gold_return_pct - mean) / sd;
+      const pips = (Number(e.gold_close) - Number(e.gold_open)) * 10.0;
       return `
         <tr>
           <td><strong>${e.date}</strong></td>
@@ -2138,6 +2208,7 @@ async function fetchNfpData() {
           <td>${Number(e.ahe_actual_pct).toFixed(2)}%</td>
           <td style="color:${e.z_score_composite > 0 ? '#ff4444' : (e.z_score_composite < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${Number(e.z_score_composite).toFixed(2)}σ</td>
           <td>$${Number(e.gold_open).toFixed(1)} → $${Number(e.gold_close).toFixed(1)}</td>
+          <td style="color:${pips >= 0 ? '#00e5ff' : '#ff4444'}; font-weight:800;">${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips</td>
           <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${Number(e.gold_return_pct).toFixed(2)}%</td>
           <td style="color:${Math.abs(distSd) >= 1.0 ? 'var(--amber-cmd)' : '#999'};">${distSd >= 0 ? '+' : ''}${distSd.toFixed(2)}σ</td>
           <td>${Number(e.volatility_ratio_vr5 || 4.8).toFixed(2)}x</td>
@@ -2157,8 +2228,12 @@ async function fetchPpiData() {
     const ppiTit = document.getElementById("audit-title-ppi");
     if (ppiTit && data.count) ppiTit.innerText = `[ 07 // AUDIT <GO> : ${data.count}-RELEASE PPI & DEMAND POST-NEWS MOVEMENT RECORD ]`;
     const { mean, sd } = computeMeanAndSd(data.events);
+    const { avgAbs, avgSigned } = computeAvgPips(data.events);
+    const ppiAvgEl = document.getElementById("ppi-avg-pips");
+    if (ppiAvgEl) ppiAvgEl.innerText = `AVG PIPS: |Δ| ${avgAbs} pips (SIGNED: ${avgSigned >= 0 ? "+" : ""}${avgSigned} pips)`;
     tbody.innerHTML = data.events.map(e => {
       const distSd = (e.gold_return_pct - mean) / sd;
+      const pips = (Number(e.gold_close) - Number(e.gold_open)) * 10.0;
       return `
         <tr>
           <td><strong>${e.date}</strong></td>
@@ -2168,6 +2243,7 @@ async function fetchPpiData() {
           <td>${Number(e.retail_forecast).toFixed(2)}%</td>
           <td style="color:${e.z_score_composite > 0 ? '#ff4444' : (e.z_score_composite < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${Number(e.z_score_composite).toFixed(2)}σ</td>
           <td>$${Number(e.gold_open).toFixed(1)} → $${Number(e.gold_close).toFixed(1)}</td>
+          <td style="color:${pips >= 0 ? '#00e5ff' : '#ff4444'}; font-weight:800;">${pips >= 0 ? '+' : ''}${pips.toFixed(1)} pips</td>
           <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${Number(e.gold_return_pct).toFixed(2)}%</td>
           <td style="color:${Math.abs(distSd) >= 1.0 ? 'var(--amber-cmd)' : '#999'};">${distSd >= 0 ? '+' : ''}${distSd.toFixed(2)}σ</td>
           <td>${Number(e.volatility_ratio_vr5 || 3.9).toFixed(2)}x</td>

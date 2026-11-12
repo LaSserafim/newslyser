@@ -518,10 +518,28 @@ def get_dynamic_levels(price: float = None):
         session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
     )
 
+def _clear_quant_caches():
+    quant_model._CALIBRATION_CACHE.clear()
+    quant_model._DAILY_OLS_CACHE["data"] = None
+    quant_model._DAILY_OLS_CACHE["ts"] = 0.0
+    quant_model._CONF_PROFILE_CACHE.clear()
+    quant_model._MC_RESULT_CACHE.clear()
+    quant_model._INTRADAY_CACHE["closes"] = None
+    quant_model._INTRADAY_CACHE["ts"] = 0.0
+
 @app.post("/api/sync-releases")
 def sync_releases(force: bool = True):
-    return data_pipeline.sync_live_releases_if_stale(force=force)
+    res = data_pipeline.sync_live_releases_if_stale(force=force)
+    _clear_quant_caches()
+    return res
 
+@app.post("/api/update-all-data")
+def update_all_data():
+    data_pipeline.build_all_datasets()
+    _clear_quant_caches()
+    _CACHE_MACRO["data"] = None
+    _CACHE_MACRO["timestamp"] = 0.0
+    return {"status": "SUCCESS", "message": "All FRED, Yahoo, GLD Options, M5 Flow, and Historical Ledgers rebuilt & refreshed."}
 @app.post("/api/refresh-all")
 def refresh_all():
     live_data = fetch_live_macro_data()

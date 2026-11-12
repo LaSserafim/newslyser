@@ -29,6 +29,7 @@
         <option value="99">CONF: 99%</option>
       </select>
       <button class="bbg-btn" id="btn-sync-live">SYNC LIVE &lt;GO&gt;</button>
+      <button class="bbg-btn" id="btn-update-all-data" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE ALL DATA &lt;GO&gt;</button>
     </div>
   </header>
 
@@ -345,7 +346,11 @@
     <section class="audit-ledger-container">
       <div class="audit-ledger-header" id="audit-toggle-header">
         <div id="audit-title-cpi">[ 07 // AUDIT &lt;GO&gt; : 35-RELEASE EMPIRICAL POST-NEWS PRICE MOVEMENT RECORD ]</div>
-        <div id="audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span id="cpi-avg-pips" style="color:var(--amber-cmd); font-size:9.5px; font-weight:800;">AVG PIPS: --</span>
+          <button class="bbg-btn-mini btn-update-history" data-hist-ev="cpi" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE HISTORY &lt;GO&gt;</button>
+          <div id="audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+        </div>
       </div>
       <div class="audit-table-scroll" id="audit-table-scroll" style="display:block;">
         <table class="bbg-audit-table">
@@ -358,6 +363,7 @@
               <th>CORE YoY</th>
               <th>COMPOSITE Z</th>
               <th>GOLD OPEN → CLOSE</th>
+              <th>PIPS MOVED</th>
               <th>GOLD RET</th>
               <th>DIST MEAN</th>
               <th>DXY RET</th>
@@ -535,12 +541,16 @@
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="fomc-audit-toggle-header">
           <div id="audit-title-fomc">[ 07 // AUDIT &lt;GO&gt; : 23-MEETING FOMC POST-NEWS PRICE MOVEMENT RECORD ]</div>
-          <div id="fomc-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span id="fomc-avg-pips" style="color:var(--amber-cmd); font-size:9.5px; font-weight:800;">AVG PIPS: --</span>
+            <button class="bbg-btn-mini btn-update-history" data-hist-ev="fomc" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE HISTORY &lt;GO&gt;</button>
+            <div id="fomc-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+          </div>
         </div>
         <div class="audit-table-scroll" id="fomc-audit-table-scroll" style="display:block;">
           <table class="bbg-audit-table">
             <thead>
-              <tr><th>DATE</th><th>ACTUAL RATE</th><th>PRICED RATE</th><th>SHOCK (bps)</th><th>GOLD OPEN → CLOSE</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>2Y DELTA</th><th>VR(5m)</th><th>REGIME</th></tr>
+              <tr><th>DATE</th><th>ACTUAL RATE</th><th>PRICED RATE</th><th>SHOCK (bps)</th><th>GOLD OPEN → CLOSE</th><th>PIPS MOVED</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>2Y DELTA</th><th>VR(5m)</th><th>REGIME</th></tr>
             </thead>
             <tbody id="fomc-tbody"></tbody>
           </table>
@@ -715,12 +725,16 @@
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="nfp-audit-toggle-header">
           <div id="audit-title-nfp">[ 07 // AUDIT &lt;GO&gt; : 34-RELEASE NFP POST-NEWS PRICE MOVEMENT RECORD ]</div>
-          <div id="nfp-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span id="nfp-avg-pips" style="color:var(--amber-cmd); font-size:9.5px; font-weight:800;">AVG PIPS: --</span>
+            <button class="bbg-btn-mini btn-update-history" data-hist-ev="nfp" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE HISTORY &lt;GO&gt;</button>
+            <div id="nfp-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+          </div>
         </div>
         <div class="audit-table-scroll" id="nfp-audit-table-scroll" style="display:block;">
           <table class="bbg-audit-table">
             <thead>
-              <tr><th>DATE</th><th>NFP ACT (k)</th><th>NFP FCST (k)</th><th>UNEMP (%)</th><th>AHE (%)</th><th>Z_LABOR</th><th>GOLD OPEN → CLOSE</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>VR(5m)</th><th>REGIME</th></tr>
+              <tr><th>DATE</th><th>NFP ACT (k)</th><th>NFP FCST (k)</th><th>UNEMP (%)</th><th>AHE (%)</th><th>Z_LABOR</th><th>GOLD OPEN → CLOSE</th><th>PIPS MOVED</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>VR(5m)</th><th>REGIME</th></tr>
             </thead>
             <tbody id="nfp-tbody"></tbody>
           </table>
@@ -890,12 +904,16 @@
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="ppi-audit-toggle-header">
           <div id="audit-title-ppi">[ 07 // AUDIT &lt;GO&gt; : 33-RELEASE PPI &amp; DEMAND POST-NEWS MOVEMENT RECORD ]</div>
-          <div id="ppi-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span id="ppi-avg-pips" style="color:var(--amber-cmd); font-size:9.5px; font-weight:800;">AVG PIPS: --</span>
+            <button class="bbg-btn-mini btn-update-history" data-hist-ev="ppi" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE HISTORY &lt;GO&gt;</button>
+            <div id="ppi-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+          </div>
         </div>
         <div class="audit-table-scroll" id="ppi-audit-table-scroll" style="display:block;">
           <table class="bbg-audit-table">
             <thead>
-              <tr><th>DATE</th><th>PPI ACT (%)</th><th>PPI FCST (%)</th><th>RETAIL (%)</th><th>RET FCST (%)</th><th>Z_DEMAND</th><th>GOLD OPEN → CLOSE</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>VR(5m)</th><th>REGIME</th></tr>
+              <tr><th>DATE</th><th>PPI ACT (%)</th><th>PPI FCST (%)</th><th>RETAIL (%)</th><th>RET FCST (%)</th><th>Z_DEMAND</th><th>GOLD OPEN → CLOSE</th><th>PIPS MOVED</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>VR(5m)</th><th>REGIME</th></tr>
             </thead>
             <tbody id="ppi-tbody"></tbody>
           </table>
@@ -1053,12 +1071,16 @@
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="astar-audit-toggle-header">
           <div>[ 06 // AUDIT.ASTR &lt;GO&gt; : HISTORICAL SETUP PERFORMANCE RECORD (VERIFIED TICKS) ]</div>
-          <div id="astar-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span id="astar-avg-pips" style="color:var(--amber-cmd); font-size:9.5px; font-weight:800;">AVG PIPS: --</span>
+            <button class="bbg-btn-mini btn-update-history" data-hist-ev="astar" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE HISTORY &lt;GO&gt;</button>
+            <div id="astar-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+          </div>
         </div>
         <div class="audit-table-scroll" id="astar-audit-table-scroll" style="display:block;">
           <table class="bbg-audit-table">
             <thead>
-              <tr><th>DATE / TIME</th><th>SETUP ID</th><th>EVENT / ASSET</th><th>DIRECTION</th><th>LOCKED ENTRY</th><th>STOP LOSS</th><th>TAKE PROFIT 1</th><th>STATUS</th><th>REALIZED R</th><th>TRADE RESOLUTION</th></tr>
+              <tr><th>DATE / TIME</th><th>SETUP ID</th><th>EVENT / ASSET</th><th>DIRECTION</th><th>LOCKED ENTRY</th><th>STOP LOSS</th><th>TAKE PROFIT 1</th><th>STATUS</th><th>PIPS MOVED</th><th>REALIZED R</th><th>TRADE RESOLUTION</th></tr>
             </thead>
             <tbody id="astar-ledger-tbody"></tbody>
           </table>
@@ -1074,7 +1096,8 @@
     <div style="padding:14px;">
       <section class="bbg-pane" style="min-height:480px;">
         <div class="bbg-pane-header">
-          <div class="bbg-pane-title"><span class="tag">ECO.CAL &lt;GO&gt;</span><span>U.S. HIGH-IMPACT MACROECONOMIC CALENDAR</span></div>
+          <div class="bbg-pane-title"><span class="tag">ECO.CAL &lt;GO&gt;</span><span>U.S. MEDIUM-TO-HIGH IMPACT MACROECONOMIC CALENDAR (MEDIUM + HIGH + MAXIMUM)</span></div>
+          <div style="font-size:9px; color:var(--amber-cmd);">[ MEDIUM ] = CLAIMS / FED SPEAK &nbsp;|&nbsp; [ HIGH ] = CPI / PPI / NFP &nbsp;|&nbsp; [ MAXIMUM ] = FOMC</div>
         </div>
         <div class="bbg-pane-body" style="padding:0; overflow-y:auto;">
           <table class="bbg-audit-table">
