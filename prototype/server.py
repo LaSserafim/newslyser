@@ -1,5 +1,5 @@
 """
-NEWSLYSER PROTOTYPE // BLOOMBERG & LINUX TACTICAL TELEMETRY WORKSTATION
+NEWSLYSER // BLOOMBERG PROFESSIONAL TERMINAL WORKSTATION (STANDBY MIRROR)
 Runs on dedicated port 8889.
 Delivers:
 1. Bayesian Probability Density Function (Prior vs. Posterior)
@@ -29,7 +29,7 @@ import data_pipeline
 DATA_DIR = os.path.join(PARENT_DIR, "data")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
-app = FastAPI(title="NEWSLYSER // Bloomberg Terminal Prototype", version="5.0.0")
+app = FastAPI(title="NEWSLYSER // Bloomberg Professional Terminal", version="6.0.0")
 
 @app.middleware("http")
 async def add_no_cache_header(request, call_next):

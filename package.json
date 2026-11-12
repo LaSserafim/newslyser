@@ -1,12 +1,12 @@
 {
   "name": "newslyser",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "NEWSLYSER // Institutional Multi-Event Macro Quantitative Terminal & Econometric Suite",
   "main": "app.py",
   "scripts": {
     "start": "python3 -m uvicorn app:app --host 127.0.0.1 --port 8888",
     "dev": "python3 -m uvicorn app:app --host 127.0.0.1 --port 8888 --reload",
-    "prototype": "cd prototype && python3 -m uvicorn server:app --host 127.0.0.1 --port 8889 --reload",
+    "mirror": "cd prototype && python3 -m uvicorn server:app --host 127.0.0.1 --port 8889 --reload",
     "build-guide": "python3 build_guide_pdf.py",
     "sync-data": "python3 data_pipeline.py",
     "test": "node --check static/app.js && node --check prototype/static/app.js"

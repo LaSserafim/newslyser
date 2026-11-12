@@ -1012,7 +1012,9 @@ async function renderEventFreqPane(ev) {
   if (document.getElementById(extId)) {
     document.getElementById(extId).innerText = `|Move|>=1SD: ${ps.pct_far_1sd}% | Avg |Ret|: ${ps.mean_abs_move_pct}% | Max: ${ps.max_abs_move_pct}%`;
   }
-
+  if (hud && freq.n) {
+    hud.innerText = `HOVER HISTOGRAM BARS // N = ${freq.n} EMPIRICAL ${ev.toUpperCase()} RELEASES`;
+  }
   const w = container.clientWidth || 380;
   const h = container.clientHeight || 215;
   const padL = 32, padR = 32, padT = 26, padB = 24;
@@ -1672,7 +1674,7 @@ const YOY_DOMAINS = {
     note: "FRED PAYEMS, UNRATE, CES0500000003 through Oct 2026 (+165K Oct jobs beat vs +65K fcst)."
   },
   ppi: {
-    subtitle: "45-MONTH MULTI-MACRO TIMELINE // PPI WHOLESALE & RETAIL DEMAND YoY (2023-2026)",
+    subtitle: "MONTHLY MULTI-MACRO TIMELINE // PPI WHOLESALE & RETAIL DEMAND YoY (2023-2026)",
     refVal: 2.0,
     refLabel: "2.0% PIPELINE BENCHMARK",
     series: [

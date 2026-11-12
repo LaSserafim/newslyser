@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NEWSLYSER // Prototype Launcher script (Port 8889)
+# NEWSLYSER // Bloomberg Professional Terminal Workstation Mirror (Port 8889)
 set -e
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"

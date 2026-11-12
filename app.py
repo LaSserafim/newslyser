@@ -67,7 +67,7 @@ def get_api_key():
     return key or ""
 
 DEEPSEEK_API_KEY = get_api_key()
-app = FastAPI(title="NEWSLYSER // Multi-Event Quantitative Macro Terminal", version="4.0.0")
+app = FastAPI(title="NEWSLYSER // Bloomberg Professional Terminal", version="6.0.0")
 
 @app.middleware("http")
 async def add_no_cache_header(request, call_next):
