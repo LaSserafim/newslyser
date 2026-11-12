@@ -5,7 +5,7 @@ set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$DIR"
 
-echo "=== NEWSLYSER // CPI QUANTITATIVE ENGINE ==="
+echo "=== NEWSLYSER // BLOOMBERG PROFESSIONAL TERMINAL WORKSTATION ==="
 echo "Checking data pipeline..."
 python3 data_pipeline.py
 
