@@ -39,6 +39,19 @@
     "effect_xauusd": "STICKY CORE +0.30% // DEC HIKE ODDS REPRICED"
   },
   {
+    "event_id": "claims_nov12_26",
+    "title": "Initial Jobless Claims (Weekly Unemployment)",
+    "country": "USD",
+    "date": "2026-11-12",
+    "time": "08:30 AM EST (20:30 WIB) [NY PRE-MARKET / US OPEN]",
+    "impact": "MEDIUM",
+    "actual": "",
+    "forecast": "194K",
+    "previous": "189K",
+    "category": "LABOR",
+    "effect_xauusd": "MEDIUM-IMPACT NY PRE-MARKET PULSE -> FEEDS NFP BAYESIAN ICSA (4W vs 12W)"
+  },
+  {
     "event_id": "ppi_oct26",
     "title": "Producer Price Index (PPI) Final Demand MoM (Oct)",
     "country": "USD",

@@ -125,18 +125,22 @@ def fetch_tradingview_live_quotes():
             atr_30 = cols[7] if len(cols) > 7 else None
 
             if sym == "FX_IDC:XAUUSD":
-                if bid is not None and ask is not None:
+                if close_p is not None:
+                    live_px = round(float(close_p), 2)
+                    quotes["GC=F"] = live_px
+                    quotes["XAUUSD_SPOT"] = live_px
+                    if bid is not None and ask is not None and abs(((float(bid) + float(ask)) / 2.0) - live_px) <= 1.50:
+                        quotes["XAUUSD_BID"] = round(float(bid), 2)
+                        quotes["XAUUSD_ASK"] = round(float(ask), 2)
+                    else:
+                        quotes["XAUUSD_BID"] = live_px
+                        quotes["XAUUSD_ASK"] = live_px
+                elif bid is not None and ask is not None:
                     mid = round((float(bid) + float(ask)) / 2.0, 2)
                     quotes["GC=F"] = mid
                     quotes["XAUUSD_SPOT"] = mid
                     quotes["XAUUSD_BID"] = round(float(bid), 2)
                     quotes["XAUUSD_ASK"] = round(float(ask), 2)
-                elif close_p is not None:
-                    mid = round(float(close_p), 2)
-                    quotes["GC=F"] = mid
-                    quotes["XAUUSD_SPOT"] = mid
-                    quotes["XAUUSD_BID"] = mid
-                    quotes["XAUUSD_ASK"] = mid
                 if high_p is not None and low_p is not None and close_p is not None:
                     quotes["SESSION_HIGH"] = round(float(high_p), 2)
                     quotes["SESSION_LOW"] = round(float(low_p), 2)
@@ -159,11 +163,11 @@ def fetch_tradingview_live_quotes():
                 cols = row.get("d", [])
                 if sym in ["FX:XAUUSD", "OANDA:XAUUSD"]:
                     bid, ask, close_p = cols[1], cols[2], cols[0]
-                    mid = round((float(bid) + float(ask)) / 2.0, 2) if (bid is not None and ask is not None) else round(float(close_p), 2)
-                    quotes["GC=F"] = mid
-                    quotes["XAUUSD_SPOT"] = mid
-                    quotes["XAUUSD_BID"] = round(float(bid or mid), 2)
-                    quotes["XAUUSD_ASK"] = round(float(ask or mid), 2)
+                    live_px = round(float(close_p), 2) if close_p is not None else round((float(bid) + float(ask)) / 2.0, 2)
+                    quotes["GC=F"] = live_px
+                    quotes["XAUUSD_SPOT"] = live_px
+                    quotes["XAUUSD_BID"] = round(float(bid), 2) if (bid is not None and abs(float(bid) - live_px) <= 1.50) else live_px
+                    quotes["XAUUSD_ASK"] = round(float(ask), 2) if (ask is not None and abs(float(ask) - live_px) <= 1.50) else live_px
                     break
         return quotes
     except Exception as e:
@@ -178,7 +182,7 @@ def fetch_live_macro_data():
     """
     import time
     now_ts = time.time()
-    if _CACHE_MACRO["data"] and (now_ts - _CACHE_MACRO["timestamp"] < 1.5):
+    if _CACHE_MACRO["data"] and (now_ts - _CACHE_MACRO["timestamp"] < 0.5):
         return _CACHE_MACRO["data"]
 
     now_utc = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")

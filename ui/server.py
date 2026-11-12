@@ -67,15 +67,19 @@ def fetch_live_quotes():
                 d = row.get("d", [])
                 if len(d) >= 1 and d[0] is not None:
                     if s == "FX_IDC:XAUUSD":
-                        mid = round((float(d[1]) + float(d[2])) / 2.0, 2) if (len(d) > 2 and d[1] and d[2]) else round(float(d[0]), 2)
-                        mapping["GC=F"] = mid
-                        mapping["XAUUSD_SPOT"] = mid
-                        mapping["XAUUSD_BID"] = round(float(d[1]), 2) if len(d) > 1 and d[1] else mid
-                        mapping["XAUUSD_ASK"] = round(float(d[2]), 2) if len(d) > 2 and d[2] else mid
+                        live_px = round(float(d[0]), 2)
+                        mapping["GC=F"] = live_px
+                        mapping["XAUUSD_SPOT"] = live_px
+                        if len(d) > 2 and d[1] and d[2] and abs(((float(d[1]) + float(d[2])) / 2.0) - live_px) <= 1.50:
+                            mapping["XAUUSD_BID"] = round(float(d[1]), 2)
+                            mapping["XAUUSD_ASK"] = round(float(d[2]), 2)
+                        else:
+                            mapping["XAUUSD_BID"] = live_px
+                            mapping["XAUUSD_ASK"] = live_px
                         if len(d) > 5 and d[4] is not None and d[5] is not None:
                             mapping["SESSION_HIGH"] = round(float(d[4]), 2)
                             mapping["SESSION_LOW"] = round(float(d[5]), 2)
-                            mapping["SESSION_CLOSE"] = round(float(d[0]), 2)
+                            mapping["SESSION_CLOSE"] = live_px
                         if len(d) > 7 and d[7] is not None and float(d[7]) > 0:
                             mapping["ATR_M30"] = round(float(d[7]), 2)
                     elif s == "TVC:DXY":

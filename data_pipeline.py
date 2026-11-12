@@ -137,6 +137,7 @@ UPCOMING_CALENDAR = [
     {"event_id": "nfp_oct26", "title": "Non-Farm Payrolls (NFP) Employment Change (Oct)", "country": "USD", "date": "2026-11-06", "time": "08:30 AM EST (20:30 WIB)", "impact": "HIGH", "actual": "165K", "forecast": "65K", "previous": "60K", "category": "LABOR", "effect_xauusd": "STRONG BEAT (+100K) // GOLD -0.58% ($4,098 -> $4,075)"},
     {"event_id": "cpi_oct26", "title": "Consumer Price Index (CPI) MoM (Oct)", "country": "USD", "date": "2026-11-10", "time": "08:30 AM EST (20:30 WIB)", "impact": "HIGH", "actual": "0.4%", "forecast": "0.3%", "previous": "0.6%", "category": "INFLATION", "effect_xauusd": "HAWKISH SHOCK (-2.86% DROP // $4,149 -> $4,030)"},
     {"event_id": "core_cpi_oct26", "title": "Core CPI (MoM) Less Food & Energy (Oct)", "country": "USD", "date": "2026-11-10", "time": "08:30 AM EST (20:30 WIB)", "impact": "HIGH", "actual": "0.3%", "forecast": "0.2%", "previous": "0.3%", "category": "INFLATION", "effect_xauusd": "STICKY CORE +0.30% // DEC HIKE ODDS REPRICED"},
+    {"event_id": "claims_nov12_26", "title": "Initial Jobless Claims (Weekly Unemployment)", "country": "USD", "date": "2026-11-12", "time": "08:30 AM EST (20:30 WIB) [NY PRE-MARKET / US OPEN]", "impact": "MEDIUM", "actual": "", "forecast": "194K", "previous": "189K", "category": "LABOR", "effect_xauusd": "MEDIUM-IMPACT NY PRE-MARKET PULSE -> FEEDS NFP BAYESIAN ICSA (4W vs 12W)"},
     {"event_id": "ppi_oct26", "title": "Producer Price Index (PPI) Final Demand MoM (Oct)", "country": "USD", "date": "2026-11-13", "time": "08:30 AM EST (20:30 WIB)", "impact": "HIGH", "actual": "", "forecast": "0.4%", "previous": "1.3%", "category": "INFLATION", "effect_xauusd": "UPSTREAM WHOLESALE PIPELINE (RELEASES NOV 13)"},
     {"event_id": "retail_oct26", "title": "Advance Retail Sales MoM (Oct)", "country": "USD", "date": "2026-11-17", "time": "08:30 AM EST (20:30 WIB)", "impact": "HIGH", "actual": "", "forecast": "0.4%", "previous": "0.8%", "category": "CONSUMER_DEMAND", "effect_xauusd": "U.S. CONSUMER RESILIENCE & GDP TRACKER"},
     {"event_id": "nfp_nov26", "title": "Non-Farm Payrolls (NFP) Employment Change (Nov)", "country": "USD", "date": "2026-12-04", "time": "08:30 AM EST (20:30 WIB)", "impact": "HIGH", "actual": "", "forecast": "135K", "previous": "165K", "category": "LABOR", "effect_xauusd": "FED DUAL-MANDATE LABOR FOUNDATION"},
@@ -428,6 +429,13 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy):
             p_atm = puts[puts["strike"] == atm_k].iloc[0] if len(puts[puts["strike"] == atm_k]) else puts.iloc[(puts["strike"] - atm_k).abs().argsort()[:1]].iloc[0]
             iv_atm = float(0.5 * (c_atm["impliedVolatility"] + p_atm["impliedVolatility"]))
             straddle_pct = round(float((c_atm["mid"] + p_atm["mid"]) * 0.80 / max(1e-6, gld_spot) * 100.0), 2)
+            try:
+                tv_r = subprocess.run(["curl", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan", "-H", "Content-Type: application/json", "-d", json.dumps({"symbols": {"tickers": ["FX_IDC:XAUUSD"]}, "columns": ["close"]})], capture_output=True, text=True)
+                tv_d = json.loads(tv_r.stdout).get("data", [])
+                if tv_d and tv_d[0].get("d") and tv_d[0]["d"][0]:
+                    spot_gc = float(tv_d[0]["d"][0])
+            except Exception:
+                pass
             ratio_gc_gld = spot_gc / max(1.0, gld_spot)
             straddle_usd = round(spot_gc * (straddle_pct / 100.0), 2)
             gex_map = {}
@@ -859,8 +867,25 @@ def build_all_datasets():
     with open(os.path.join(DATA_DIR, "tomorrow_preview.json"), "w") as f:
         json.dump(tomorrow_event, f, indent=2)
 
+    cal_rows = [dict(r) for r in UPCOMING_CALENDAR]
+    try:
+        req_ff = urllib.request.Request("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req_ff, timeout=4.0) as r_ff:
+            ff_week = json.loads(r_ff.read().decode("utf-8"))
+        for row_c in cal_rows:
+            if "jobless" in row_c["title"].lower() or "unemployment" in row_c["title"].lower():
+                for it in ff_week:
+                    if it.get("country") == "USD" and "unemployment claims" in it.get("title", "").lower():
+                        row_c["date"] = str(it.get("date", row_c["date"]))[:10]
+                        if it.get("forecast"): row_c["forecast"] = it["forecast"]
+                        if it.get("previous"): row_c["previous"] = it["previous"]
+                        if it.get("actual"): row_c["actual"] = it["actual"]
+                        if it.get("impact"): row_c["impact"] = str(it["impact"]).upper()
+                        break
+    except Exception:
+        pass
     with open(os.path.join(DATA_DIR, "high_impact_calendar.json"), "w") as f:
-        json.dump(UPCOMING_CALENDAR, f, indent=2)
+        json.dump(cal_rows, f, indent=2)
 
     # Refresh macro_summary.json with authentic latest FRED tails
     macro_summary = {}
@@ -1094,6 +1119,7 @@ def sync_live_releases_if_stale(force=False):
                    ("non-farm" in ev_title_l and "non-farm" in title_l) or \
                    ("retail sales" in ev_title_l and "retail sales m/m" in title_l and "core" not in title_l) or \
                    ("cpi" in ev_title_l and "cpi m/m" in title_l and "core" not in title_l) or \
+                   ("jobless" in ev_title_l and "unemployment claims" in title_l) or \
                    ("fomc" in ev_title_l and "federal funds" in title_l):
                     ev["actual"] = act_str
                     cal_changed = True

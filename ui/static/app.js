@@ -1989,7 +1989,7 @@ async function fetchCalendarData() {
         <td><strong>${ev.date}</strong></td>
         <td>${ev.time}</td>
         <td><strong style="color:var(--amber-cmd);">${ev.title}</strong></td>
-        <td><span style="color:${ev.impact === 'MAXIMUM' ? '#ff4444' : '#ffffff'}; font-weight:800;">[ ${ev.impact} ]</span></td>
+        <td><span style="color:${ev.impact === 'MAXIMUM' ? '#ff4444' : (ev.impact === 'MEDIUM' ? 'var(--amber-cmd)' : '#ffffff')}; font-weight:800;">[ ${ev.impact} ]</span></td>
         <td style="color:${ev.actual ? '#00e5ff' : '#666'}; font-weight:800;">${ev.actual || 'PENDING'}</td>
         <td>${ev.forecast || '-'}</td>
         <td style="color:#777;">${ev.previous || '-'}</td>
