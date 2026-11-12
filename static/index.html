@@ -74,24 +74,24 @@
       <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
         <div class="slider-inline">
           <label>ACTUAL HEADLINE MoM:</label>
-          <input type="range" class="bbg-slider" id="bbg-range-headline" min="-0.2" max="1.0" step="0.05" value="0.4">
-          <span class="val" id="bbg-val-headline">0.40%</span>
+          <input type="range" class="bbg-slider" id="bbg-range-headline" min="-0.2" max="1.0" step="0.05" value="0.3">
+          <span class="val" id="bbg-val-headline">0.30%</span>
         </div>
 
         <div class="slider-inline">
           <label>ACTUAL CORE YoY:</label>
-          <input type="range" class="bbg-slider" id="bbg-range-core" min="2.0" max="4.5" step="0.05" value="3.4">
-          <span class="val" id="bbg-val-core">3.40%</span>
+          <input type="range" class="bbg-slider" id="bbg-range-core" min="2.0" max="4.5" step="0.05" value="2.9">
+          <span class="val" id="bbg-val-core">2.90%</span>
         </div>
 
         <div class="slider-inline">
-          <label>PURIFIED SHOCK:</label>
-          <span class="val" id="bbg-val-shock" style="color:var(--amber-cmd);">+1.33σ</span>
+          <label>PRE-MARKET Z:</label>
+          <span class="val" id="bbg-val-shock" style="color:var(--amber-cmd);">SYNCING...</span>
         </div>
 
         <div class="slider-inline">
-          <label>REGIME:</label>
-          <span class="val" id="bbg-val-regime">HAWKISH DRIFT</span>
+          <label>MODE / REGIME:</label>
+          <span class="val" id="bbg-val-regime">AUTO PRE-MARKET</span>
         </div>
       </div>
 
@@ -99,7 +99,7 @@
         <button class="bbg-btn active" id="bbg-btn-horizon-1d">T+24h SDE</button>
         <button class="bbg-btn" id="bbg-btn-horizon-5d">5D SWING</button>
         <button class="bbg-btn" id="bbg-btn-firewall">TRIGGER 60s FIREWALL</button>
-        <button class="bbg-btn" id="bbg-btn-reset">RESET &lt;DEFAULT&gt;</button>
+        <button class="bbg-btn" id="bbg-btn-reset">RESET &lt;PRE-MARKET&gt;</button>
       </div>
     </div>
 
@@ -289,8 +289,16 @@
 
           <table class="bbg-mini-table" style="margin-top:8px;">
             <tr>
+              <td class="label">STAGE-A MACRO PROBS:</td>
+              <td class="val" id="val-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td>
+            </tr>
+            <tr>
+              <td class="label">STAGE-B ON NEWS PRINT:</td>
+              <td class="val" id="val-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td>
+            </tr>
+            <tr>
               <td class="label">TRADE DIRECTIVE:</td>
-              <td class="val" id="val-ticket-action" style="color:var(--fg-bright); font-weight:900;">SELL LIMIT / SHORT RALLY</td>
+              <td class="val" id="val-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td>
             </tr>
             <tr>
               <td class="label">ENTRY ZONE:</td>
@@ -378,7 +386,7 @@
           <button class="bbg-btn active" id="fomc-btn-horizon-1d">T+24h SDE</button>
           <button class="bbg-btn" id="fomc-btn-horizon-5d">5D SWING</button>
           <button class="bbg-btn" id="fomc-btn-firewall">TRIGGER 60s FIREWALL</button>
-          <button class="bbg-btn" id="fomc-btn-reset">RESET &lt;DEFAULT&gt;</button>
+          <button class="bbg-btn" id="fomc-btn-reset">RESET &lt;PRE-MARKET&gt;</button>
         </div>
       </div>
 
@@ -493,6 +501,8 @@
               </div>
             </div>
             <table class="bbg-mini-table" style="margin-top:8px;">
+              <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-fomc-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
+              <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-fomc-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
               <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-fomc-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
               <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-fomc-ticket-entry">--</td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-fomc-ticket-sl" style="color:#ff4444;">--</td></tr>
@@ -554,7 +564,7 @@
           <button class="bbg-btn active" id="nfp-btn-horizon-1d">T+24h SDE</button>
           <button class="bbg-btn" id="nfp-btn-horizon-5d">5D SWING</button>
           <button class="bbg-btn" id="nfp-btn-firewall">TRIGGER 60s FIREWALL</button>
-          <button class="bbg-btn" id="nfp-btn-reset">RESET &lt;DEFAULT&gt;</button>
+          <button class="bbg-btn" id="nfp-btn-reset">RESET &lt;PRE-MARKET&gt;</button>
         </div>
       </div>
 
@@ -669,6 +679,8 @@
               </div>
             </div>
             <table class="bbg-mini-table" style="margin-top:8px;">
+              <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-nfp-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
+              <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-nfp-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
               <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-nfp-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
               <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-nfp-ticket-entry">--</td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-nfp-ticket-sl" style="color:#ff4444;">--</td></tr>
@@ -725,7 +737,7 @@
           <button class="bbg-btn active" id="ppi-btn-horizon-1d">T+24h SDE</button>
           <button class="bbg-btn" id="ppi-btn-horizon-5d">5D SWING</button>
           <button class="bbg-btn" id="ppi-btn-firewall">TRIGGER 60s FIREWALL</button>
-          <button class="bbg-btn" id="ppi-btn-reset">RESET &lt;DEFAULT&gt;</button>
+          <button class="bbg-btn" id="ppi-btn-reset">RESET &lt;PRE-MARKET&gt;</button>
         </div>
       </div>
 
@@ -840,6 +852,8 @@
               </div>
             </div>
             <table class="bbg-mini-table" style="margin-top:8px;">
+              <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-ppi-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
+              <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-ppi-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
               <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-ppi-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
               <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-ppi-ticket-entry">--</td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-ppi-ticket-sl" style="color:#ff4444;">--</td></tr>

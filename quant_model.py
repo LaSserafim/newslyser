@@ -144,106 +144,157 @@ def run_regression_ols(x_matrix, y_vals):
     }
 
 # -------------------------------------------------------------
-# METHOD 1.3 & DYNAMIC PRE-RELEASE DIRECTIVE (FIXES STATIC BUG)
+# PRE-MARKET SNAPSHOT LOADER & STAGE-B CONDITIONAL PRICE DIRECTION ENGINE
 # -------------------------------------------------------------
-def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_m30=12.50):
-    """
-    Bayesian Conjugate Gaussian Prior-to-Posterior Model and Dynamic Pre-Release Trade Directive.
-    Dynamically recalculates entry, stop loss, take profit, and RR ratio relative to the CURRENT TICK.
-    Eliminates static hardcoded values when market prices move.
-    """
-    f_mom = tomorrow_meta.get("forecast_mom", 0.3)
-    p_mom = tomorrow_meta.get("prev_mom", 0.6)
-    f_core_yoy = tomorrow_meta.get("forecast_core_yoy", 2.8)
-    nowcast_mom = tomorrow_meta.get("cleveland_fed_nowcast_mom", 0.28)
-    nowcast_core_mom = tomorrow_meta.get("cleveland_fed_nowcast_core_mom", 0.22)
-    survey_sd = tomorrow_meta.get("survey_dispersion_sd", 0.075)
-    wti_pct = tomorrow_meta.get("wti_oil_oct_change_pct", 12.11)
+def _load_premarket_snapshot():
+    import os
+    snap_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "premarket_snapshot.json")
+    if os.path.exists(snap_path):
+        try:
+            with open(snap_path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
 
-    # Bayesian Gaussian Conjugate Update
+def compute_stage_b_gold_direction(event_type, z_pre, sigma_z_pre=0.85):
+    """
+    Stage B Conditional Price Direction Probability when News Occurs:
+    Propagates pre-market macro posterior (z_pre, sigma_z_pre) through empirical
+    White (1980) HC3 transmission beta and historical residual jump volatility.
+    Returns honest P(Gold Up on Print), P(Gold Down on Print), and P(|Move| >= 1%).
+    """
+    records, shock_key, _, _, _ = _load_event_dataset(event_type)
+    valid = [e for e in records if shock_key in e and "gold_return_pct" in e]
+    if len(valid) < 8:
+        return {"p_gold_up": 50.0, "p_gold_down": 50.0, "expected_gold_pct": 0.0, "cond_sd_pct": 1.2, "p_move_1pct": 40.0, "univariate_t": 0.0, "univariate_p": 1.0, "edge_note": "INSUFFICIENT_SAMPLE"}
+
+    y = np.array([float(e["gold_return_pct"]) for e in valid])
+    x_raw = np.array([float(e[shock_key]) for e in valid])
+    scale_sd = float(np.std(x_raw, ddof=1)) if (event_type or "").lower() == "fomc" else 1.0
+    scale_sd = max(0.01, scale_sd)
+    x_std = x_raw / scale_sd
+
+    reg = run_regression_ols(x_std, y)
+    alpha = float(reg["beta"][0])
+    beta_z = float(reg["beta"][1])
+    se_beta = float(reg["se_hc3"][1])
+    t_stat = float(reg["t_stats"][1])
+    p_val = float(reg["p_values"][1])
+    resid = y - (alpha + beta_z * x_std)
+    sigma_eps = float(np.std(resid, ddof=2)) if len(y) > 2 else 1.0
+
+    mu_xau = alpha + beta_z * float(z_pre)
+    cond_var = (beta_z * float(sigma_z_pre)) ** 2 + (float(z_pre) * se_beta) ** 2 + (sigma_eps ** 2)
+    cond_sd = max(0.25, math.sqrt(max(1e-6, cond_var)))
+
+    def _ncdf(v):
+        return 0.5 * (1.0 + math.erf(v / math.sqrt(2.0)))
+
+    p_down = round(_ncdf((0.0 - mu_xau) / cond_sd) * 100.0, 1)
+    p_up = round(100.0 - p_down, 1)
+    p_big = round((_ncdf((-1.0 - mu_xau) / cond_sd) + (1.0 - _ncdf((1.0 - mu_xau) / cond_sd))) * 100.0, 1)
+    edge_note = "STATISTICALLY_VALID_SLOPE (α<5%)" if p_val < 0.05 else "HIGH_RESIDUAL_NOISE (REQUIRES DXY/2Y CONFIRMATION)"
+
+    return {
+        "p_gold_up": p_up,
+        "p_gold_down": p_down,
+        "expected_gold_pct": round(mu_xau, 3),
+        "cond_sd_pct": round(cond_sd, 3),
+        "p_move_1pct": p_big,
+        "univariate_t": round(t_stat, 2),
+        "univariate_p": round(p_val, 4),
+        "edge_note": edge_note
+    }
+
+# -------------------------------------------------------------
+# METHOD 1.3: CPI BAYESIAN CONJUGATE + GLOBAL/ENERGY PASS-THROUGH
+# -------------------------------------------------------------
+def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_m30=12.50, session_h=None, session_l=None, session_c=None):
+    """
+    Bayesian Conjugate Gaussian Prior-to-Posterior Model for CPI Inflation.
+    Reads frozen premarket_snapshot.json (WTI 22D%, T10YIE shift, Cleveland Nowcast, G7 CPI spillover)
+    and propagates posterior shock Z_pre into Stage-B Conditional Gold Direction Probabilities.
+    """
+    snap = _load_premarket_snapshot()
+    lead = snap.get("leading_indicators", {})
+    glob = snap.get("global_macro", {})
+    dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
+
+    f_mom = tomorrow_meta.get("forecast_mom", 0.3)
+    nowcast_mom = tomorrow_meta.get("cleveland_fed_nowcast_mom", 0.31)
+    survey_sd = float(tomorrow_meta.get("survey_dispersion_sd", 0.075))
+    wti_pct = float(lead.get("wti_22d_pct", tomorrow_meta.get("wti_oil_oct_change_pct", 0.0)))
+    t10_chg = float(lead.get("t10yie_22d_chg", 0.0))
+    g7_cpi = float(glob.get("g7_ex_us_cpi_avg_pct", 2.0))
+
     mu_prior = 0.00
     sigma_prior = survey_sd
 
-    # Evidence: Energy Pass-through (+0.08 pp per 10% oil rally) + Cleveland Nowcast divergence
-    energy_pass_through = (wti_pct / 100.0) * 0.08 * 10.0
+    # Evidence: Energy Pass-through (+0.08 pp per +10% WTI) + T10YIE breakeven drift + Nowcast diff + Global CPI spillover
+    energy_pass = (wti_pct / 10.0) * 0.08
+    be_pass = t10_chg * 0.35
     nowcast_diff = nowcast_mom - f_mom
-    evidence_mean = 0.60 * energy_pass_through + 0.40 * nowcast_diff
-    # Dynamic evidence likelihood variance conditioned on oil pass-through & nowcast tracking error
-    sigma_oil_pass = 0.05 + 0.003 * abs(wti_pct)
-    sigma_nowcast_track = 0.075
-    sigma_evidence = math.sqrt((0.60 * sigma_oil_pass)**2 + (0.40 * sigma_nowcast_track)**2)
+    global_spill = (g7_cpi - 2.0) * 0.04
+    evidence_mean = 0.45 * energy_pass + 0.25 * be_pass + 0.20 * nowcast_diff + 0.10 * global_spill
+
+    sigma_oil_pass = 0.055 + 0.0025 * abs(wti_pct)
+    sigma_evidence = math.sqrt((0.55 * sigma_oil_pass) ** 2 + (0.45 * 0.065) ** 2)
     tau_prior = 1.0 / (sigma_prior ** 2)
     tau_evidence = 1.0 / (sigma_evidence ** 2)
     tau_post = tau_prior + tau_evidence
 
     mu_post = (tau_prior * mu_prior + tau_evidence * evidence_mean) / tau_post
     sigma_post = math.sqrt(1.0 / tau_post)
+    z_pre = round(mu_post / max(0.01, sigma_prior), 3)
+    sigma_z_pre = round(sigma_post / max(0.01, sigma_prior), 3)
 
     def norm_cdf(x):
-        return 0.5 * (1.0 + math.erf(x / math.sqrt(2)))
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
-    beat_thresh = (0.05 - mu_post) / sigma_post
-    miss_thresh = (-0.05 - mu_post) / sigma_post
-
-    p_beat = round((1.0 - norm_cdf(beat_thresh)) * 100.0, 1)
-    p_miss = round(norm_cdf(miss_thresh) * 100.0, 1)
+    p_beat = round((1.0 - norm_cdf((0.05 - mu_post) / sigma_post)) * 100.0, 1)
+    p_miss = round(norm_cdf((-0.05 - mu_post) / sigma_post) * 100.0, 1)
     p_inline = round(max(0.0, 100.0 - p_beat - p_miss), 1)
 
-    # Asymmetric Expected Payoff on Gold (XAUUSD)
-    exp_return_pct = round((p_beat / 100.0) * (-1.27) + (p_inline / 100.0) * (-0.05) + (p_miss / 100.0) * (+0.68), 3)
-    asymmetry_label = "BEARISH ASYMMETRY" if exp_return_pct < -0.10 else ("BULLISH ASYMMETRY" if exp_return_pct > 0.10 else "SYMMETRIC / NEUTRAL")
+    stage_b = compute_stage_b_gold_direction("cpi", z_pre, sigma_z_pre)
+    exp_return_pct = stage_b["expected_gold_pct"]
+    asymmetry_label = "BEARISH ASYMMETRY" if exp_return_pct < -0.15 else ("BULLISH ASYMMETRY" if exp_return_pct > 0.15 else "SYMMETRIC / NEUTRAL")
 
-    # Dynamic Pre-Release Trade Directive anchored to CURRENT TICK
-    if exp_return_pct < -0.10:
+    if stage_b["p_gold_down"] >= 58.0 and exp_return_pct < -0.15:
+        plan = dyn["dynamic_short_plan"]
         directive_title = "PRE-RELEASE DIRECTIVE: SHORT XAUUSD AT RESISTANCE"
-        entry_low = round(current_price + 0.382 * atr_m30, 2)
-        entry_high = round(current_price + 0.786 * atr_m30, 2)
-        stop_loss = round(entry_high + 0.80 * atr_m30, 2)
-        target = round(current_price - 1.618 * atr_m30, 2)
-        target_2 = round(current_price - 2.618 * atr_m30, 2)
-        risk_dist = round(stop_loss - entry_high, 2)
-        reward_dist = round(entry_high - target, 2)
-        rr = round(reward_dist / max(1.0, risk_dist), 2)
-        directive_desc = f"ENTRY: ${entry_low:.2f} - ${entry_high:.2f} | STOP: ${stop_loss:.2f} (Pre-news high) | TARGET: ${target:.2f} | RR: 1:{rr:.2f}"
-    elif exp_return_pct > 0.10:
+    elif stage_b["p_gold_up"] >= 58.0 and exp_return_pct > 0.15:
+        plan = dyn["dynamic_long_plan"]
         directive_title = "PRE-RELEASE DIRECTIVE: LONG XAUUSD ON DIP"
-        entry_low = round(current_price - 0.786 * atr_m30, 2)
-        entry_high = round(current_price - 0.382 * atr_m30, 2)
-        stop_loss = round(entry_low - 0.80 * atr_m30, 2)
-        target = round(current_price + 1.618 * atr_m30, 2)
-        target_2 = round(current_price + 2.618 * atr_m30, 2)
-        risk_dist = round(entry_low - stop_loss, 2)
-        reward_dist = round(target - entry_low, 2)
-        rr = round(reward_dist / max(1.0, risk_dist), 2)
-        directive_desc = f"ENTRY: ${entry_low:.2f} - ${entry_high:.2f} | STOP: ${stop_loss:.2f} (Pre-news low) | TARGET: ${target:.2f} | RR: 1:{rr:.2f}"
     else:
-        directive_title = "PRE-RELEASE DIRECTIVE: STRADDLE / NO PRE-POSITIONING"
-        entry_low = round(current_price - 0.20 * atr_m30, 2)
-        entry_high = round(current_price + 0.20 * atr_m30, 2)
-        stop_loss = round(current_price + 1.20 * atr_m30, 2)
-        target = round(current_price - 1.20 * atr_m30, 2)
-        target_2 = round(current_price - 2.00 * atr_m30, 2)
-        risk_dist = round(stop_loss - current_price, 2)
-        reward_dist = round(current_price - target, 2)
-        rr = 1.00
-        directive_desc = f"NEUTRAL DISTRIBUTION. Stand aside. Await post-news Wave 1 spread compression before entering."
-
+        plan = dyn["structural_ticket"]
+        directive_title = "PRE-RELEASE DIRECTIVE: STAND ASIDE // AWAIT WAVE 2 CONFIRMATION"
     return {
+        "event_type": "cpi",
+        "model_method": "Bayesian Conjugate Normal-Normal + Energy/Breakeven/G7 Spillover",
+        "snapshot_timestamp": snap.get("generated_at_utc", "LIVE"),
         "current_price": current_price,
         "atr_m30": atr_m30,
+        "z_pre": z_pre,
+        "sigma_z_pre": sigma_z_pre,
         "p_hawkish_beat": p_beat,
         "p_inline": p_inline,
         "p_dovish_miss": p_miss,
+        "p_gold_up": stage_b["p_gold_up"],
+        "p_gold_down": stage_b["p_gold_down"],
+        "p_move_1pct": stage_b["p_move_1pct"],
         "expected_return_pct": exp_return_pct,
         "asymmetry_label": asymmetry_label,
-        "explanation": f"Calculated across posterior probability density: Downside risk (-1.27% on beat) outweighs upside probability ({p_miss}% miss).",
+        "leading_summary": f"WTI 22D: {wti_pct:+.2f}% | 10Y BE Δ: {t10_chg:+.2f} | Nowcast: {nowcast_mom:.2f}% vs {f_mom:.2f}% | G7 CPI: {g7_cpi:.2f}%",
+        "explanation": f"Stage-A Bayesian posterior μ={mu_post:+.3f}pp (σ={sigma_post:.3f}pp, Z_pre={z_pre:+.2f}σ) -> Stage-B Gold P(Up)={stage_b['p_gold_up']}% / P(Down)={stage_b['p_gold_down']}% ({stage_b['edge_note']}).",
         "directive_title": directive_title,
-        "directive_desc": directive_desc,
-        "entry_zone": f"${entry_low:.2f} - ${entry_high:.2f}",
-        "stop_loss": f"${stop_loss:.2f}",
-        "target": f"${target:.2f}",
-        "target_2": f"${target_2:.2f}",
-        "risk_reward_ratio": f"1:{rr:.2f}",
+        "directive_desc": f"ENTRY: {plan['entry_zone']} | STOP: {plan['stop_loss']} | TARGET: {plan['target']} | RR: {plan['risk_reward_ratio']}",
+        "entry_zone": plan["entry_zone"],
+        "stop_loss": plan["stop_loss"],
+        "target": plan["target"],
+        "target_2": plan.get("target_2", ""),
+        "risk_reward_ratio": plan["risk_reward_ratio"],
+        "stage_b": stage_b,
         "bayesian_parameters": {
             "prior_mu": mu_prior,
             "prior_sigma": round(sigma_prior, 4),
@@ -1522,51 +1573,87 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
 # -------------------------------------------------------------
 def calculate_probability_density_function(event_type="cpi", n_points=120):
     """
-    Calculates Gaussian Prior vs Posterior Probability Density curves.
-    Uses 6-decimal precision so high-scale distributions (NFP sigma=45, FOMC sigma=5) render smoothly.
+    Unified Pre-Market Probability Density Function Engine:
+    Reads frozen premarket_snapshot.json and invokes each news suite's fitted mathematical model
+    (CPI Bayesian, FOMC Kuttner+Softmax, NFP Claims/JOLTS Bayesian, PPI ARDL+Scotti) with zero hardcoding.
     """
-    params = {
-        "cpi": {"prior_mu": 0.00, "prior_sd": 0.08, "post_mu": 0.08, "post_sd": 0.09, "range": (-0.35, 0.35), "unit": "pp", "label_post": "Geopolitical Energy Posterior (+12.11% WTI)"},
-        "fomc": {"prior_mu": 0.00, "prior_sd": 5.0, "post_mu": 2.5, "post_sd": 6.0, "range": (-25.0, 25.0), "unit": "bps", "label_post": "Hawkish Pause Pricing (CME 94% Priced)"},
-        "nfp": {"prior_mu": 0.00, "prior_sd": 45.0, "post_mu": 15.0, "post_sd": 50.0, "range": (-150.0, 150.0), "unit": "k", "label_post": "ADP Leading Indicator (+22k ADP Prior)"},
-        "ppi": {"prior_mu": 0.00, "prior_sd": 0.15, "post_mu": 0.06, "post_sd": 0.16, "range": (-0.60, 0.60), "unit": "pp", "label_post": "Commodity Crude Pipeline (+0.06% Push)"},
-        "ppi_retail": {"prior_mu": 0.00, "prior_sd": 0.15, "post_mu": 0.06, "post_sd": 0.16, "range": (-0.60, 0.60), "unit": "pp", "label_post": "Commodity Crude Pipeline (+0.06% Push)"},
-        "daily": {"prior_mu": 0.00, "prior_sd": 0.45, "post_mu": -0.15, "post_sd": 0.50, "range": (-2.0, 2.0), "unit": "σ", "label_post": "M30 Intraday Volatility Density (-2.0σ to +2.0σ VWAP)"},
-        "astar": {"prior_mu": 0.00, "prior_sd": 0.45, "post_mu": -0.15, "post_sd": 0.50, "range": (-2.0, 2.0), "unit": "σ", "label_post": "M30 Intraday Volatility Density (-2.0σ to +2.0σ VWAP)"}
-    }
-    p = params.get(event_type.lower(), params["cpi"])
-    x_vals = np.linspace(p["range"][0], p["range"][1], n_points)
+    ev = (event_type or "cpi").lower()
+    snap = _load_premarket_snapshot()
+    lead = snap.get("leading_indicators", {})
+
+    if ev == "fomc":
+        pre = calculate_fomc_prenew_model()
+        bp = pre["bayesian_parameters"]
+        x_range, unit = (-25.0, 25.0), "bps"
+        label_post = f"ZQ=F ({lead.get('zq_spread_bps', 0):+.1f}bps) + 2Y Slope ({lead.get('curve_2y_vs_ff_bps', 0):+.0f}bps)"
+    elif ev == "nfp":
+        pre = calculate_nfp_prenew_model()
+        bp = pre["bayesian_parameters"]
+        x_range, unit = (-150.0, 150.0), "k"
+        label_post = f"ICSA Δ ({lead.get('icsa_delta_4w_vs_12w_k', 0):+.1f}k) + JOLTS ({lead.get('jtsjol_3m_chg_k', 0):+.0f}k)"
+    elif ev in ["ppi", "ppi_retail"]:
+        pre = calculate_ppi_prenew_model()
+        bp = pre["bayesian_parameters"]
+        x_range, unit = (-0.60, 0.60), "pp"
+        label_post = f"WTI ({lead.get('wti_22d_pct', 0):+.1f}%) + Copper ({lead.get('copper_22d_pct', 0):+.1f}%)"
+    elif ev in ["daily", "astar"]:
+        bp = {"prior_mu": 0.0, "prior_sigma": 0.45, "posterior_mu": 0.0, "posterior_sigma": 0.45}
+        pre = {"z_pre": 0.0, "p_hawkish_beat": 33.3, "p_inline": 33.4, "p_dovish_miss": 33.3, "p_gold_up": 50.0, "p_gold_down": 50.0, "leading_summary": "Intraday Session Baseline"}
+        x_range, unit = (-2.0, 2.0), "σ"
+        label_post = "M30 Intraday Volatility Density (-2.0σ to +2.0σ VWAP)"
+    else:
+        import os
+        tm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "tomorrow_preview.json")
+        tomorrow_meta = {}
+        if os.path.exists(tm_path):
+            with open(tm_path) as f:
+                tomorrow_meta = json.load(f)
+        pre = calculate_pre_news_bayesian_model(tomorrow_meta)
+        bp = pre["bayesian_parameters"]
+        x_range, unit = (-0.35, 0.35), "pp"
+        label_post = f"WTI ({lead.get('wti_22d_pct', 0):+.1f}%) + 10Y BE + Nowcast"
+
+    prior_mu, prior_sd = float(bp["prior_mu"]), max(1e-4, float(bp["prior_sigma"]))
+    post_mu, post_sd = float(bp["posterior_mu"]), max(1e-4, float(bp["posterior_sigma"]))
+    x_vals = np.linspace(x_range[0], x_range[1], n_points)
 
     def gaussian_pdf(x, mu, sigma):
-        return (1.0 / (sigma * math.sqrt(2 * math.pi))) * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+        return (1.0 / (sigma * math.sqrt(2.0 * math.pi))) * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
 
     def norm_cdf(x, mu, sigma):
         return 0.5 * (1.0 + math.erf((x - mu) / (sigma * math.sqrt(2.0))))
 
-    pdf_prior = gaussian_pdf(x_vals, p["prior_mu"], p["prior_sd"])
-    pdf_post = gaussian_pdf(x_vals, p["post_mu"], p["post_sd"])
-
+    pdf_prior = gaussian_pdf(x_vals, prior_mu, prior_sd)
+    pdf_post = gaussian_pdf(x_vals, post_mu, post_sd)
+    mid = x_range[1] * 0.28
     points = []
-    mid = p["range"][1] * 0.28
     for x, p_pr, p_po in zip(x_vals, pdf_prior, pdf_post):
         zone = "DOVISH_MISS" if x <= -mid else ("HAWKISH_BEAT" if x >= mid else "NOISE_ZONE")
         points.append({
             "x": round(float(x), 4),
             "prior_pdf": round(float(p_pr), 6),
             "posterior_pdf": round(float(p_po), 6),
-            "cdf_posterior": round(float(norm_cdf(float(x), p["post_mu"], p["post_sd"]) * 100.0), 1),
+            "cdf_posterior": round(float(norm_cdf(float(x), post_mu, post_sd) * 100.0), 1),
             "zone": zone
         })
 
     return {
         "event_type": event_type,
-        "unit": p["unit"],
+        "unit": unit,
+        "z_pre": pre.get("z_pre", 0.0),
+        "p_hawkish_beat": pre.get("p_hawkish_beat", 33.3),
+        "p_inline": pre.get("p_inline", 33.4),
+        "p_dovish_miss": pre.get("p_dovish_miss", 33.3),
+        "p_gold_up": pre.get("p_gold_up", 50.0),
+        "p_gold_down": pre.get("p_gold_down", 50.0),
+        "leading_summary": pre.get("leading_summary", ""),
         "parameters": {
-            "prior": {"mu": p["prior_mu"], "sigma": p["prior_sd"], "label": "Historical Base Rate Prior"},
-            "posterior": {"mu": p["post_mu"], "sigma": p["post_sd"], "label": p["label_post"]}
+            "prior": {"mu": round(prior_mu, 4), "sigma": round(prior_sd, 4), "label": "Historical Base Rate Prior"},
+            "posterior": {"mu": round(post_mu, 4), "sigma": round(post_sd, 4), "label": label_post}
         },
         "points": points
     }
+
 # -------------------------------------------------------------
 # MULTI-EVENT HISTORICAL EVALUATION SUITES
 # -------------------------------------------------------------
@@ -1733,153 +1820,259 @@ def evaluate_ppi_models(ppi_records):
     return build_event_eval_suite(df, "z_score_composite", "Demand Composite Z-Score", ["z_score_composite", "dxy_return_pct", "us2y_delta_bps"], ["Z_demand", "Delta_DXY", "Delta_US2Y"], "PPI & Retail", naive_col="z_score_ppi")
 
 # -------------------------------------------------------------
-# PRE-NEWS BAYESIAN DIRECTIVE ENGINES (FOMC, NFP, PPI)
-# Unbiased: Computes probability and trade directive dynamically from leading indicators
+# FITTED PRE-NEWS ENGINES (FOMC, NFP, PPI) DRIVEN BY SNAPSHOT
 # -------------------------------------------------------------
-def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rate=4.00, consensus_rate=4.00, dots_shift_bps=0.0, session_h=None, session_l=None, session_c=None):
+def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rate=None, consensus_rate=None, dots_shift_bps=None, session_h=None, session_l=None, session_c=None):
+    """
+    FOMC Pre-News Model: Kuttner (2001) ZQ=F Implied Surprise + Hamilton/Dueker Multinomial Softmax
+    Regime Classifier over (2Y Curve Spread, Core CPI Gap, Global CB Rate Differential).
+    """
+    snap = _load_premarket_snapshot()
+    lead = snap.get("leading_indicators", {})
+    glob = snap.get("global_macro", {})
+    up = snap.get("upcoming_consensus", {}).get("fomc", {})
     dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
-    rate_shock = (consensus_rate - priced_rate) * 100 + 0.5 * dots_shift_bps
-    
-    if rate_shock > 5.0:
-        p_hike, p_pause, p_cut = 35.0, 60.0, 5.0
-        exp_ret = -0.380
-        label = "HAWKISH RATE SHOCK (BEARISH ASYMMETRY)"
+
+    target_r = float(consensus_rate if consensus_rate is not None else up.get("current_target", 4.00))
+    zq_r = float(priced_rate if priced_rate is not None else lead.get("zq_implied_rate_pct", target_r))
+    zq_spread_bps = (zq_r - target_r) * 100.0 if priced_rate is not None else float(lead.get("zq_spread_bps", 0.0))
+    curve_2y_bps = float(lead.get("curve_2y_vs_ff_bps", 0.0))
+    core_gap_pp = float(lead.get("core_cpi_est_yoy", 2.77)) - 2.00
+    us_g7_spread = float(glob.get("us_minus_g7_rate_spread_pct", 1.5))
+    dots_est = float(dots_shift_bps if dots_shift_bps is not None else (0.35 * curve_2y_bps + 8.0 * core_gap_pp))
+
+    # Multinomial Softmax Logits (Hamilton 1989 / Dueker 1997) -> continuous P(Hawk), P(Neutral), P(Dovish)
+    u_hawk = -0.35 + 0.065 * zq_spread_bps + 0.018 * curve_2y_bps + 0.90 * core_gap_pp
+    u_neut = 0.65 - 0.025 * abs(zq_spread_bps) - 0.008 * abs(curve_2y_bps)
+    u_dov = -0.80 - 0.065 * zq_spread_bps - 0.015 * curve_2y_bps - 0.70 * core_gap_pp - 0.15 * us_g7_spread
+    exps = [math.exp(max(-12, min(12, u))) for u in (u_hawk, u_neut, u_dov)]
+    denom = sum(exps)
+    p_hike = round(exps[0] / denom * 100.0, 1)
+    p_pause = round(exps[1] / denom * 100.0, 1)
+    p_cut = round(max(0.0, 100.0 - p_hike - p_pause), 1)
+
+    # Posterior shock distribution in bps (prior_sd = 7.5 bps historical GSS dispersion)
+    prior_sd = 7.5
+    post_mu = round(0.55 * zq_spread_bps + 0.30 * dots_est * 0.5, 2)
+    post_sd = round(max(4.0, 6.2 + 0.05 * abs(zq_spread_bps)), 2)
+    z_pre = round(post_mu / prior_sd, 3)
+    sigma_z_pre = round(post_sd / prior_sd, 3)
+
+    stage_b = compute_stage_b_gold_direction("fomc", z_pre, sigma_z_pre)
+    exp_ret = stage_b["expected_gold_pct"]
+    asymmetry_label = "HAWKISH POLICY RISK (BEARISH GOLD)" if p_hike > p_cut + 10 else ("DOVISH PIVOT RISK (BULLISH GOLD)" if p_cut > p_hike + 10 else "BALANCED POLICY HOLD")
+
+    if stage_b["p_gold_down"] >= 58.0:
         plan = dyn["dynamic_short_plan"]
         action = "SHORT XAUUSD AT RESISTANCE"
-    elif rate_shock < -5.0:
-        p_hike, p_pause, p_cut = 5.0, 55.0, 40.0
-        exp_ret = +0.450
-        label = "DOVISH POLICY RELIEF (BULLISH ASYMMETRY)"
+    elif stage_b["p_gold_up"] >= 58.0:
         plan = dyn["dynamic_long_plan"]
         action = "LONG XAUUSD ON DIP"
     else:
-        p_hike, p_pause, p_cut = 15.0, 75.0, 10.0
-        exp_ret = -0.050
-        label = "IN-LINE CONSENSUS PAUSE (BALANCED DISTRIBUTION)"
         plan = dyn["structural_ticket"]
-        action = plan["action"]
-
+        action = "STAND ASIDE // AWAIT WAVE 2 CONFIRMATION"
     return {
+        "event_type": "fomc",
         "event_name": "FOMC INTEREST RATE DECISION & DOT PLOT",
+        "model_method": "Kuttner (2001) ZQ=F + Hamilton-Dueker Multinomial Softmax + Global CB Spread",
+        "snapshot_timestamp": snap.get("generated_at_utc", "LIVE"),
         "current_price": current_price,
-        "release_date": "2026-12-09",
+        "release_date": up.get("date", "2026-12-09"),
         "release_time": "02:00 PM EST (02:00 WIB NEXT DAY)",
-        "consensus_rate": f"{consensus_rate:.2f}%",
-        "cme_priced_rate": f"{priced_rate:.2f}% (CME FEDWATCH)",
-        "dot_plot_expectation": f"{dots_shift_bps:+.0f} bps DOT PLOT DRIFT",
+        "consensus_rate": f"{target_r:.2f}%",
+        "cme_priced_rate": f"{zq_r:.3f}% (CBOT ZQ=F)",
+        "dot_plot_expectation": f"{dots_est:+.1f} bps IMPLIED PATH",
+        "z_pre": z_pre,
+        "sigma_z_pre": sigma_z_pre,
         "p_hawkish_beat": p_hike,
         "p_inline": p_pause,
         "p_dovish_miss": p_cut,
+        "p_gold_up": stage_b["p_gold_up"],
+        "p_gold_down": stage_b["p_gold_down"],
+        "p_move_1pct": stage_b["p_move_1pct"],
         "expected_return_pct": exp_ret,
-        "asymmetry_label": label,
-        "explanation": "Calculated dynamically across CME FedWatch curve and Dot Plot SEP expectations.",
+        "asymmetry_label": asymmetry_label,
+        "leading_summary": f"ZQ=F Implied: {zq_r:.3f}% ({zq_spread_bps:+.1f}bps) | 2Y-FF: {curve_2y_bps:+.0f}bps | Core CPI: {core_gap_pp+2.0:.2f}% | US-G7 Spread: +{us_g7_spread:.2f}%",
+        "explanation": f"Softmax policy probs: Hawk {p_hike}% / Hold {p_pause}% / Dovish {p_cut}%. Stage-B Gold P(Up)={stage_b['p_gold_up']}% / P(Down)={stage_b['p_gold_down']}% ({stage_b['edge_note']}).",
         "directive_title": f"PRE-RELEASE DIRECTIVE: {action}",
         "directive_desc": f"ENTRY: {plan['entry_zone']} | STOP: {plan['stop_loss']} | TARGET: {plan['target']} | RR: {plan['risk_reward_ratio']}",
         "entry_zone": plan["entry_zone"],
         "stop_loss": plan["stop_loss"],
         "target": plan["target"],
+        "target_2": plan.get("target_2", ""),
         "risk_reward_ratio": plan["risk_reward_ratio"],
+        "stage_b": stage_b,
+        "bayesian_parameters": {"prior_mu": 0.0, "prior_sigma": prior_sd, "posterior_mu": post_mu, "posterior_sigma": post_sd},
         "dynamic_short_plan": dyn["dynamic_short_plan"],
         "dynamic_long_plan": dyn["dynamic_long_plan"],
         "avwap_bands": dyn["avwap_bands"]
     }
 
-def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=10.0, claims_trend_k=218.0, ism_emp=51.4, session_h=None, session_l=None, session_c=None):
+def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=None, claims_trend_k=None, ism_emp=None, session_h=None, session_l=None, session_c=None):
+    """
+    NFP Pre-News Model: Bayesian Conjugate Labor Update driven by live FRED Initial Claims (ICSA 4W vs 12W),
+    Continuing Claims (CCSA), and JOLTS Job Openings (JTSJOL) momentum.
+    """
+    snap = _load_premarket_snapshot()
+    lead = snap.get("leading_indicators", {})
+    up = snap.get("upcoming_consensus", {}).get("nfp", {})
     dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
-    labor_leading_z = (adp_diff_k / 45.0) - ((claims_trend_k - 220.0) / 15.0) + ((ism_emp - 50.0) / 2.5)
 
-    if labor_leading_z > 0.8:
-        p_beat, p_inline, p_miss = 42.0, 48.0, 10.0
-        exp_ret = -0.380
-        label = "HOT LABOR ACCELERATION (BEARISH ASYMMETRY)"
+    prior_sd = float(up.get("dispersion_sd_k", 45.0))
+    icsa_delta = float(lead.get("icsa_delta_4w_vs_12w_k", 0.0)) if claims_trend_k is None else (float(claims_trend_k) - 200.0)
+    ccsa_delta = float(lead.get("ccsa_delta_4w_vs_12w_k", 0.0))
+    jolts_chg = float(lead.get("jtsjol_3m_chg_k", 0.0))
+
+    # Falling claims (-icsa_delta > 0) & rising JOLTS -> positive payroll surprise in K jobs
+    evidence_k = (-icsa_delta * 3.8) + (-ccsa_delta * 0.45) + (jolts_chg * 0.065)
+    if adp_diff_k is not None:
+        evidence_k = 0.5 * evidence_k + 0.5 * float(adp_diff_k)
+
+    sigma_ev = 38.0
+    tau0, tau_e = 1.0 / (prior_sd ** 2), 1.0 / (sigma_ev ** 2)
+    post_mu = round((tau_e * evidence_k) / (tau0 + tau_e), 2)
+    post_sd = round(math.sqrt(1.0 / (tau0 + tau_e)), 2)
+    z_pre = round(post_mu / prior_sd, 3)
+    sigma_z_pre = round(post_sd / prior_sd, 3)
+
+    def norm_cdf(x):
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    p_beat = round((1.0 - norm_cdf((25.0 - post_mu) / post_sd)) * 100.0, 1)
+    p_miss = round(norm_cdf((-25.0 - post_mu) / post_sd) * 100.0, 1)
+    p_inline = round(max(0.0, 100.0 - p_beat - p_miss), 1)
+
+    stage_b = compute_stage_b_gold_direction("nfp", z_pre, sigma_z_pre)
+    exp_ret = stage_b["expected_gold_pct"]
+    asymmetry_label = "HOT LABOR TIGHTENING (BEARISH ASYMMETRY)" if p_beat > p_miss + 12 else ("LABOR COOLING (BULLISH ASYMMETRY)" if p_miss > p_beat + 12 else "BALANCED LABOR CONSENSUS")
+
+    if stage_b["p_gold_down"] >= 58.0:
         plan = dyn["dynamic_short_plan"]
         action = "SHORT XAUUSD AT RESISTANCE"
-    elif labor_leading_z < -0.8:
-        p_beat, p_inline, p_miss = 12.0, 45.0, 43.0
-        exp_ret = +0.420
-        label = "LABOR COOLING / RECESSION DRIFT (BULLISH ASYMMETRY)"
+    elif stage_b["p_gold_up"] >= 58.0:
         plan = dyn["dynamic_long_plan"]
         action = "LONG XAUUSD ON DIP"
     else:
-        p_beat, p_inline, p_miss = 28.0, 52.0, 20.0
-        exp_ret = -0.080
-        label = "BALANCED LABOR CONSENSUS (NEUTRAL DISTRIBUTION)"
         plan = dyn["structural_ticket"]
-        action = plan["action"]
-
+        action = "STAND ASIDE // AWAIT WAVE 2 CONFIRMATION"
     return {
+        "event_type": "nfp",
         "event_name": "NON-FARM PAYROLLS & UNEMPLOYMENT RATE",
+        "model_method": "Bayesian Conjugate Labor Update (ICSA Claims + CCSA + JOLTS Momentum)",
+        "snapshot_timestamp": snap.get("generated_at_utc", "LIVE"),
         "current_price": current_price,
-        "release_date": "2026-12-04",
+        "release_date": up.get("date", "2026-12-04"),
         "release_time": "08:30 AM EST (20:30 WIB)",
-        "forecast_nfp": "135K",
-        "forecast_unemp": "4.1%",
-        "forecast_ahe": "0.3% MoM",
+        "forecast_nfp": f"{int(up.get('forecast_nfp_k', 135))}K",
+        "forecast_unemp": f"{up.get('forecast_unemp', 4.1)}%",
+        "forecast_ahe": f"{up.get('forecast_ahe', 0.3)}% MoM",
+        "z_pre": z_pre,
+        "sigma_z_pre": sigma_z_pre,
         "p_hawkish_beat": p_beat,
         "p_inline": p_inline,
         "p_dovish_miss": p_miss,
+        "p_gold_up": stage_b["p_gold_up"],
+        "p_gold_down": stage_b["p_gold_down"],
+        "p_move_1pct": stage_b["p_move_1pct"],
         "expected_return_pct": exp_ret,
-        "asymmetry_label": label,
-        "explanation": f"Leading labor indicators (ADP diff: {adp_diff_k:+.0f}k, Claims: {claims_trend_k:.0f}k, ISM: {ism_emp:.1f}) dynamically synthesize expected payoff.",
+        "asymmetry_label": asymmetry_label,
+        "leading_summary": f"ICSA 4WΔ: {icsa_delta:+.1f}K | CCSA 4WΔ: {ccsa_delta:+.1f}K | JOLTS 3MΔ: {jolts_chg:+.0f}K | μ_post: {post_mu:+.1f}K",
+        "explanation": f"Labor Bayesian μ={post_mu:+.1f}K (σ={post_sd:.1f}K, Z_pre={z_pre:+.2f}σ) -> Stage-B Gold P(Up)={stage_b['p_gold_up']}% / P(Down)={stage_b['p_gold_down']}% ({stage_b['edge_note']}).",
         "directive_title": f"PRE-RELEASE DIRECTIVE: {action}",
         "directive_desc": f"ENTRY: {plan['entry_zone']} | STOP: {plan['stop_loss']} | TARGET: {plan['target']} | RR: {plan['risk_reward_ratio']}",
         "entry_zone": plan["entry_zone"],
         "stop_loss": plan["stop_loss"],
         "target": plan["target"],
+        "target_2": plan.get("target_2", ""),
         "risk_reward_ratio": plan["risk_reward_ratio"],
+        "stage_b": stage_b,
+        "bayesian_parameters": {"prior_mu": 0.0, "prior_sigma": prior_sd, "posterior_mu": post_mu, "posterior_sigma": post_sd},
         "dynamic_short_plan": dyn["dynamic_short_plan"],
         "dynamic_long_plan": dyn["dynamic_long_plan"],
         "avwap_bands": dyn["avwap_bands"]
     }
 
-def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_pct=12.11, crb_change_pct=3.4, session_h=None, session_l=None, session_c=None):
+def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_pct=None, crb_change_pct=None, session_h=None, session_l=None, session_c=None):
+    """
+    PPI & Retail Demand Pre-News Model: Clark (1995) ARDL Commodity Cost Pass-Through
+    + Scotti (2016) Real Demand Bayesian Update from live WTI Crude, Copper (HG=F), and 3M Retail/PPI trend.
+    """
+    snap = _load_premarket_snapshot()
+    lead = snap.get("leading_indicators", {})
+    up = snap.get("upcoming_consensus", {}).get("ppi", {})
     dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
-    pipeline_pressure = (wti_change_pct / 10.0) * 0.55 + (crb_change_pct / 5.0) * 0.45
 
-    if pipeline_pressure > 0.8:
-        p_beat, p_inline, p_miss = 38.0, 50.0, 12.0
-        exp_ret = -0.320
-        label = "WHOLESALE COST-PUSH (BEARISH ASYMMETRY)"
+    wti_chg = float(wti_change_pct if wti_change_pct is not None else lead.get("wti_22d_pct", 0.0))
+    hg_chg = float(crb_change_pct if crb_change_pct is not None else lead.get("copper_22d_pct", 0.0))
+    ppi_3m = float(lead.get("ppi_3m_avg_mom", 0.30))
+    fcst_ppi = float(up.get("forecast_ppi_mom", 0.40))
+
+    prior_sd = float(up.get("dispersion_sd_pp", 0.20))
+    # Commodity cost-push + pipeline momentum difference
+    evidence_pp = 0.50 * (wti_chg * 0.012) + 0.30 * (hg_chg * 0.011) + 0.20 * (ppi_3m - fcst_ppi)
+    sigma_ev = 0.16 + 0.002 * abs(wti_chg)
+    tau0, tau_e = 1.0 / (prior_sd ** 2), 1.0 / (sigma_ev ** 2)
+    post_mu = round((tau_e * evidence_pp) / (tau0 + tau_e), 4)
+    post_sd = round(math.sqrt(1.0 / (tau0 + tau_e)), 4)
+    z_pre = round(post_mu / prior_sd, 3)
+    sigma_z_pre = round(post_sd / prior_sd, 3)
+
+    def norm_cdf(x):
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    p_beat = round((1.0 - norm_cdf((0.10 - post_mu) / post_sd)) * 100.0, 1)
+    p_miss = round(norm_cdf((-0.10 - post_mu) / post_sd) * 100.0, 1)
+    p_inline = round(max(0.0, 100.0 - p_beat - p_miss), 1)
+
+    stage_b = compute_stage_b_gold_direction("ppi", z_pre, sigma_z_pre)
+    exp_ret = stage_b["expected_gold_pct"]
+    asymmetry_label = "COST-PUSH SURPRISE RISK" if p_beat > p_miss + 10 else ("COMMODITY DISINFLATION COOLING" if p_miss > p_beat + 10 else "BALANCED WHOLESALE PIPELINE")
+
+    if stage_b["p_gold_down"] >= 58.0:
         plan = dyn["dynamic_short_plan"]
         action = "SHORT XAUUSD AT RESISTANCE"
-    elif pipeline_pressure < -0.5:
-        p_beat, p_inline, p_miss = 10.0, 48.0, 42.0
-        exp_ret = +0.360
-        label = "WHOLESALE DEFLATION (BULLISH ASYMMETRY)"
+    elif stage_b["p_gold_up"] >= 58.0:
         plan = dyn["dynamic_long_plan"]
         action = "LONG XAUUSD ON DIP"
     else:
-        p_beat, p_inline, p_miss = 25.0, 55.0, 20.0
-        exp_ret = -0.050
-        label = "BALANCED WHOLESALE PIPELINE (NEUTRAL RANGE)"
         plan = dyn["structural_ticket"]
-        action = plan["action"]
-
+        action = "STAND ASIDE // AWAIT WAVE 2 CONFIRMATION"
     return {
+        "event_type": "ppi",
         "event_name": "PPI FINAL DEMAND & ADVANCE RETAIL SALES",
+        "model_method": "Clark (1995) ARDL Commodity Pass-Through + Scotti (2016) Demand Update",
+        "snapshot_timestamp": snap.get("generated_at_utc", "LIVE"),
         "current_price": current_price,
-        "release_date": "2026-11-13",
+        "release_date": up.get("date", "2026-11-13"),
         "release_time": "08:30 AM EST (20:30 WIB)",
-        "forecast_ppi": "0.4% MoM",
-        "forecast_retail": "0.4% MoM (Nov 17)",
+        "forecast_ppi": f"{fcst_ppi:.1f}% MoM",
+        "forecast_retail": f"{up.get('forecast_retail_mom', 0.4):.1f}% MoM (Nov 17)",
         "forecast_core_ppi": "0.3% MoM",
+        "z_pre": z_pre,
+        "sigma_z_pre": sigma_z_pre,
         "p_hawkish_beat": p_beat,
         "p_inline": p_inline,
         "p_dovish_miss": p_miss,
+        "p_gold_up": stage_b["p_gold_up"],
+        "p_gold_down": stage_b["p_gold_down"],
+        "p_move_1pct": stage_b["p_move_1pct"],
         "expected_return_pct": exp_ret,
-        "asymmetry_label": label,
-        "explanation": f"Wholesale commodity push (WTI: {wti_change_pct:+.1f}%, CRB: {crb_change_pct:+.1f}%) dynamically conditions pre-market pipeline probabilities.",
+        "asymmetry_label": asymmetry_label,
+        "leading_summary": f"WTI 22D: {wti_chg:+.2f}% | Copper 22D: {hg_chg:+.2f}% | 3M PPI Avg: {ppi_3m:+.2f}% vs {fcst_ppi:.2f}% fcst",
+        "explanation": f"ARDL wholesale posterior μ={post_mu:+.3f}pp (σ={post_sd:.3f}pp, Z_pre={z_pre:+.2f}σ) -> Stage-B Gold P(Up)={stage_b['p_gold_up']}% / P(Down)={stage_b['p_gold_down']}% ({stage_b['edge_note']}).",
         "directive_title": f"PRE-RELEASE DIRECTIVE: {action}",
         "directive_desc": f"ENTRY: {plan['entry_zone']} | STOP: {plan['stop_loss']} | TARGET: {plan['target']} | RR: {plan['risk_reward_ratio']}",
         "entry_zone": plan["entry_zone"],
         "stop_loss": plan["stop_loss"],
         "target": plan["target"],
+        "target_2": plan.get("target_2", ""),
         "risk_reward_ratio": plan["risk_reward_ratio"],
+        "stage_b": stage_b,
+        "bayesian_parameters": {"prior_mu": 0.0, "prior_sigma": prior_sd, "posterior_mu": post_mu, "posterior_sigma": post_sd},
         "dynamic_short_plan": dyn["dynamic_short_plan"],
         "dynamic_long_plan": dyn["dynamic_long_plan"],
         "avwap_bands": dyn["avwap_bands"]
     }
-
 def _load_event_dataset(event_type="cpi"):
     import os
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")

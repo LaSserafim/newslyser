@@ -1,0 +1,63 @@
+{
+  "generated_at_utc": "2026-11-12 02:22:10 UTC",
+  "snapshot_policy": "FROZEN_MACRO_CONDITION (UPDATES ONLY ON STARTUP / SYNC LIVE / OFFICIAL RELEASE)",
+  "global_macro": {
+    "global_surprise_index_gsi": 0.82,
+    "g7_ex_us_cpi_avg_pct": 1.62,
+    "g7_ex_us_policy_rate_avg_pct": 2.47,
+    "us_minus_g7_rate_spread_pct": 1.53
+  },
+  "leading_indicators": {
+    "wti_last": 85.96,
+    "wti_22d_pct": -8.69,
+    "copper_last": 6.272,
+    "copper_22d_pct": -6.08,
+    "t10yie_last": 2.2,
+    "t10yie_22d_chg": -0.13,
+    "zq_implied_rate_pct": 4.175,
+    "dfedtaru_pct": 4.0,
+    "zq_spread_bps": 17.5,
+    "dgs2_last_pct": 4.56,
+    "curve_2y_vs_ff_bps": 56.0,
+    "icsa_last_k": 189.0,
+    "icsa_4w_ma_k": 194.8,
+    "icsa_12w_ma_k": 199.8,
+    "icsa_delta_4w_vs_12w_k": -5.0,
+    "ccsa_4w_ma_k": 1709.5,
+    "ccsa_12w_ma_k": 1732.2,
+    "ccsa_delta_4w_vs_12w_k": -22.7,
+    "jtsjol_last_k": 7523.0,
+    "jtsjol_3m_chg_k": 287.0,
+    "core_cpi_est_yoy": 2.77,
+    "ppi_3m_avg_mom": 0.66,
+    "retail_3m_avg_mom": 0.55
+  },
+  "upcoming_consensus": {
+    "cpi": {
+      "date": "2026-12-10",
+      "forecast_mom": 0.3,
+      "nowcast_mom": 0.31,
+      "survey_sd": 0.075
+    },
+    "fomc": {
+      "date": "2026-12-09",
+      "current_target": 4.0,
+      "consensus_rate": 4.0,
+      "zq_implied": 4.175
+    },
+    "nfp": {
+      "date": "2026-12-04",
+      "forecast_nfp_k": 135.0,
+      "forecast_unemp": 4.1,
+      "forecast_ahe": 0.3,
+      "dispersion_sd_k": 45.0
+    },
+    "ppi": {
+      "date": "2026-11-13",
+      "forecast_ppi_mom": 0.4,
+      "prev_ppi_mom": 1.34,
+      "forecast_retail_mom": 0.4,
+      "dispersion_sd_pp": 0.2
+    }
+  }
+}

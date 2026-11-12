@@ -219,7 +219,8 @@ def build_all_datasets():
         "CPIAUCSL", "CPILFESL", "CUSR0000SASLE", "CUSR0000SEHC",
         "PAYEMS", "UNRATE", "CES0500000003",
         "PPIFIS", "RSAFS",
-        "DFEDTARU", "FEDFUNDS", "DGS2", "DGS10", "DFII10", "T10YIE"
+        "DFEDTARU", "FEDFUNDS", "DGS2", "DGS10", "DFII10", "T10YIE",
+        "ICSA", "CCSA", "JTSJOL"
     ]
     fred = {}
     for sid in series_ids:
@@ -230,9 +231,8 @@ def build_all_datasets():
     # Download Yahoo Finance daily market history strictly through today + 1 (since yfinance end is exclusive)
     end_dt = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"[YFINANCE] Downloading market history 2023-12-15 -> {end_dt}...")
-    tickers = ["GC=F", "DX-Y.NYB", "ZT=F", "ZQ=F", "^TNX", "CL=F"]
+    tickers = ["GC=F", "DX-Y.NYB", "ZT=F", "ZQ=F", "^TNX", "CL=F", "HG=F"]
     mkt = yf.download(tickers, start="2023-12-15", end=end_dt, interval="1d", progress=False, auto_adjust=False)
-
     dgs2_df = fred["DGS2"].dropna() if "DGS2" in fred else None
     tips_df = fred["DFII10"].dropna() if "DFII10" in fred else None
 
@@ -581,8 +581,109 @@ def build_all_datasets():
     with open(os.path.join(DATA_DIR, "macro_summary.json"), "w") as f:
         json.dump(macro_summary, f, indent=2)
 
-    print("[PIPELINE] All authentic datasets + calendar + macro_summary persisted cleanly!")
+    # ------------------------------------------------------------------
+    # G. BUILD FROZEN PRE-MARKET STATISTICAL SNAPSHOT (LAYER 1)
+    # ------------------------------------------------------------------
+    def _pct22(sym):
+        if "Close" in mkt and sym in mkt["Close"]:
+            s = mkt["Close"][sym].dropna()
+            if len(s) >= 22:
+                return round(float(s.iloc[-1]), 3), round((float(s.iloc[-1]) / float(s.iloc[-22]) - 1.0) * 100.0, 2)
+            if len(s) >= 1:
+                return round(float(s.iloc[-1]), 3), 0.0
+        return 0.0, 0.0
 
+    wti_last, wti_22d = _pct22("CL=F")
+    hg_last, hg_22d = _pct22("HG=F")
+    zq_s = mkt["Close"]["ZQ=F"].dropna() if ("Close" in mkt and "ZQ=F" in mkt["Close"]) else pd.Series(dtype=float)
+    zq_implied = round(100.0 - float(zq_s.iloc[-1]), 3) if not zq_s.empty else 4.00
+    taru_last = round(float(fred["DFEDTARU"]["DFEDTARU"].dropna().iloc[-1]), 2) if "DFEDTARU" in fred else 4.00
+    dgs2_last = round(float(fred["DGS2"]["DGS2"].dropna().iloc[-1]), 2) if "DGS2" in fred else 4.56
+
+    t10_s = fred["T10YIE"]["T10YIE"].dropna() if "T10YIE" in fred else pd.Series(dtype=float)
+    t10_last = round(float(t10_s.iloc[-1]), 2) if not t10_s.empty else 2.20
+    t10_22d_chg = round(float(t10_s.iloc[-1] - t10_s.iloc[-min(22, len(t10_s))]), 3) if not t10_s.empty else 0.0
+
+    icsa_s = fred["ICSA"]["ICSA"].dropna() if "ICSA" in fred else pd.Series(dtype=float)
+    icsa_last = round(float(icsa_s.iloc[-1]) / 1000.0, 1) if not icsa_s.empty else 189.0
+    icsa_4w = round(float(icsa_s.iloc[-4:].mean()) / 1000.0, 1) if len(icsa_s) >= 4 else icsa_last
+    icsa_12w = round(float(icsa_s.iloc[-12:].mean()) / 1000.0, 1) if len(icsa_s) >= 12 else icsa_4w
+
+    ccsa_s = fred["CCSA"]["CCSA"].dropna() if "CCSA" in fred else pd.Series(dtype=float)
+    ccsa_4w = round(float(ccsa_s.iloc[-4:].mean()) / 1000.0, 1) if len(ccsa_s) >= 4 else 1710.0
+    ccsa_12w = round(float(ccsa_s.iloc[-12:].mean()) / 1000.0, 1) if len(ccsa_s) >= 12 else ccsa_4w
+
+    jolt_s = fred["JTSJOL"]["JTSJOL"].dropna() if "JTSJOL" in fred else pd.Series(dtype=float)
+    jolt_last = round(float(jolt_s.iloc[-1]), 0) if not jolt_s.empty else 7500.0
+    jolt_3m_base = round(float(jolt_s.iloc[-4:-1].mean()), 0) if len(jolt_s) >= 4 else jolt_last
+
+    # Global macro spillovers (US vs G7/BRICS from global_macro_matrix.json)
+    gm_path = os.path.join(DATA_DIR, "global_macro_matrix.json")
+    g7_cpi_avg, g7_rate_avg, gsi = 2.0, 3.0, 0.0
+    if os.path.exists(gm_path):
+        with open(gm_path) as f:
+            gm = json.load(f)
+        gsi = float(gm.get("global_surprise_index_gsi", 0.0))
+        sov = list((gm.get("sovereigns") or {}).values())
+        non_us = [s for s in sov if s.get("currency") != "USD"]
+        if non_us:
+            g7_cpi_avg = round(float(np.mean([float(s.get("headline_cpi_yoy", 2.0)) for s in non_us])), 2)
+            g7_rate_avg = round(float(np.mean([float(s.get("policy_rate", s.get("pboc_1y_lpr", 2.5))) for s in non_us])), 2)
+
+    # Core CPI YoY estimate (handle Oct 2025 shutdown interpolation cleanly)
+    c_idx_now = float(cpi_core.dropna().iloc[-1])
+    c_idx_sep25 = float(cpi_core.loc[pd.Timestamp("2025-09-01")])
+    c_idx_nov25 = float(cpi_core.loc[pd.Timestamp("2025-11-01")])
+    core_cpi_est_yoy = round(((c_idx_now / (0.5 * (c_idx_sep25 + c_idx_nov25))) - 1.0) * 100.0, 2)
+
+    ppi_3m_avg = round(float(ppi_mom.dropna().iloc[-3:].mean()), 2)
+    retail_3m_avg = round(float(retail_mom.dropna().iloc[-3:].mean()), 2)
+
+    premarket_snapshot = {
+        "generated_at_utc": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "snapshot_policy": "FROZEN_MACRO_CONDITION (UPDATES ONLY ON STARTUP / SYNC LIVE / OFFICIAL RELEASE)",
+        "global_macro": {
+            "global_surprise_index_gsi": gsi,
+            "g7_ex_us_cpi_avg_pct": g7_cpi_avg,
+            "g7_ex_us_policy_rate_avg_pct": g7_rate_avg,
+            "us_minus_g7_rate_spread_pct": round(taru_last - g7_rate_avg, 2)
+        },
+        "leading_indicators": {
+            "wti_last": wti_last,
+            "wti_22d_pct": wti_22d,
+            "copper_last": hg_last,
+            "copper_22d_pct": hg_22d,
+            "t10yie_last": t10_last,
+            "t10yie_22d_chg": t10_22d_chg,
+            "zq_implied_rate_pct": zq_implied,
+            "dfedtaru_pct": taru_last,
+            "zq_spread_bps": round((zq_implied - taru_last) * 100.0, 1),
+            "dgs2_last_pct": dgs2_last,
+            "curve_2y_vs_ff_bps": round((dgs2_last - taru_last) * 100.0, 1),
+            "icsa_last_k": icsa_last,
+            "icsa_4w_ma_k": icsa_4w,
+            "icsa_12w_ma_k": icsa_12w,
+            "icsa_delta_4w_vs_12w_k": round(icsa_4w - icsa_12w, 1),
+            "ccsa_4w_ma_k": ccsa_4w,
+            "ccsa_12w_ma_k": ccsa_12w,
+            "ccsa_delta_4w_vs_12w_k": round(ccsa_4w - ccsa_12w, 1),
+            "jtsjol_last_k": jolt_last,
+            "jtsjol_3m_chg_k": round(jolt_last - jolt_3m_base, 0),
+            "core_cpi_est_yoy": core_cpi_est_yoy,
+            "ppi_3m_avg_mom": ppi_3m_avg,
+            "retail_3m_avg_mom": retail_3m_avg
+        },
+        "upcoming_consensus": {
+            "cpi": {"date": tomorrow_event["date"], "forecast_mom": tomorrow_event["forecast_mom"], "nowcast_mom": tomorrow_event["cleveland_fed_nowcast_mom"], "survey_sd": tomorrow_event["survey_dispersion_sd"]},
+            "fomc": {"date": "2026-12-09", "current_target": taru_last, "consensus_rate": taru_last, "zq_implied": zq_implied},
+            "nfp": {"date": "2026-12-04", "forecast_nfp_k": 135.0, "forecast_unemp": 4.1, "forecast_ahe": 0.3, "dispersion_sd_k": 45.0},
+            "ppi": {"date": "2026-11-13", "forecast_ppi_mom": 0.4, "prev_ppi_mom": 1.34, "forecast_retail_mom": 0.4, "dispersion_sd_pp": 0.20}
+        }
+    }
+    with open(os.path.join(DATA_DIR, "premarket_snapshot.json"), "w") as f:
+        json.dump(premarket_snapshot, f, indent=2)
+
+    print("[PIPELINE] All authentic datasets + calendar + macro_summary + premarket_snapshot persisted cleanly!")
 
 _SYNC_STATE = {"last_ts": 0.0}
 
@@ -666,7 +767,7 @@ def sync_live_releases_if_stale(force=False):
             for s in [cpi_f, ppi_f, pay_f] if s is not None and not s.dropna().empty
         )
         # If FRED advanced a month or a scheduled release date passed with live FF actuals, rebuild datasets
-        if (latest_yoy_dt and fred_max > latest_yoy_dt) or updated_events:
+        if force or (latest_yoy_dt and fred_max > latest_yoy_dt) or updated_events:
             build_all_datasets()
             return {"synced": True, "rebuilt": True, "updated_events": updated_events, "fred_latest": fred_max}
     except Exception as e:

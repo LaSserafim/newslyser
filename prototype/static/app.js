@@ -6,12 +6,13 @@
  */
 
 const EVENT_STATE = {
-  cpi:  { z: 1.33, horizon: 1, asset: "gold", diag: "tcurve", pdfView: "cpi", fwTimer: null },
-  fomc: { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", fwTimer: null },
-  nfp:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", fwTimer: null },
-  ppi:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", fwTimer: null }
+  cpi:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", pdfView: "cpi", mode: "PREMARKET", fwTimer: null },
+  fomc: { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mode: "PREMARKET", fwTimer: null },
+  nfp:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mode: "PREMARKET", fwTimer: null },
+  ppi:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mode: "PREMARKET", fwTimer: null }
 };
 
+let PREMARKET_CACHE = null;
 let currentAiMode = "pre_news";
 let maximizedPaneId = null;
 let yoyDomain = "cpi";
@@ -19,7 +20,7 @@ let yoyTimelineCache = null;
 let yoyActiveKeys = { headline_yoy: true, core_yoy: true, supercore_yoy: true, shelter_yoy: true };
 let ttlTimerInterval = null;
 
-function init() {
+async function init() {
   initClock();
   initModuleNavigation();
   initCpiSliders();
@@ -32,8 +33,9 @@ function init() {
   initDeepSeekControls();
   initYoyControls();
 
-  // Initial fetches & renders
-  fetchState();
+  // Load frozen Pre-Market Snapshot FIRST so Pane 01, 02, 03, 06 match identically on first paint
+  await Promise.all([fetchPremarketSnapshot(false), fetchState()]);
+  renderWorkstation("cpi");
   fetchAuditLedger();
   fetchFomcData();
   fetchNfpData();
@@ -41,7 +43,6 @@ function init() {
   fetchCalendarData();
   fetchAcademicLit();
   fetchAstarData();
-  renderWorkstation("cpi");
   initAutoRefreshLoop();
 
   if (window.Motion) {
@@ -191,21 +192,21 @@ function initCpiSliders() {
     vCore.innerText = `${core.toFixed(2)}%`;
 
     const zHl = (hl - 0.3) / 0.075;
-    const zCore = (core - 2.8) / 0.075;
+    const zCore = (core - 2.9) / 0.075;
     const zComp = 0.60 * zCore + 0.40 * zHl;
     EVENT_STATE.cpi.z = zComp;
+    EVENT_STATE.cpi.mode = "WHATIF";
 
-    vShock.innerText = `${zComp > 0 ? "+" : ""}${zComp.toFixed(2)}σ`;
+    vShock.innerText = `${zComp > 0 ? "+" : ""}${zComp.toFixed(2)}σ (WHAT-IF)`;
     vShock.style.color = zComp > 0.8 ? "var(--amber-cmd)" : (zComp < -0.8 ? "#ffffff" : "var(--fg-normal)");
 
-    let regime = "IN-LINE NOISE";
-    if (zComp >= 1.5) regime = "HAWKISH EXPANSION DRIFT";
-    else if (zComp >= 0.8) regime = "HAWKISH SURPRISE";
-    else if (zComp <= -1.5) regime = "DOVISH REVERSAL TREND";
-    else if (zComp <= -0.8) regime = "DOVISH RELIEF";
+    let regime = "WHAT-IF: IN-LINE NOISE";
+    if (zComp >= 1.5) regime = "WHAT-IF: HAWKISH DRIFT";
+    else if (zComp >= 0.8) regime = "WHAT-IF: HAWKISH SURPRISE";
+    else if (zComp <= -1.5) regime = "WHAT-IF: DOVISH REVERSAL";
+    else if (zComp <= -0.8) regime = "WHAT-IF: DOVISH RELIEF";
     vRegime.innerText = regime;
 
-    renderEventPdfPane("cpi");
     renderEventMcPane("cpi");
     renderEventFreqPane("cpi");
     executeSimulateCpi(hl, core);
@@ -234,10 +235,10 @@ function initFomcSliders() {
     vDots.innerText = `${dt > 0 ? "+" : ""}${dt.toFixed(1)} bps`;
 
     const shockBps = (act - pr) * 100 + 0.5 * dt;
-    const zFomc = shockBps / 10.0;
+    const zFomc = shockBps / 7.5;
     EVENT_STATE.fomc.z = zFomc;
-    sSum.innerText = `${shockBps > 0 ? "+" : ""}${shockBps.toFixed(1)} bps (${shockBps === 0 ? "CONSENSUS PAUSE" : (shockBps > 0 ? "HAWKISH SURPRISE" : "DOVISH CUT")})`;
-
+    EVENT_STATE.fomc.mode = "WHATIF";
+    sSum.innerText = `${shockBps > 0 ? "+" : ""}${shockBps.toFixed(1)} bps (WHAT-IF)`;
     renderEventMcPane("fomc");
     renderEventFreqPane("fomc");
     try {
@@ -277,12 +278,14 @@ function initNfpSliders() {
     const zAh = (ah - 0.3) / 0.10;
     const zLabor = 0.50 * zNfp - 0.30 * zUn + 0.20 * zAh;
     EVENT_STATE.nfp.z = zLabor;
+    EVENT_STATE.nfp.mode = "WHATIF";
 
-    sSum.innerText = `${zLabor > 0 ? "+" : ""}${zLabor.toFixed(2)}σ (${zLabor >= 1.0 ? "HAWKISH EXPANSION" : (zLabor <= -1.0 ? "DOVISH COOLING" : "IN-LINE NOISE")})`;
+    sSum.innerText = `${zLabor > 0 ? "+" : ""}${zLabor.toFixed(2)}σ (WHAT-IF)`;
     renderEventMcPane("nfp");
     renderEventFreqPane("nfp");
     try {
       const res = await fetch(`/api/nfp-model?nfp_actual=${act}&nfp_forecast=135&unemp_actual=${un}&unemp_forecast=4.1&ahe_actual=${ah}&ahe_forecast=0.3`);
+      const d = await res.json();
       if (d && d.metrics && d.dynamic_execution) {
         updateExecTicket("nfp", d.metrics.tactical_signal, d.dynamic_execution);
       }
@@ -312,12 +315,14 @@ function initPpiSliders() {
     const zRet = (ret - 0.4) / 0.35;
     const zDemand = 0.55 * zPpi + 0.45 * zRet;
     EVENT_STATE.ppi.z = zDemand;
+    EVENT_STATE.ppi.mode = "WHATIF";
 
-    sSum.innerText = `${zDemand > 0 ? "+" : ""}${zDemand.toFixed(2)}σ (${zDemand >= 1.0 ? "COST-PUSH" : (zDemand <= -1.0 ? "DEMAND COOLING" : "BALANCED")})`;
+    sSum.innerText = `${zDemand > 0 ? "+" : ""}${zDemand.toFixed(2)}σ (WHAT-IF)`;
     renderEventMcPane("ppi");
     renderEventFreqPane("ppi");
     try {
       const res = await fetch(`/api/ppi-retail-model?ppi_actual=${act}&ppi_forecast=0.4&retail_actual=${ret}&retail_forecast=0.4`);
+      const d = await res.json();
       if (d && d.metrics && d.dynamic_execution) {
         updateExecTicket("ppi", d.metrics.tactical_signal, d.dynamic_execution);
       }
@@ -367,7 +372,7 @@ function initAllControls() {
     btn.innerText = "SYNCING B-PIPE...";
     try { await fetch("/api/sync-releases?force=true", { method: "POST" }); } catch (e) {}
     yoyTimelineCache = null;
-    await Promise.all([fetchState(), fetchAuditLedger(), fetchFomcData(), fetchNfpData(), fetchPpiData(), fetchCalendarData(), fetchAstarData()]);
+    await Promise.all([fetchPremarketSnapshot(false), fetchState(), fetchAuditLedger(), fetchFomcData(), fetchNfpData(), fetchPpiData(), fetchCalendarData(), fetchAstarData()]);
     const mod = getActiveModuleId();
     if (mod === "mod-cpi") renderWorkstation("cpi");
     else if (mod === "mod-fomc") renderWorkstation("fomc");
@@ -528,10 +533,11 @@ function triggerFirewallCountdown(ev, seconds = 60) {
   }, 1000);
 }
 
-function resetEventModule(ev, pre) {
+async function resetEventModule(ev, pre) {
   EVENT_STATE[ev].horizon = 1;
   EVENT_STATE[ev].asset = "gold";
   EVENT_STATE[ev].diag = "tcurve";
+  EVENT_STATE[ev].mode = "PREMARKET";
   resetFirewallBox(ev);
 
   const b1d = document.getElementById(`${pre}-btn-horizon-1d`);
@@ -541,48 +547,42 @@ function resetEventModule(ev, pre) {
 
   if (ev === "cpi") {
     EVENT_STATE.cpi.pdfView = "cpi";
-    const rH = document.getElementById("bbg-range-headline");
-    const rC = document.getElementById("bbg-range-core");
-    if (rH) rH.value = 0.4;
-    if (rC) rC.value = 3.4;
-    rH?.dispatchEvent(new Event("input"));
+    const rH = document.getElementById("bbg-range-headline"), rC = document.getElementById("bbg-range-core");
+    if (rH) rH.value = 0.3;
+    if (rC) rC.value = 2.9;
+    if (document.getElementById("bbg-val-headline")) document.getElementById("bbg-val-headline").innerText = "0.30%";
+    if (document.getElementById("bbg-val-core")) document.getElementById("bbg-val-core").innerText = "2.90%";
     document.querySelectorAll("[data-z]").forEach(b => b.classList.remove("active"));
     setBtnActive(document.querySelector("[data-asset='gold']"), "[data-asset]");
     setBtnActive(document.querySelector("[data-diag='tcurve']"), "[data-diag]");
-    renderWorkstation("cpi");
   } else if (ev === "fomc") {
-    const r1 = document.getElementById("fomc-range-rate");
-    const r2 = document.getElementById("fomc-range-priced");
-    const r3 = document.getElementById("fomc-range-dots");
-    if (r1) r1.value = 4.0;
-    if (r2) r2.value = 4.0;
-    if (r3) r3.value = 0.0;
-    r1?.dispatchEvent(new Event("input"));
+    if (document.getElementById("fomc-range-rate")) document.getElementById("fomc-range-rate").value = 4.0;
+    if (document.getElementById("fomc-range-priced")) document.getElementById("fomc-range-priced").value = 4.0;
+    if (document.getElementById("fomc-range-dots")) document.getElementById("fomc-range-dots").value = 0.0;
+    if (document.getElementById("fomc-val-rate")) document.getElementById("fomc-val-rate").innerText = "4.00%";
+    if (document.getElementById("fomc-val-priced")) document.getElementById("fomc-val-priced").innerText = "4.00%";
+    if (document.getElementById("fomc-val-dots")) document.getElementById("fomc-val-dots").innerText = "0.0 bps";
     setBtnActive(document.querySelector('[data-ev="fomc"][data-ev-asset="gold"]'), '[data-ev="fomc"][data-ev-asset]');
     setBtnActive(document.querySelector('[data-ev="fomc"][data-ev-diag="tcurve"]'), '[data-ev="fomc"][data-ev-diag]');
-    renderWorkstation("fomc");
   } else if (ev === "nfp") {
-    const r1 = document.getElementById("nfp-range-act");
-    const r2 = document.getElementById("nfp-range-unemp");
-    const r3 = document.getElementById("nfp-range-ahe");
-    if (r1) r1.value = 135;
-    if (r2) r2.value = 4.1;
-    if (r3) r3.value = 0.3;
-    r1?.dispatchEvent(new Event("input"));
+    if (document.getElementById("nfp-range-act")) document.getElementById("nfp-range-act").value = 135;
+    if (document.getElementById("nfp-range-unemp")) document.getElementById("nfp-range-unemp").value = 4.1;
+    if (document.getElementById("nfp-range-ahe")) document.getElementById("nfp-range-ahe").value = 0.3;
+    if (document.getElementById("nfp-val-act")) document.getElementById("nfp-val-act").innerText = "135k";
+    if (document.getElementById("nfp-val-unemp")) document.getElementById("nfp-val-unemp").innerText = "4.1%";
+    if (document.getElementById("nfp-val-ahe")) document.getElementById("nfp-val-ahe").innerText = "0.30%";
     setBtnActive(document.querySelector('[data-ev="nfp"][data-ev-asset="gold"]'), '[data-ev="nfp"][data-ev-asset]');
     setBtnActive(document.querySelector('[data-ev="nfp"][data-ev-diag="tcurve"]'), '[data-ev="nfp"][data-ev-diag]');
-    renderWorkstation("nfp");
   } else if (ev === "ppi") {
-    const r1 = document.getElementById("ppi-range-act");
-    const r2 = document.getElementById("ppi-range-retail");
-    if (r1) r1.value = 0.4;
-    if (r2) r2.value = 0.4;
-    r1?.dispatchEvent(new Event("input"));
+    if (document.getElementById("ppi-range-act")) document.getElementById("ppi-range-act").value = 0.4;
+    if (document.getElementById("ppi-range-retail")) document.getElementById("ppi-range-retail").value = 0.4;
+    if (document.getElementById("ppi-val-act")) document.getElementById("ppi-val-act").innerText = "0.40%";
+    if (document.getElementById("ppi-val-retail")) document.getElementById("ppi-val-retail").innerText = "0.40%";
     setBtnActive(document.querySelector('[data-ev="ppi"][data-ev-asset="gold"]'), '[data-ev="ppi"][data-ev-asset]');
     setBtnActive(document.querySelector('[data-ev="ppi"][data-ev-diag="tcurve"]'), '[data-ev="ppi"][data-ev-diag]');
-    renderWorkstation("ppi");
   }
-  fetchState();
+  await fetchPremarketSnapshot(false);
+  renderWorkstation(ev);
 }
 
 function initAuditToggle() {
@@ -622,13 +622,15 @@ function initKeyboardShortcuts() {
 // ==============================================================
 // 3. LIVE STATE, TICKERS & DYNAMIC TICKET UPDATES
 // ==============================================================
-function updateExecTicket(ev, directive, plan, avwapBands = null) {
-  const actId = ev === "cpi" ? "val-ticket-action" : `val-${ev}-ticket-action`;
-  const entId = ev === "cpi" ? "val-ticket-entry" : `val-${ev}-ticket-entry`;
-  const slId  = ev === "cpi" ? "val-ticket-sl" : `val-${ev}-ticket-sl`;
-  const tpId  = ev === "cpi" ? "val-ticket-tp" : `val-${ev}-ticket-tp`;
-  const avId  = ev === "cpi" ? "val-ticket-avwap" : `val-${ev}-ticket-avwap`;
-  const lmId  = ev === "cpi" ? "val-ticket-lambda" : `val-${ev}-ticket-lambda`;
+function updateExecTicket(ev, directive, plan, avwapBands = null, preModel = null) {
+  const actId  = ev === "cpi" ? "val-ticket-action" : `val-${ev}-ticket-action`;
+  const entId  = ev === "cpi" ? "val-ticket-entry" : `val-${ev}-ticket-entry`;
+  const slId   = ev === "cpi" ? "val-ticket-sl" : `val-${ev}-ticket-sl`;
+  const tpId   = ev === "cpi" ? "val-ticket-tp" : `val-${ev}-ticket-tp`;
+  const avId   = ev === "cpi" ? "val-ticket-avwap" : `val-${ev}-ticket-avwap`;
+  const lmId   = ev === "cpi" ? "val-ticket-lambda" : `val-${ev}-ticket-lambda`;
+  const probId = ev === "cpi" ? "val-ticket-probs" : `val-${ev}-ticket-probs`;
+  const dirId  = ev === "cpi" ? "val-ticket-dir" : `val-${ev}-ticket-dir`;
 
   if (document.getElementById(actId) && directive) document.getElementById(actId).innerText = directive;
   if (plan) {
@@ -639,6 +641,60 @@ function updateExecTicket(ev, directive, plan, avwapBands = null) {
   if (avwapBands) {
     if (document.getElementById(avId)) document.getElementById(avId).innerText = `$${avwapBands.avwap.toFixed(2)} (±1σ: $${avwapBands.upper_1sd.toFixed(0)} / $${avwapBands.lower_1sd.toFixed(0)})`;
     if (document.getElementById(lmId)) document.getElementById(lmId).innerText = `${avwapBands.kyles_lambda_illiquidity_proxy.toFixed(4)}% (SLIPPAGE RISK)`;
+  }
+  if (preModel) {
+    if (document.getElementById(probId)) {
+      document.getElementById(probId).innerText = `HAWK: ${preModel.p_hawkish_beat}% | NEUT: ${preModel.p_inline}% | DOV: ${preModel.p_dovish_miss}%`;
+    }
+    if (document.getElementById(dirId)) {
+      const dirEl = document.getElementById(dirId);
+      dirEl.innerText = `GOLD UP: ${preModel.p_gold_up}% | DOWN: ${preModel.p_gold_down}% (${preModel.expected_return_pct >= 0 ? "+" : ""}${preModel.expected_return_pct}%)`;
+      dirEl.style.color = preModel.p_gold_up >= 58 ? "#00e5ff" : (preModel.p_gold_down >= 58 ? "#ff4444" : "var(--amber-cmd)");
+    }
+  }
+}
+
+function applyPremarketModelToUi(ev, m) {
+  if (!m) return;
+  if (EVENT_STATE[ev] && EVENT_STATE[ev].mode === "PREMARKET") {
+    EVENT_STATE[ev].z = Number(m.z_pre || 0.0);
+    if (ev === "cpi") {
+      const sh = document.getElementById("bbg-val-shock"), rg = document.getElementById("bbg-val-regime");
+      if (sh) {
+        sh.innerText = `${m.z_pre >= 0 ? "+" : ""}${Number(m.z_pre).toFixed(2)}σ (PRE-MARKET)`;
+        sh.style.color = m.z_pre > 0.5 ? "var(--amber-cmd)" : (m.z_pre < -0.5 ? "#00e5ff" : "#ffffff");
+      }
+      if (rg) rg.innerText = `AUTO PRE-MARKET // ${m.asymmetry_label}`;
+    } else if (ev === "fomc") {
+      const s = document.getElementById("fomc-shock-summary");
+      if (s) s.innerText = `${m.z_pre >= 0 ? "+" : ""}${Number(m.z_pre).toFixed(2)}σ (${m.asymmetry_label})`;
+    } else if (ev === "nfp") {
+      const s = document.getElementById("nfp-shock-summary");
+      if (s) s.innerText = `${m.z_pre >= 0 ? "+" : ""}${Number(m.z_pre).toFixed(2)}σ (${m.asymmetry_label})`;
+    } else if (ev === "ppi") {
+      const s = document.getElementById("ppi-shock-summary");
+      if (s) s.innerText = `${m.z_pre >= 0 ? "+" : ""}${Number(m.z_pre).toFixed(2)}σ (${m.asymmetry_label})`;
+    }
+  }
+  updateExecTicket(ev, m.directive_title, m, m.avwap_bands || null, m);
+}
+
+async function fetchPremarketSnapshot(renderActive = true) {
+  try {
+    const res = await fetch("/api/premarket-snapshot");
+    const data = await res.json();
+    PREMARKET_CACHE = data;
+    const models = data.models || {};
+    ["cpi", "fomc", "nfp", "ppi"].forEach(ev => applyPremarketModelToUi(ev, models[ev]));
+    if (renderActive) {
+      const mod = getActiveModuleId();
+      if (mod === "mod-cpi") renderWorkstation("cpi");
+      else if (mod === "mod-fomc") renderWorkstation("fomc");
+      else if (mod === "mod-nfp") renderWorkstation("nfp");
+      else if (mod === "mod-ppi") renderWorkstation("ppi");
+    }
+  } catch (e) {
+    console.warn("fetchPremarketSnapshot failed:", e);
   }
 }
 
@@ -656,18 +712,12 @@ async function fetchState() {
     }
 
     const av = data.dynamic_levels?.avwap_bands;
-    if (data.pre_news_model) {
-      updateExecTicket("cpi", data.pre_news_model.directive_title, {
-        entry_zone: data.pre_news_model.entry_zone,
-        stop_loss: data.pre_news_model.stop_loss,
-        target: data.pre_news_model.target,
-        target_2: data.pre_news_model.target_2,
-        risk_reward_ratio: data.pre_news_model.risk_reward_ratio
-      }, av);
+    if (data.pre_news_model && EVENT_STATE.cpi.mode === "PREMARKET") {
+      updateExecTicket("cpi", data.pre_news_model.directive_title, data.pre_news_model, av, data.pre_news_model);
     }
-    if (data.fomc_prenew) updateExecTicket("fomc", data.fomc_prenew.directive_title, data.fomc_prenew, av);
-    if (data.nfp_prenew)  updateExecTicket("nfp", data.nfp_prenew.directive_title, data.nfp_prenew, av);
-    if (data.ppi_prenew)  updateExecTicket("ppi", data.ppi_prenew.directive_title, data.ppi_prenew, av);
+    if (data.fomc_prenew && EVENT_STATE.fomc.mode === "PREMARKET") updateExecTicket("fomc", data.fomc_prenew.directive_title, data.fomc_prenew, av, data.fomc_prenew);
+    if (data.nfp_prenew && EVENT_STATE.nfp.mode === "PREMARKET")  updateExecTicket("nfp", data.nfp_prenew.directive_title, data.nfp_prenew, av, data.nfp_prenew);
+    if (data.ppi_prenew && EVENT_STATE.ppi.mode === "PREMARKET")  updateExecTicket("ppi", data.ppi_prenew.directive_title, data.ppi_prenew, av, data.ppi_prenew);
   } catch (e) {
     console.warn("fetchState failed:", e);
   }
@@ -736,7 +786,9 @@ async function renderEventPdfPane(ev) {
   if (postEl && data.parameters?.posterior) {
     postEl.innerText = `mu=${data.parameters.posterior.mu > 0 ? "+" : ""}${data.parameters.posterior.mu}, sigma=${data.parameters.posterior.sigma}${unit} (${data.parameters.posterior.label})`;
   }
-
+  if (hud && data.z_pre !== undefined) {
+    hud.innerText = `Z_pre=${data.z_pre >= 0 ? "+" : ""}${Number(data.z_pre).toFixed(2)}σ | HAWK ${data.p_hawkish_beat}% / NEUT ${data.p_inline}% / DOV ${data.p_dovish_miss}% | GOLD UP ${data.p_gold_up}%`;
+  }
   const w = container.clientWidth || 380;
   const h = container.clientHeight || 215;
   const padL = 36, padR = 36, padT = 18, padB = 24;
@@ -751,6 +803,11 @@ async function renderEventPdfPane(ev) {
   const pathPrior = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.prior_pdf).toFixed(1)}`).join(" ");
   const pathPost  = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(p.x).toFixed(1)} ${getY(p.posterior_pdf).toFixed(1)}`).join(" ");
   const x0 = getX(0), xMiss = getX(minX * 0.35), xBeat = getX(maxX * 0.35), yZero = getY(0);
+  const postMu = Number(data.parameters?.posterior?.mu || 0);
+  const xPost = getX(Math.max(minX, Math.min(maxX, postMu)));
+  const closeMu = Math.abs(xPost - x0) < 48;
+  const t0Anchor = closeMu ? (xPost < x0 ? "start" : "end") : "middle";
+  const postAnchor = closeMu ? (xPost < x0 ? "end" : "start") : "middle";
 
   container.innerHTML = `
     <svg id="svg-${ev}-pdf" viewBox="0 0 ${w} ${h}" class="bbg-svg" style="cursor:crosshair;">
@@ -765,10 +822,11 @@ async function renderEventPdfPane(ev) {
       <line x1="${xMiss}" y1="${padT}" x2="${xMiss}" y2="${h - padB}" class="grid-dot"/>
       <line x1="${xBeat}" y1="${padT}" x2="${xBeat}" y2="${h - padB}" class="grid-dot"/>
       <line x1="${x0}" y1="${padT}" x2="${x0}" y2="${yZero}" stroke="#ffb000" stroke-width="1" stroke-dasharray="2,2"/>
-      <text x="${x0}" y="${padT + 10}" fill="#ffb000" text-anchor="middle">T0: 0</text>
+      <text x="${x0 + (closeMu ? (xPost < x0 ? 3 : -3) : 0)}" y="${padT + 10}" fill="#ffb000" text-anchor="${t0Anchor}">T0: 0</text>
+      <line x1="${xPost}" y1="${padT + 14}" x2="${xPost}" y2="${yZero}" stroke="#00e5ff" stroke-width="1.4" stroke-dasharray="3,2"/>
+      <text x="${xPost + (closeMu ? (xPost < x0 ? -3 : 3) : 0)}" y="${padT + 10}" fill="#00e5ff" font-weight="800" text-anchor="${postAnchor}">μ:${postMu >= 0 ? "+" : ""}${postMu}</text>
       <path d="${pathPrior}" fill="none" stroke="#666666" stroke-width="1.2" stroke-dasharray="3,3"/>
       <path d="${pathPost}" fill="none" stroke="#ffffff" stroke-width="2.2"/>
-      <text x="${padL}" y="${h - 6}" text-anchor="start">${minX.toFixed(2)}${unit}</text>
       <text x="${xMiss}" y="${h - 6}" text-anchor="middle">MISS</text>
       <text x="${xBeat}" y="${h - 6}" text-anchor="middle">BEAT</text>
       <text x="${w - padR}" y="${h - 6}" text-anchor="end">${maxX.toFixed(2)}${unit}</text>
@@ -1514,7 +1572,8 @@ async function fetchGlobalMacroMatrix() {
 function initAutoRefreshLoop() {
   setInterval(async () => {
     try {
-      const res = await fetch("/api/refresh-all", { method: "POST" });
+      const isAstar = getActiveModuleId() === "mod-astar";
+      const res = await fetch(`/api/live-ticks?include_astar=${isAstar}`);
       const data = await res.json();
       if (data && data.prices) {
         const p = data.prices;
@@ -1524,7 +1583,7 @@ function initAutoRefreshLoop() {
         animateNumber(document.getElementById("tick-10y"), p["^TNX"], "", "%", 2);
         animateNumber(document.getElementById("tick-oil"), p["CL=F"], "$", "", 2);
       }
-      if (data && data.daily_a_star && getActiveModuleId() === "mod-astar") {
+      if (isAstar && data && data.daily_a_star) {
         fetchAstarData();
       }
     } catch (e) {}

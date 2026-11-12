@@ -325,6 +325,49 @@ def get_tomorrow():
         "macro_snapshots": macro
     }
 
+@app.get("/api/premarket-snapshot")
+def get_premarket_snapshot():
+    _, tomorrow, _ = load_data()
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {})
+    price = prices.get("GC=F", 3975.0)
+    atr_val = prices.get("ATR_M30", 10.50)
+    sh, sl, sc = prices.get("SESSION_HIGH"), prices.get("SESSION_LOW"), prices.get("SESSION_CLOSE")
+    snap_path = os.path.join(DATA_DIR, "premarket_snapshot.json")
+    snapshot_meta = {}
+    if os.path.exists(snap_path):
+        with open(snap_path) as f:
+            snapshot_meta = json.load(f)
+    return {
+        "snapshot": snapshot_meta,
+        "models": {
+            "cpi": quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
+            "fomc": quant_model.calculate_fomc_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
+            "nfp": quant_model.calculate_nfp_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
+            "ppi": quant_model.calculate_ppi_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
+        }
+    }
+
+@app.get("/api/live-ticks")
+def get_live_ticks(include_astar: bool = False):
+    """Lightweight spot-only tick stream: NEVER mutates pre-market snapshot or Wave 1 firewall."""
+    live_data = fetch_live_macro_data()
+    prices = live_data.get("prices", {})
+    res = {"status": "SUCCESS", "timestamp": live_data.get("timestamp"), "prices": prices}
+    if include_astar:
+        current_gold = prices.get("GC=F", 3975.0)
+        atr_val = prices.get("ATR_M30", 10.50)
+        sh, sl, sc = prices.get("SESSION_HIGH"), prices.get("SESSION_LOW"), prices.get("SESSION_CLOSE")
+        dxy = prices.get("DX-Y.NYB", 102.24)
+        us10y = prices.get("^TNX", 5.00)
+        us2y = prices.get("ZT=F", 4.75)
+        created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
+        res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(
+            current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+            n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc
+        )
+    return res
+
 @app.get("/api/pre-news-model")
 def get_pre_news_model(price: float = None, atr: float = None):
     _, tomorrow, _ = load_data()
@@ -332,7 +375,10 @@ def get_pre_news_model(price: float = None, atr: float = None):
     prices = live.get("prices", {})
     price = price if price is not None else prices.get("GC=F", 3975.0)
     atr_val = atr if atr is not None else prices.get("ATR_M30", 10.50)
-    return quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=price, atr_m30=atr_val)
+    return quant_model.calculate_pre_news_bayesian_model(
+        tomorrow, current_price=price, atr_m30=atr_val,
+        session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
+    )
 
 @app.get("/api/fomc-prenew-model")
 def get_fomc_prenew_model(price: float = None, atr: float = None):
@@ -459,10 +505,6 @@ def sync_releases(force: bool = True):
 
 @app.post("/api/refresh-all")
 def refresh_all():
-    try:
-        data_pipeline.sync_live_releases_if_stale(force=False)
-    except Exception as e:
-        print(f"[SYNC] Non-fatal release check note: {e}")
     live_data = fetch_live_macro_data()
     prices = live_data.get("prices", {})
     current_gold = prices.get("GC=F", 3975.0)
@@ -482,7 +524,7 @@ def refresh_all():
         n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc
     )
 
-    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=current_gold, atr_m30=atr_val)
+    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
@@ -787,7 +829,7 @@ def get_state():
         current_price=gold_price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
         n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc
     )
-    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=gold_price, atr_m30=atr_val)
+    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
