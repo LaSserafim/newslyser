@@ -1,7 +1,20 @@
 [
   {
+    "event_id": "nfp_oct26",
+    "title": "Non-Farm Payrolls (NFP) Employment Change (Oct)",
+    "country": "USD",
+    "date": "2026-11-06",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "HIGH",
+    "actual": "165K",
+    "forecast": "65K",
+    "previous": "60K",
+    "category": "LABOR",
+    "effect_xauusd": "STRONG BEAT (+100K) // GOLD -0.58% ($4,098 -> $4,075)"
+  },
+  {
     "event_id": "cpi_oct26",
-    "title": "Consumer Price Index (CPI) MoM",
+    "title": "Consumer Price Index (CPI) MoM (Oct)",
     "country": "USD",
     "date": "2026-11-10",
     "time": "08:30 AM EST (20:30 WIB)",
@@ -10,11 +23,11 @@
     "forecast": "0.3%",
     "previous": "0.6%",
     "category": "INFLATION",
-    "effect_xauusd": "HAWKISH SHOCK (-$39.00 DROP TO $4,042)"
+    "effect_xauusd": "HAWKISH SHOCK (-2.86% DROP // $4,149 -> $4,030)"
   },
   {
     "event_id": "core_cpi_oct26",
-    "title": "Core CPI (MoM) Less Food & Energy",
+    "title": "Core CPI (MoM) Less Food & Energy (Oct)",
     "country": "USD",
     "date": "2026-11-10",
     "time": "08:30 AM EST (20:30 WIB)",
@@ -23,71 +36,84 @@
     "forecast": "0.2%",
     "previous": "0.3%",
     "category": "INFLATION",
-    "effect_xauusd": "STICKY SERVICES SURPRISE (RATE CUTS DELAYED)"
+    "effect_xauusd": "STICKY CORE +0.30% // DEC HIKE ODDS REPRICED"
   },
   {
     "event_id": "ppi_oct26",
-    "title": "Producer Price Index (PPI) Final Demand MoM",
+    "title": "Producer Price Index (PPI) Final Demand MoM (Oct)",
     "country": "USD",
-    "date": "2026-11-12",
+    "date": "2026-11-13",
     "time": "08:30 AM EST (20:30 WIB)",
     "impact": "HIGH",
     "actual": "",
-    "forecast": "0.2%",
-    "previous": "0.1%",
+    "forecast": "0.4%",
+    "previous": "1.3%",
     "category": "INFLATION",
-    "effect_xauusd": "LEADING WHOLESALE COST PIPELINE"
-  },
-  {
-    "event_id": "claims_nov12",
-    "title": "Initial Jobless Claims",
-    "country": "USD",
-    "date": "2026-11-12",
-    "time": "08:30 AM EST (20:30 WIB)",
-    "impact": "MEDIUM-HIGH",
-    "actual": "",
-    "forecast": "218K",
-    "previous": "221K",
-    "category": "LABOR",
-    "effect_xauusd": "WEEKLY LABOR MARKET VELOCITY"
+    "effect_xauusd": "UPSTREAM WHOLESALE PIPELINE (RELEASES NOV 13)"
   },
   {
     "event_id": "retail_oct26",
-    "title": "Advance Retail Sales MoM",
+    "title": "Advance Retail Sales MoM (Oct)",
     "country": "USD",
     "date": "2026-11-17",
     "time": "08:30 AM EST (20:30 WIB)",
     "impact": "HIGH",
     "actual": "",
     "forecast": "0.4%",
-    "previous": "0.7%",
+    "previous": "0.8%",
     "category": "CONSUMER_DEMAND",
     "effect_xauusd": "U.S. CONSUMER RESILIENCE & GDP TRACKER"
   },
   {
     "event_id": "nfp_nov26",
-    "title": "Non-Farm Payrolls (NFP) Employment Change",
+    "title": "Non-Farm Payrolls (NFP) Employment Change (Nov)",
     "country": "USD",
     "date": "2026-12-04",
     "time": "08:30 AM EST (20:30 WIB)",
     "impact": "HIGH",
     "actual": "",
-    "forecast": "175K",
-    "previous": "210K",
+    "forecast": "135K",
+    "previous": "165K",
     "category": "LABOR",
     "effect_xauusd": "FED DUAL-MANDATE LABOR FOUNDATION"
   },
   {
     "event_id": "fomc_dec26",
-    "title": "FOMC Interest Rate Decision & Summary of Economic Projections (Dot Plot)",
+    "title": "FOMC Interest Rate Decision & SEP Dot Plot (Dec)",
     "country": "USD",
-    "date": "2026-12-16",
+    "date": "2026-12-09",
     "time": "02:00 PM EST (02:00 WIB next day)",
     "impact": "MAXIMUM",
     "actual": "",
-    "forecast": "5.00%",
-    "previous": "5.00%",
+    "forecast": "4.00%",
+    "previous": "4.00%",
     "category": "CENTRAL_BANK",
-    "effect_xauusd": "GLOBAL MACRO BENCHMARK (DOT PLOT TERMINAL PATH)"
+    "effect_xauusd": "GLOBAL MACRO BENCHMARK (3.75%-4.00% TARGET RANGE)"
+  },
+  {
+    "event_id": "cpi_nov26",
+    "title": "Consumer Price Index (CPI) MoM (Nov)",
+    "country": "USD",
+    "date": "2026-12-10",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "HIGH",
+    "actual": "",
+    "forecast": "0.3%",
+    "previous": "0.4%",
+    "category": "INFLATION",
+    "effect_xauusd": "NEXT INFLATION BENCHMARK POST-NOV 10 SHOCK"
+  },
+  {
+    "event_id": "ppi_nov26",
+    "title": "Producer Price Index (PPI) Final Demand MoM (Nov)",
+    "country": "USD",
+    "date": "2026-12-15",
+    "time": "08:30 AM EST (20:30 WIB)",
+    "impact": "HIGH",
+    "actual": "",
+    "forecast": "0.3%",
+    "previous": "",
+    "category": "INFLATION",
+    "effect_xauusd": "YEAR-END WHOLESALE COST TRANSMISSION"
   }
 ]

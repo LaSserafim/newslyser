@@ -1678,24 +1678,29 @@ def build_event_eval_suite(df, shock_col, shock_label, multi_cols, multi_labels,
         "car_0_60m": {"window": "[0, 60m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])), 2) if any(x_shock > 0) else -1.72, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])), 2) if any(x_shock < 0) else +1.82}
     }
 
-    # 5. Regime Breakdown
-    noise_count = int(np.sum(np.abs(x_shock) < 1.0))
-    shock_count = int(np.sum(np.abs(x_shock) >= 1.0))
+    # 5. Regime Breakdown (100% empirical hit-rate inside each zone)
+    noise_mask = np.abs(x_shock) < 1.0
+    shock_mask = np.abs(x_shock) >= 1.0
+    noise_count = int(np.sum(noise_mask))
+    shock_count = int(np.sum(shock_mask))
+    noise_hits = sum((s > 0 and r < 0) or (s < 0 and r > 0) or (s == 0) for s, r in zip(x_shock[noise_mask], y[noise_mask]))
+    shock_hits = sum((s > 0 and r < 0) or (s < 0 and r > 0) for s, r in zip(x_shock[shock_mask], y[shock_mask]))
+    noise_acc = round(noise_hits / max(1, noise_count) * 100.0, 1) if noise_count else 0.0
+    shock_acc = round(shock_hits / max(1, shock_count) * 100.0, 1) if shock_count else 0.0
     regime_breakdown = {
         "noise_zone": {
             "threshold": f"|{shock_col}| < 1.0",
             "count": noise_count,
-            "accuracy_pct": 68.2,
+            "accuracy_pct": noise_acc,
             "behavior": "Mean-reversion inside pre-release range"
         },
         "shock_zone": {
             "threshold": f"|{shock_col}| >= 1.0",
             "count": shock_count,
-            "accuracy_pct": 72.5,
+            "accuracy_pct": shock_acc,
             "behavior": "Institutional Post-Announcement Drift (Trend Continuation)"
         }
     }
-
     return {
         "naive_baseline_ols": naive_dict,
         "model_1_univariate": m1_dict,
@@ -1731,7 +1736,7 @@ def evaluate_ppi_models(ppi_records):
 # PRE-NEWS BAYESIAN DIRECTIVE ENGINES (FOMC, NFP, PPI)
 # Unbiased: Computes probability and trade directive dynamically from leading indicators
 # -------------------------------------------------------------
-def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rate=5.00, consensus_rate=5.00, dots_shift_bps=0.0, session_h=None, session_l=None, session_c=None):
+def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rate=4.00, consensus_rate=4.00, dots_shift_bps=0.0, session_h=None, session_l=None, session_c=None):
     dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
     rate_shock = (consensus_rate - priced_rate) * 100 + 0.5 * dots_shift_bps
     
@@ -1757,7 +1762,7 @@ def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rat
     return {
         "event_name": "FOMC INTEREST RATE DECISION & DOT PLOT",
         "current_price": current_price,
-        "release_date": "2026-12-16",
+        "release_date": "2026-12-09",
         "release_time": "02:00 PM EST (02:00 WIB NEXT DAY)",
         "consensus_rate": f"{consensus_rate:.2f}%",
         "cme_priced_rate": f"{priced_rate:.2f}% (CME FEDWATCH)",
@@ -1807,7 +1812,7 @@ def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=
         "current_price": current_price,
         "release_date": "2026-12-04",
         "release_time": "08:30 AM EST (20:30 WIB)",
-        "forecast_nfp": "175K",
+        "forecast_nfp": "135K",
         "forecast_unemp": "4.1%",
         "forecast_ahe": "0.3% MoM",
         "p_hawkish_beat": p_beat,
@@ -1853,11 +1858,11 @@ def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_
     return {
         "event_name": "PPI FINAL DEMAND & ADVANCE RETAIL SALES",
         "current_price": current_price,
-        "release_date": "2026-11-12",
+        "release_date": "2026-11-13",
         "release_time": "08:30 AM EST (20:30 WIB)",
-        "forecast_ppi": "0.2% MoM",
-        "forecast_retail": "0.4% MoM",
-        "forecast_core_ppi": "0.2% MoM",
+        "forecast_ppi": "0.4% MoM",
+        "forecast_retail": "0.4% MoM (Nov 17)",
+        "forecast_core_ppi": "0.3% MoM",
         "p_hawkish_beat": p_beat,
         "p_inline": p_inline,
         "p_dovish_miss": p_miss,
@@ -2150,9 +2155,22 @@ def get_event_hypothesis_diagnostics(event_type="cpi"):
     mse_base = float(np.mean((y[cut:] - np.mean(y[:cut])) ** 2))
     oos_r2 = round(1.0 - mse_te / mse_base, 4) if mse_base > 0 else 0.0
 
+    df1_f = max(1, k - 1)
+    df2_f = max(1, df_multi)
+    f_val = max(0.0, float(m_multi["f_stat"]))
+    f_x = df2_f / (df2_f + df1_f * f_val) if f_val > 0 else 1.0
+    f_p_val = round(float(min(1.0, max(0.0, _ibeta(df2_f / 2.0, df1_f / 2.0, f_x)))), 5)
+
     slope_valid = abs(t_stat) >= t_crit and p_val < 0.05
     luck_rejected = binom_p < 0.05 and acc_pct > 50.0
+    multi_valid = f_p_val < 0.05
     valid_at_5pct = slope_valid and luck_rejected
+    if valid_at_5pct:
+        verdict_txt = f"VALID EDGE (α=5%): t={t_stat:.2f} (p={p_val:.4f}), Hit={wins}/{trials} ({acc_pct}%, p={binom_p:.4f})"
+    elif multi_valid:
+        verdict_txt = f"UNI LUCK (t_p={p_val:.4f}) | X-ASSET VALID (F={f_val:.2f}, p={f_p_val:.4f})"
+    else:
+        verdict_txt = f"NO EDGE / LUCK RISK AT 5% (t_p={p_val:.4f}, F_p={f_p_val:.4f}, Hit={acc_pct}%)"
 
     return {
         "event_type": event_type,
@@ -2170,6 +2188,11 @@ def get_event_hypothesis_diagnostics(event_type="cpi"):
         "r2_multivariate": m_multi["r2"],
         "oos_r2": oos_r2,
         "f_stat": m_multi["f_stat"],
+        "f_p_val": f_p_val,
+        "multi_valid_5pct": multi_valid,
+        "confidence_90": bool(p_val < 0.10 or f_p_val < 0.10),
+        "confidence_95": bool(valid_at_5pct or multi_valid),
+        "confidence_99": bool(p_val < 0.01 and luck_rejected),
         "binomial_wins": wins,
         "binomial_trials": trials,
         "binomial_accuracy_pct": acc_pct,
@@ -2177,7 +2200,7 @@ def get_event_hypothesis_diagnostics(event_type="cpi"):
         "slope_valid_5pct": slope_valid,
         "beats_luck_5pct": luck_rejected,
         "valid_at_5pct": valid_at_5pct,
-        "verdict_5pct": f"VALID EDGE (α=5%): t={t_stat:.2f} (p={p_val:.4f}), Hit={wins}/{trials} ({acc_pct}%, p={binom_p:.4f})" if valid_at_5pct else f"INSUFFICIENT / LUCK RISK AT 5% (t_p={p_val:.4f}, binom_p={binom_p:.4f})",
+        "verdict_5pct": verdict_txt,
         "leverage_threshold": round(h_threshold, 4),
         "high_leverage_outlier_count": sum(1 for d in diagnostic_points if d["is_high_leverage"] or d["is_outlier"]),
         "academic_citation": citation,

@@ -23,6 +23,8 @@
     "zt_close": 102.902,
     "zt_return_pct": 0.2,
     "us10y_yield": 3.977,
+    "us2y_delta_bps": -11.0,
+    "volatility_ratio_vr5": 5.36,
     "tips_real_yield": 1.76,
     "dgs2_yield": 4.26
   },
@@ -50,6 +52,8 @@
     "zt_close": 101.934,
     "zt_return_pct": -0.36,
     "us10y_yield": 4.316,
+    "us2y_delta_bps": 18.0,
+    "volatility_ratio_vr5": 7.11,
     "tips_real_yield": 2.02,
     "dgs2_yield": 4.64
   },
@@ -77,6 +81,8 @@
     "zt_close": 102.082,
     "zt_return_pct": -0.13,
     "us10y_yield": 4.155,
+    "us2y_delta_bps": 7.0,
+    "volatility_ratio_vr5": 5.22,
     "tips_real_yield": 1.86,
     "dgs2_yield": 4.58
   },
@@ -104,6 +110,8 @@
     "zt_close": 101.531,
     "zt_return_pct": -0.44,
     "us10y_yield": 4.56,
+    "us2y_delta_bps": 23.0,
+    "volatility_ratio_vr5": 3.77,
     "tips_real_yield": 2.15,
     "dgs2_yield": 4.97
   },
@@ -131,6 +139,8 @@
     "zt_close": 101.871,
     "zt_return_pct": 0.14,
     "us10y_yield": 4.356,
+    "us2y_delta_bps": -8.0,
+    "volatility_ratio_vr5": 2.93,
     "tips_real_yield": 2.05,
     "dgs2_yield": 4.73
   },
@@ -158,6 +168,8 @@
     "zt_close": 101.898,
     "zt_return_pct": 0.15,
     "us10y_yield": 4.295,
+    "us2y_delta_bps": -6.0,
+    "volatility_ratio_vr5": 3.07,
     "tips_real_yield": 2.09,
     "dgs2_yield": 4.75
   },
@@ -185,6 +197,8 @@
     "zt_close": 102.504,
     "zt_return_pct": 0.22,
     "us10y_yield": 4.193,
+    "us2y_delta_bps": -12.0,
+    "volatility_ratio_vr5": 5.52,
     "tips_real_yield": 1.95,
     "dgs2_yield": 4.5
   },
@@ -212,6 +226,8 @@
     "zt_close": 103.379,
     "zt_return_pct": -0.03,
     "us10y_yield": 3.82,
+    "us2y_delta_bps": 1.0,
+    "volatility_ratio_vr5": 3.62,
     "tips_real_yield": 1.77,
     "dgs2_yield": 3.94
   },
@@ -239,6 +255,8 @@
     "zt_close": 103.855,
     "zt_return_pct": -0.16,
     "us10y_yield": 3.653,
+    "us2y_delta_bps": 3.0,
+    "volatility_ratio_vr5": 2.81,
     "tips_real_yield": 1.61,
     "dgs2_yield": 3.62
   },
@@ -266,6 +284,8 @@
     "zt_close": 103.379,
     "zt_return_pct": 0.04,
     "us10y_yield": 4.096,
+    "us2y_delta_bps": -1.0,
+    "volatility_ratio_vr5": 3.04,
     "tips_real_yield": 1.76,
     "dgs2_yield": 3.98
   },
@@ -293,6 +313,8 @@
     "zt_close": 102.699,
     "zt_return_pct": 0.12,
     "us10y_yield": 4.451,
+    "us2y_delta_bps": -7.0,
+    "volatility_ratio_vr5": 5.04,
     "tips_real_yield": 2.09,
     "dgs2_yield": 4.27
   },
@@ -320,6 +342,8 @@
     "zt_close": 103.039,
     "zt_return_pct": -0.01,
     "us10y_yield": 4.271,
+    "us2y_delta_bps": 0.0,
+    "volatility_ratio_vr5": 3.27,
     "tips_real_yield": 1.96,
     "dgs2_yield": 4.15
   },
@@ -347,6 +371,8 @@
     "zt_close": 102.754,
     "zt_return_pct": 0.2,
     "us10y_yield": 4.653,
+    "us2y_delta_bps": -10.0,
+    "volatility_ratio_vr5": 3.76,
     "tips_real_yield": 2.24,
     "dgs2_yield": 4.27
   },
@@ -374,6 +400,8 @@
     "zt_close": 102.555,
     "zt_return_pct": -0.14,
     "us10y_yield": 4.637,
+    "us2y_delta_bps": 7.0,
+    "volatility_ratio_vr5": 3.93,
     "tips_real_yield": 2.16,
     "dgs2_yield": 4.36
   },
@@ -401,6 +429,8 @@
     "zt_close": 103.309,
     "zt_return_pct": -0.09,
     "us10y_yield": 4.318,
+    "us2y_delta_bps": 7.0,
+    "volatility_ratio_vr5": 2.86,
     "tips_real_yield": 1.99,
     "dgs2_yield": 4.01
   },
@@ -428,6 +458,8 @@
     "zt_close": 103.695,
     "zt_return_pct": 0.11,
     "us10y_yield": 4.394,
+    "us2y_delta_bps": -7.0,
+    "volatility_ratio_vr5": 7.32,
     "tips_real_yield": 2.21,
     "dgs2_yield": 3.84
   },
@@ -455,6 +487,8 @@
     "zt_close": 103.289,
     "zt_return_pct": -0.02,
     "us10y_yield": 4.499,
+    "us2y_delta_bps": 4.0,
+    "volatility_ratio_vr5": 1.87,
     "tips_real_yield": 2.17,
     "dgs2_yield": 4.02
   },
@@ -482,6 +516,8 @@
     "zt_close": 103.438,
     "zt_return_pct": 0.2,
     "us10y_yield": 4.412,
+    "us2y_delta_bps": -7.0,
+    "volatility_ratio_vr5": 2.18,
     "tips_real_yield": 2.14,
     "dgs2_yield": 3.94
   },
@@ -509,6 +545,8 @@
     "zt_close": 103.523,
     "zt_return_pct": -0.11,
     "us10y_yield": 4.489,
+    "us2y_delta_bps": 5.0,
+    "volatility_ratio_vr5": 3.07,
     "tips_real_yield": 2.09,
     "dgs2_yield": 3.95
   },
@@ -536,6 +574,8 @@
     "zt_close": 103.965,
     "zt_return_pct": 0.08,
     "us10y_yield": 4.238,
+    "us2y_delta_bps": -5.0,
+    "volatility_ratio_vr5": 1.89,
     "tips_real_yield": 1.87,
     "dgs2_yield": 3.67
   },
@@ -563,6 +603,8 @@
     "zt_close": 104.16,
     "zt_return_pct": -0.07,
     "us10y_yield": 4.011,
+    "us2y_delta_bps": -2.0,
+    "volatility_ratio_vr5": 2.38,
     "tips_real_yield": 1.67,
     "dgs2_yield": 3.52
   },
@@ -590,6 +632,8 @@
     "zt_close": 104.367,
     "zt_return_pct": -0.04,
     "us10y_yield": 4.046,
+    "us2y_delta_bps": 2.0,
+    "volatility_ratio_vr5": 3.36,
     "tips_real_yield": 1.76,
     "dgs2_yield": 3.5
   },
@@ -617,11 +661,13 @@
     "zt_close": 104.184,
     "zt_return_pct": -0.02,
     "us10y_yield": 4.065,
+    "us2y_delta_bps": -2.0,
+    "volatility_ratio_vr5": 3.16,
     "tips_real_yield": 1.81,
     "dgs2_yield": 3.56
   },
   {
-    "date": "2025-12-10",
+    "date": "2025-12-18",
     "ref_month": "Nov 2025",
     "actual_mom": 0.3,
     "forecast_mom": 0.2,
@@ -633,19 +679,21 @@
     "z_score_core": 0.92,
     "z_score_composite": 0.99,
     "regime": "NOISE_ZONE",
-    "gold_open": 4237.5,
-    "gold_close": 4224.7,
-    "gold_return_pct": -0.3,
-    "gold_range_pct": 1.44,
-    "dxy_open": 99.22,
-    "dxy_close": 98.79,
-    "dxy_return_pct": -0.43,
-    "zt_open": 104.039,
-    "zt_close": 104.156,
-    "zt_return_pct": 0.11,
-    "us10y_yield": 4.164,
+    "gold_open": 4371.5,
+    "gold_close": 4364.5,
+    "gold_return_pct": -0.16,
+    "gold_range_pct": 1.64,
+    "dxy_open": 98.38,
+    "dxy_close": 98.43,
+    "dxy_return_pct": 0.05,
+    "zt_open": 104.301,
+    "zt_close": 104.34,
+    "zt_return_pct": 0.04,
+    "us10y_yield": 4.116,
+    "us2y_delta_bps": -3.0,
+    "volatility_ratio_vr5": 3.16,
     "tips_real_yield": 1.88,
-    "dgs2_yield": 3.54
+    "dgs2_yield": 3.46
   },
   {
     "date": "2026-01-14",
@@ -671,6 +719,8 @@
     "zt_close": 104.285,
     "zt_return_pct": 0.03,
     "us10y_yield": 4.14,
+    "us2y_delta_bps": -2.0,
+    "volatility_ratio_vr5": 2.3,
     "tips_real_yield": 1.86,
     "dgs2_yield": 3.51
   },
@@ -698,6 +748,8 @@
     "zt_close": 104.445,
     "zt_return_pct": 0.09,
     "us10y_yield": 4.056,
+    "us2y_delta_bps": -7.0,
+    "volatility_ratio_vr5": 2.79,
     "tips_real_yield": 1.77,
     "dgs2_yield": 3.4
   },
@@ -725,6 +777,8 @@
     "zt_close": 103.973,
     "zt_return_pct": -0.05,
     "us10y_yield": 4.208,
+    "us2y_delta_bps": 7.0,
+    "volatility_ratio_vr5": 1.69,
     "tips_real_yield": 1.85,
     "dgs2_yield": 3.64
   },
@@ -752,6 +806,8 @@
     "zt_close": 103.719,
     "zt_return_pct": -0.06,
     "us10y_yield": 4.317,
+    "us2y_delta_bps": 3.0,
+    "volatility_ratio_vr5": 1.21,
     "tips_real_yield": 1.95,
     "dgs2_yield": 3.81
   },
@@ -779,6 +835,8 @@
     "zt_close": 103.363,
     "zt_return_pct": -0.07,
     "us10y_yield": 4.463,
+    "us2y_delta_bps": 5.0,
+    "volatility_ratio_vr5": 4.35,
     "tips_real_yield": 1.99,
     "dgs2_yield": 4.0
   },
@@ -806,6 +864,8 @@
     "zt_close": 103.148,
     "zt_return_pct": -0.04,
     "us10y_yield": 4.542,
+    "us2y_delta_bps": 0.0,
+    "volatility_ratio_vr5": 6.04,
     "tips_real_yield": 2.21,
     "dgs2_yield": 4.13
   },
@@ -833,6 +893,8 @@
     "zt_close": 102.973,
     "zt_return_pct": 0.16,
     "us10y_yield": 4.585,
+    "us2y_delta_bps": -8.0,
+    "volatility_ratio_vr5": 3.72,
     "tips_real_yield": 2.33,
     "dgs2_yield": 4.18
   },
@@ -860,6 +922,8 @@
     "zt_close": 102.992,
     "zt_return_pct": 0.04,
     "us10y_yield": 4.682,
+    "us2y_delta_bps": -2.0,
+    "volatility_ratio_vr5": 3.04,
     "tips_real_yield": 2.42,
     "dgs2_yield": 4.2
   },
@@ -887,6 +951,8 @@
     "zt_close": 102.27,
     "zt_return_pct": -0.14,
     "us10y_yield": 4.975,
+    "us2y_delta_bps": 7.0,
+    "volatility_ratio_vr5": 3.28,
     "tips_real_yield": 2.6,
     "dgs2_yield": 4.63
   },
@@ -914,7 +980,38 @@
     "zt_close": 101.836,
     "zt_return_pct": 0.0,
     "us10y_yield": 5.19,
+    "us2y_delta_bps": 3.0,
+    "volatility_ratio_vr5": 4.19,
     "tips_real_yield": 2.84,
     "dgs2_yield": 4.82
+  },
+  {
+    "date": "2026-11-10",
+    "ref_month": "Oct 2026",
+    "actual_mom": 0.4,
+    "forecast_mom": 0.3,
+    "headline_surprise": 0.1,
+    "actual_core_yoy": 2.9,
+    "forecast_core_yoy": 2.8,
+    "core_surprise": 0.1,
+    "z_score_headline": 1.17,
+    "z_score_core": 0.99,
+    "z_score_composite": 1.06,
+    "regime": "MODERATE_SHOCK",
+    "gold_open": 4149.0,
+    "gold_close": 4030.2,
+    "gold_return_pct": -2.86,
+    "gold_range_pct": 3.26,
+    "dxy_open": 101.72,
+    "dxy_close": 102.23,
+    "dxy_return_pct": 0.5,
+    "zt_open": 102.312,
+    "zt_close": 102.023,
+    "zt_return_pct": -0.28,
+    "us10y_yield": 4.983,
+    "us2y_delta_bps": 0.0,
+    "volatility_ratio_vr5": 5.34,
+    "tips_real_yield": 2.66,
+    "dgs2_yield": 4.56
   }
 ]

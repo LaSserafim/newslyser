@@ -49,7 +49,7 @@
     </div>
     <div class="bbg-tick">
       <span class="bbg-tick-sym">TARGET RELEASE</span>
-      <span class="bbg-tick-val" id="tick-event">OCT CPI: 0.4% / 0.3%</span>
+      <span class="bbg-tick-val" id="tick-event">NEXT: OCT PPI (NOV 13) 0.4% | LAST CPI: 0.4%</span>
     </div>
   </div>
 
@@ -182,7 +182,7 @@
           </div>
         </div>
         <div class="bbg-pane-body">
-          <div class="bbg-hud-bar" id="hud-freq">HOVER HISTOGRAM BARS // N = 34 EMPIRICAL CPI RELEASES</div>
+          <div class="bbg-hud-bar" id="hud-freq">HOVER HISTOGRAM BARS // N = 35 EMPIRICAL CPI RELEASES</div>
           <div class="bbg-chart-canvas" id="canvas-freq"></div>
           <table class="bbg-mini-table">
             <tr>
@@ -321,7 +321,7 @@
     <!-- Collapsible 34-Release Historical Database -->
     <section class="audit-ledger-container">
       <div class="audit-ledger-header" id="audit-toggle-header">
-        <div>[ 07 // AUDIT &lt;GO&gt; : 34-RELEASE EMPIRICAL POST-NEWS PRICE MOVEMENT RECORD ]</div>
+        <div id="audit-title-cpi">[ 07 // AUDIT &lt;GO&gt; : 35-RELEASE EMPIRICAL POST-NEWS PRICE MOVEMENT RECORD ]</div>
         <div id="audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
       </div>
       <div class="audit-table-scroll" id="audit-table-scroll" style="display:block;">
@@ -355,13 +355,13 @@
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
           <div class="slider-inline">
             <label>ACTUAL RATE (%):</label>
-            <input type="range" class="bbg-slider" id="fomc-range-rate" min="3.5" max="6.0" step="0.25" value="5.0">
-            <span class="val" id="fomc-val-rate">5.00%</span>
+            <input type="range" class="bbg-slider" id="fomc-range-rate" min="3.0" max="6.0" step="0.25" value="4.0">
+            <span class="val" id="fomc-val-rate">4.00%</span>
           </div>
           <div class="slider-inline">
             <label>PRICED RATE (%):</label>
-            <input type="range" class="bbg-slider" id="fomc-range-priced" min="3.5" max="6.0" step="0.25" value="5.0">
-            <span class="val" id="fomc-val-priced">5.00%</span>
+            <input type="range" class="bbg-slider" id="fomc-range-priced" min="3.0" max="6.0" step="0.25" value="4.0">
+            <span class="val" id="fomc-val-priced">4.00%</span>
           </div>
           <div class="slider-inline">
             <label>DOTS SHIFT (bps):</label>
@@ -422,11 +422,11 @@
 
         <section class="bbg-pane" id="pane-fomc-freq">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>24-MEETING SHOCK FREQUENCY &amp; POST-NEWS MOVE</span></div>
+            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>23-MEETING SHOCK FREQUENCY &amp; POST-NEWS MOVE</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-freq">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-fomc-freq">HOVER HISTOGRAM BARS // N = 24 EMPIRICAL FOMC MEETINGS</div>
+            <div class="bbg-hud-bar" id="hud-fomc-freq">HOVER HISTOGRAM BARS // N = 23 EMPIRICAL FOMC MEETINGS</div>
             <div class="bbg-chart-canvas" id="canvas-fomc-freq"></div>
             <table class="bbg-mini-table">
               <tr><td class="label">EMPIRICAL RANK:</td><td class="val" id="val-fomc-freq-rank">--</td></tr>
@@ -507,7 +507,7 @@
 
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="fomc-audit-toggle-header">
-          <div>[ 07 // AUDIT &lt;GO&gt; : 24-MEETING FOMC POST-NEWS PRICE MOVEMENT RECORD ]</div>
+          <div id="audit-title-fomc">[ 07 // AUDIT &lt;GO&gt; : 23-MEETING FOMC POST-NEWS PRICE MOVEMENT RECORD ]</div>
           <div id="fomc-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
         </div>
         <div class="audit-table-scroll" id="fomc-audit-table-scroll" style="display:block;">
@@ -531,8 +531,8 @@
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
           <div class="slider-inline">
             <label>NFP HEADLINE (k):</label>
-            <input type="range" class="bbg-slider" id="nfp-range-act" min="0" max="350" step="10" value="175">
-            <span class="val" id="nfp-val-act">175k</span>
+            <input type="range" class="bbg-slider" id="nfp-range-act" min="0" max="350" step="10" value="135">
+            <span class="val" id="nfp-val-act">135k</span>
           </div>
           <div class="slider-inline">
             <label>UNEMPLOYMENT (%):</label>
@@ -598,11 +598,11 @@
 
         <section class="bbg-pane" id="pane-nfp-freq">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>36-RELEASE SHOCK FREQUENCY &amp; POST-NEWS MOVE</span></div>
+            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>34-RELEASE SHOCK FREQUENCY &amp; POST-NEWS MOVE</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-freq">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-nfp-freq">HOVER HISTOGRAM BARS // N = 36 EMPIRICAL LABOR RELEASES</div>
+            <div class="bbg-hud-bar" id="hud-nfp-freq">HOVER HISTOGRAM BARS // N = 34 EMPIRICAL LABOR RELEASES</div>
             <div class="bbg-chart-canvas" id="canvas-nfp-freq"></div>
             <table class="bbg-mini-table">
               <tr><td class="label">EMPIRICAL RANK:</td><td class="val" id="val-nfp-freq-rank">--</td></tr>
@@ -683,7 +683,7 @@
 
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="nfp-audit-toggle-header">
-          <div>[ 07 // AUDIT &lt;GO&gt; : 36-RELEASE NFP POST-NEWS PRICE MOVEMENT RECORD ]</div>
+          <div id="audit-title-nfp">[ 07 // AUDIT &lt;GO&gt; : 34-RELEASE NFP POST-NEWS PRICE MOVEMENT RECORD ]</div>
           <div id="nfp-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
         </div>
         <div class="audit-table-scroll" id="nfp-audit-table-scroll" style="display:block;">
@@ -707,8 +707,8 @@
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
           <div class="slider-inline">
             <label>PPI MoM (%):</label>
-            <input type="range" class="bbg-slider" id="ppi-range-act" min="-0.5" max="0.8" step="0.05" value="0.2">
-            <span class="val" id="ppi-val-act">0.20%</span>
+            <input type="range" class="bbg-slider" id="ppi-range-act" min="-0.5" max="1.6" step="0.05" value="0.4">
+            <span class="val" id="ppi-val-act">0.40%</span>
           </div>
           <div class="slider-inline">
             <label>RETAIL SALES (%):</label>
@@ -854,7 +854,7 @@
 
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="ppi-audit-toggle-header">
-          <div>[ 07 // AUDIT &lt;GO&gt; : 36-RELEASE PPI &amp; DEMAND POST-NEWS MOVEMENT RECORD ]</div>
+          <div id="audit-title-ppi">[ 07 // AUDIT &lt;GO&gt; : 33-RELEASE PPI &amp; DEMAND POST-NEWS MOVEMENT RECORD ]</div>
           <div id="ppi-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
         </div>
         <div class="audit-table-scroll" id="ppi-audit-table-scroll" style="display:block;">
@@ -1031,9 +1031,10 @@
                 <th>TIME</th>
                 <th>EVENT</th>
                 <th>IMPACT</th>
+                <th>ACTUAL</th>
                 <th>FORECAST</th>
                 <th>PREVIOUS</th>
-                <th>VOLATILITY RATIO VR(w)</th>
+                <th>MARKET EFFECT / REGIME</th>
               </tr>
             </thead>
             <tbody id="cal-tbody">
@@ -1083,20 +1084,44 @@
 
   <!-- ==================== MODULE 08: YoY TIMELINE ==================== -->
   <main class="module-view" id="mod-yoy">
-    <div style="padding:14px;">
-      <section class="bbg-pane" style="min-height:480px;">
+    <div style="padding:14px; display:flex; flex-direction:column; gap:10px;">
+      <div class="cockpit-ribbon">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:9px; color:var(--fg-dim); font-weight:800;">MACRO TIMELINE SUITE:</span>
+          <button class="bbg-btn active" data-yoy-domain="cpi">CPI INFLATION</button>
+          <button class="bbg-btn" data-yoy-domain="nfp">NFP &amp; LABOR</button>
+          <button class="bbg-btn" data-yoy-domain="ppi">PPI &amp; DEMAND</button>
+          <button class="bbg-btn" data-yoy-domain="fomc">FOMC POLICY RATE</button>
+          <button class="bbg-btn" data-yoy-domain="all">ALL MACRO OVERLAY</button>
+        </div>
+        <div id="yoy-series-pills" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      </div>
+      <section class="bbg-pane" style="min-height:500px;">
         <div class="bbg-pane-header">
-          <div class="bbg-pane-title"><span class="tag">TIMELN.YOY &lt;GO&gt;</span><span>45-MONTH COMPONENT INFLATION TIMELINE</span></div>
-          <div style="display:flex; gap:6px;">
-            <button class="bbg-btn-mini active" id="pill-hl" style="border-bottom:2px solid #ffffff;">HEADLINE</button>
-            <button class="bbg-btn-mini active" id="pill-core" style="border-bottom:2px solid #ffb000;">CORE</button>
-            <button class="bbg-btn-mini active" id="pill-super" style="border-bottom:2px solid #00e5ff;">SUPERCORE</button>
-            <button class="bbg-btn-mini active" id="pill-shelter" style="border-bottom:2px solid #ff4444;">SHELTER</button>
-          </div>
+          <div class="bbg-pane-title"><span class="tag">TIMELN.YOY &lt;GO&gt;</span><span id="yoy-pane-subtitle">46-MONTH MULTI-MACRO TIMELINE // CPI INFLATION YoY (2023-2026)</span></div>
+          <div id="yoy-latest-badge" style="font-size:9px; color:var(--amber-cmd); font-weight:800;">LATEST: --</div>
         </div>
         <div class="bbg-pane-body">
-          <div class="bbg-hud-bar" id="hud-yoy">HOVER DATE TICK // HEADLINE, CORE, SUPERCORE, SHELTER (2023-2026)</div>
-          <div class="bbg-chart-canvas" id="canvas-yoy" style="min-height:380px;"></div>
+          <div class="bbg-hud-bar" id="hud-yoy">HOVER DATE TICK // MULTI-MACRO HISTORICAL SERIES (2023-2026)</div>
+          <div class="bbg-chart-canvas" id="canvas-yoy" style="min-height:390px;"></div>
+          <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px; margin-top:8px; border-top:1px solid #1a1a1a; padding-top:8px; font-size:9px;">
+            <div style="background:#050505; border:1px solid #161616; padding:6px 8px;">
+              <div style="color:var(--fg-dim); margin-bottom:2px;">LATEST PRINT</div>
+              <div id="yoy-val-latest" style="color:var(--fg-bright); font-weight:800;">--</div>
+            </div>
+            <div style="background:#050505; border:1px solid #161616; padding:6px 8px;">
+              <div style="color:var(--fg-dim); margin-bottom:2px;">PRIOR / 12M AGO</div>
+              <div id="yoy-val-prior" style="color:var(--fg-bright); font-weight:800;">--</div>
+            </div>
+            <div style="background:#050505; border:1px solid #161616; padding:6px 8px;">
+              <div style="color:var(--fg-dim); margin-bottom:2px;">BENCHMARK / GAP</div>
+              <div id="yoy-val-gap" style="color:var(--amber-cmd); font-weight:800;">--</div>
+            </div>
+            <div style="background:#050505; border:1px solid #161616; padding:6px 8px;">
+              <div style="color:var(--fg-dim); margin-bottom:2px;">EMPIRICAL DATA NOTE</div>
+              <div id="yoy-val-note" style="color:#aaa; font-weight:600; line-height:1.3;">--</div>
+            </div>
+          </div>
         </div>
       </section>
     </div>

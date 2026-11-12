@@ -18,6 +18,7 @@ from openai import OpenAI
 import yfinance as yf
 
 import quant_model
+import data_pipeline
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -452,8 +453,16 @@ def get_dynamic_levels(price: float = None):
         session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
     )
 
+@app.post("/api/sync-releases")
+def sync_releases(force: bool = True):
+    return data_pipeline.sync_live_releases_if_stale(force=force)
+
 @app.post("/api/refresh-all")
 def refresh_all():
+    try:
+        data_pipeline.sync_live_releases_if_stale(force=False)
+    except Exception as e:
+        print(f"[SYNC] Non-fatal release check note: {e}")
     live_data = fetch_live_macro_data()
     prices = live_data.get("prices", {})
     current_gold = prices.get("GC=F", 3975.0)
@@ -477,10 +486,9 @@ def refresh_all():
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
-    fomc = quant_model.calculate_fomc_model(5.00, 5.00, 0.0, current_price=current_gold, atr_m30=atr_val)
-    nfp = quant_model.calculate_nfp_model(175.0, 175.0, 4.1, 4.1, 0.3, 0.3, current_price=current_gold, atr_m30=atr_val)
-    ppi = quant_model.calculate_ppi_retail_model(0.2, 0.2, 0.4, 0.4, current_price=current_gold, atr_m30=atr_val)
-
+    fomc = quant_model.calculate_fomc_model(4.00, 4.00, 0.0, current_price=current_gold, atr_m30=atr_val)
+    nfp = quant_model.calculate_nfp_model(135.0, 135.0, 4.1, 4.1, 0.3, 0.3, current_price=current_gold, atr_m30=atr_val)
+    ppi = quant_model.calculate_ppi_retail_model(0.4, 0.4, 0.4, 0.4, current_price=current_gold, atr_m30=atr_val)
     return {
         "status": "SUCCESS",
         "timestamp": live_data.get("timestamp"),
@@ -551,21 +559,21 @@ def manual_calc(req: ManualCalcRequest):
         raise HTTPException(status_code=400, detail="Unknown event_type")
 
 @app.get("/api/fomc-model")
-def get_fomc_model(actual_rate: float = 5.00, priced_rate: float = 5.00, dots_shift_bps: float = 0.0, price: float = None):
+def get_fomc_model(actual_rate: float = 4.00, priced_rate: float = 4.00, dots_shift_bps: float = 0.0, price: float = None):
     if price is None:
         live = fetch_live_macro_data()
         price = live.get("prices", {}).get("GC=F", 4069.40)
     return quant_model.calculate_fomc_model(actual_rate, priced_rate, dots_shift_bps, current_price=price)
 
 @app.get("/api/nfp-model")
-def get_nfp_model(nfp_actual: float = 175.0, nfp_forecast: float = 175.0, unemp_actual: float = 4.1, unemp_forecast: float = 4.1, ahe_actual: float = 0.3, ahe_forecast: float = 0.3, price: float = None):
+def get_nfp_model(nfp_actual: float = 135.0, nfp_forecast: float = 135.0, unemp_actual: float = 4.1, unemp_forecast: float = 4.1, ahe_actual: float = 0.3, ahe_forecast: float = 0.3, price: float = None):
     if price is None:
         live = fetch_live_macro_data()
         price = live.get("prices", {}).get("GC=F", 4069.40)
     return quant_model.calculate_nfp_model(nfp_actual, nfp_forecast, unemp_actual, unemp_forecast, ahe_actual, ahe_forecast, current_price=price)
 
 @app.get("/api/ppi-retail-model")
-def get_ppi_retail_model(ppi_actual: float = 0.2, ppi_forecast: float = 0.2, retail_actual: float = 0.4, retail_forecast: float = 0.4, price: float = None):
+def get_ppi_retail_model(ppi_actual: float = 0.4, ppi_forecast: float = 0.4, retail_actual: float = 0.4, retail_forecast: float = 0.4, price: float = None):
     if price is None:
         live = fetch_live_macro_data()
         price = live.get("prices", {}).get("GC=F", 4069.40)
@@ -637,20 +645,22 @@ STRICT INSTRUCTIONS:
    [ 5. TIME-OF-DAY EXECUTION DIRECTIVE (SESSION 3-WAVE RULES) ]
 4. Every statement must be a quantitative fact, decision, or defined risk. No marketing."""
     elif req.mode == "pre_news":
-        bayesian = quant_model.calculate_pre_news_bayesian_model(tomorrow)
+        live = fetch_live_macro_data()
+        prices = live.get("prices", {})
+        wti_px = prices.get("CL=F", 86.20)
+        bayesian = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=prices.get("GC=F", 4000.0), atr_m30=prices.get("ATR_M30", 12.5))
         prompt = f"""You are the Chief Quantitative Macroeconomist and Head of Fixed Income & Commodities Trading at a Tier-1 macro hedge fund.
-Deliver an executive PRE-NEWS predictive macro memo ahead of tomorrow's U.S. macroeconomic release.
+Deliver an executive PRE-NEWS predictive macro memo ahead of the upcoming U.S. macroeconomic release ({tomorrow.get('ref_month', 'Upcoming')} / {tomorrow.get('date', '')}).
 
 EVENT TYPE: {req.event_type.upper()}
 AUTHENTIC EMPIRICAL CONTEXT:
 - Consensus Forecast: Headline MoM {tomorrow['forecast_mom']}%, Core YoY {tomorrow['forecast_core_yoy']}%.
-- Cleveland Fed Inflation Nowcast: Headline 0.28% MoM, Core 0.22% MoM.
-- Geopolitical Energy Factor: WTI Crude Oil trading elevated at $104.12 (+12.11% MoM).
+- Cleveland Fed Inflation Nowcast: Headline {tomorrow.get('cleveland_fed_nowcast_mom', 0.31)}% MoM, Core {tomorrow.get('cleveland_fed_nowcast_core_mom', 0.25)}% MoM.
+- Geopolitical Energy Factor: WTI Crude Oil live at ${wti_px:.2f} ({tomorrow.get('wti_oil_oct_change_pct', 0.0):+.2f}% 22D change).
 - Bayesian Probability Decomposition: Hawkish Beat {bayesian['p_hawkish_beat']}%, In-Line {bayesian['p_inline']}%, Dovish Miss {bayesian['p_dovish_miss']}%.
 - Pre-Release Bayesian Expected Value on Gold: {bayesian['expected_return_pct']}% ({bayesian['asymmetry_label']}).
 - Dynamic Trade Directive: {bayesian['directive_title']} ({bayesian['directive_desc']}).
-- Live Baseline: {req.market_context}
-
+- Live Baseline: Spot Gold ${prices.get('GC=F', 4000.0):.2f}, DXY {prices.get('DX-Y.NYB', 102.5):.2f}, US 2Y {prices.get('ZT=F', 4.75):.2f}%, US 10Y {prices.get('^TNX', 4.99):.2f}%.
 STRICT INSTRUCTIONS:
 1. DO NOT USE ANY MARKDOWN ASTERISKS (** or *), NO HASHTAG HEADINGS (###), AND NO CONVERSATIONAL FILLER.
 2. Write in stark, uppercase industrial engineering format using brackets [ SECTION NAME ] and hyphen bullets (- ).

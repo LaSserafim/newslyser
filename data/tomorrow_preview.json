@@ -1,16 +1,19 @@
 {
-  "date": "2026-11-10",
+  "date": "2026-12-10",
   "time": "08:30 AM EST (13:30 UTC / 20:30 WIB)",
-  "ref_month": "October 2026",
+  "ref_month": "November 2026",
+  "last_released_date": "2026-11-10",
+  "last_actual_mom": 0.4,
+  "last_actual_core_mom": 0.3,
   "forecast_mom": 0.3,
-  "prev_mom": 0.6,
-  "forecast_core_yoy": 2.8,
-  "prev_core_yoy": 2.6,
+  "prev_mom": 0.4,
+  "forecast_core_yoy": 2.9,
+  "prev_core_yoy": 2.9,
   "forecast_core_mom": 0.2,
   "prev_core_mom": 0.3,
-  "cleveland_fed_nowcast_mom": 0.28,
-  "cleveland_fed_nowcast_core_mom": 0.22,
+  "cleveland_fed_nowcast_mom": 0.31,
+  "cleveland_fed_nowcast_core_mom": 0.25,
   "survey_dispersion_sd": 0.075,
-  "wti_oil_oct_change_pct": 12.11,
-  "t10y_breakeven_pct": 2.23
+  "wti_oil_oct_change_pct": -9.18,
+  "t10y_breakeven_pct": 2.2
 }

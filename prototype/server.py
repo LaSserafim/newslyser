@@ -24,6 +24,7 @@ from pydantic import BaseModel
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PARENT_DIR)
 import quant_model
+import data_pipeline
 
 DATA_DIR = os.path.join(PARENT_DIR, "data")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -297,8 +298,16 @@ def get_dynamic_levels(price: float = None):
     atr_val = prices.get("ATR_M30", 10.50)
     return quant_model.calculate_dynamic_levels(current_price=price, atr_m30=atr_val, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
 
+@app.post("/api/sync-releases")
+def sync_releases(force: bool = True):
+    return data_pipeline.sync_live_releases_if_stale(force=force)
+
 @app.post("/api/refresh-all")
 def refresh_all():
+    try:
+        data_pipeline.sync_live_releases_if_stale(force=False)
+    except Exception as e:
+        print(f"[SYNC] Non-fatal release check note: {e}")
     prices = fetch_live_quotes()
     _, tomorrow, _ = load_data()
     current_gold = prices.get("GC=F", 3975.0)
@@ -316,10 +325,9 @@ def refresh_all():
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
-    fomc = quant_model.calculate_fomc_model(5.00, 5.00, 0.0, current_price=current_gold, atr_m30=atr_val)
-    nfp = quant_model.calculate_nfp_model(175.0, 175.0, 4.1, 4.1, 0.3, 0.3, current_price=current_gold, atr_m30=atr_val)
-    ppi = quant_model.calculate_ppi_retail_model(0.2, 0.2, 0.4, 0.4, current_price=current_gold, atr_m30=atr_val)
-
+    fomc = quant_model.calculate_fomc_model(4.00, 4.00, 0.0, current_price=current_gold, atr_m30=atr_val)
+    nfp = quant_model.calculate_nfp_model(135.0, 135.0, 4.1, 4.1, 0.3, 0.3, current_price=current_gold, atr_m30=atr_val)
+    ppi = quant_model.calculate_ppi_retail_model(0.4, 0.4, 0.4, 0.4, current_price=current_gold, atr_m30=atr_val)
     return {
         "status": "SUCCESS",
         "prices": prices,

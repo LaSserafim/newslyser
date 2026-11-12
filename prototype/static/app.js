@@ -14,7 +14,9 @@ const EVENT_STATE = {
 
 let currentAiMode = "pre_news";
 let maximizedPaneId = null;
-let yoySeries = { headline: true, core: true, supercore: true, shelter: true };
+let yoyDomain = "cpi";
+let yoyTimelineCache = null;
+let yoyActiveKeys = { headline_yoy: true, core_yoy: true, supercore_yoy: true, shelter_yoy: true };
 let ttlTimerInterval = null;
 
 function init() {
@@ -270,7 +272,7 @@ function initNfpSliders() {
     vUnemp.innerText = `${un.toFixed(1)}%`;
     vAhe.innerText = `${ah.toFixed(2)}%`;
 
-    const zNfp = (act - 175) / 45.0;
+    const zNfp = (act - 135) / 45.0;
     const zUn = (un - 4.1) / 0.15;
     const zAh = (ah - 0.3) / 0.10;
     const zLabor = 0.50 * zNfp - 0.30 * zUn + 0.20 * zAh;
@@ -280,8 +282,7 @@ function initNfpSliders() {
     renderEventMcPane("nfp");
     renderEventFreqPane("nfp");
     try {
-      const res = await fetch(`/api/nfp-model?nfp_actual=${act}&nfp_forecast=175&unemp_actual=${un}&unemp_forecast=4.1&ahe_actual=${ah}&ahe_forecast=0.3`);
-      const d = await res.json();
+      const res = await fetch(`/api/nfp-model?nfp_actual=${act}&nfp_forecast=135&unemp_actual=${un}&unemp_forecast=4.1&ahe_actual=${ah}&ahe_forecast=0.3`);
       if (d && d.metrics && d.dynamic_execution) {
         updateExecTicket("nfp", d.metrics.tactical_signal, d.dynamic_execution);
       }
@@ -307,8 +308,8 @@ function initPpiSliders() {
     vAct.innerText = `${act.toFixed(2)}%`;
     vRetail.innerText = `${ret.toFixed(2)}%`;
 
-    const zPpi = (act - 0.2) / 0.15;
-    const zRet = (ret - 0.4) / 0.25;
+    const zPpi = (act - 0.4) / 0.20;
+    const zRet = (ret - 0.4) / 0.35;
     const zDemand = 0.55 * zPpi + 0.45 * zRet;
     EVENT_STATE.ppi.z = zDemand;
 
@@ -316,8 +317,7 @@ function initPpiSliders() {
     renderEventMcPane("ppi");
     renderEventFreqPane("ppi");
     try {
-      const res = await fetch(`/api/ppi-retail-model?ppi_actual=${act}&ppi_forecast=0.2&retail_actual=${ret}&retail_forecast=0.4`);
-      const d = await res.json();
+      const res = await fetch(`/api/ppi-retail-model?ppi_actual=${act}&ppi_forecast=0.4&retail_actual=${ret}&retail_forecast=0.4`);
       if (d && d.metrics && d.dynamic_execution) {
         updateExecTicket("ppi", d.metrics.tactical_signal, d.dynamic_execution);
       }
@@ -365,13 +365,15 @@ function initAllControls() {
   document.getElementById("btn-sync-live")?.addEventListener("click", async () => {
     const btn = document.getElementById("btn-sync-live");
     btn.innerText = "SYNCING B-PIPE...";
-    await fetchState();
-    await fetchAstarData();
+    try { await fetch("/api/sync-releases?force=true", { method: "POST" }); } catch (e) {}
+    yoyTimelineCache = null;
+    await Promise.all([fetchState(), fetchAuditLedger(), fetchFomcData(), fetchNfpData(), fetchPpiData(), fetchCalendarData(), fetchAstarData()]);
     const mod = getActiveModuleId();
     if (mod === "mod-cpi") renderWorkstation("cpi");
     else if (mod === "mod-fomc") renderWorkstation("fomc");
     else if (mod === "mod-nfp") renderWorkstation("nfp");
     else if (mod === "mod-ppi") renderWorkstation("ppi");
+    else if (mod === "mod-yoy") renderYoyTimeline();
     setTimeout(() => { btn.innerText = "SYNC LIVE <GO>"; }, 500);
   });
 
@@ -552,8 +554,8 @@ function resetEventModule(ev, pre) {
     const r1 = document.getElementById("fomc-range-rate");
     const r2 = document.getElementById("fomc-range-priced");
     const r3 = document.getElementById("fomc-range-dots");
-    if (r1) r1.value = 5.0;
-    if (r2) r2.value = 5.0;
+    if (r1) r1.value = 4.0;
+    if (r2) r2.value = 4.0;
     if (r3) r3.value = 0.0;
     r1?.dispatchEvent(new Event("input"));
     setBtnActive(document.querySelector('[data-ev="fomc"][data-ev-asset="gold"]'), '[data-ev="fomc"][data-ev-asset]');
@@ -563,7 +565,7 @@ function resetEventModule(ev, pre) {
     const r1 = document.getElementById("nfp-range-act");
     const r2 = document.getElementById("nfp-range-unemp");
     const r3 = document.getElementById("nfp-range-ahe");
-    if (r1) r1.value = 175;
+    if (r1) r1.value = 135;
     if (r2) r2.value = 4.1;
     if (r3) r3.value = 0.3;
     r1?.dispatchEvent(new Event("input"));
@@ -573,7 +575,7 @@ function resetEventModule(ev, pre) {
   } else if (ev === "ppi") {
     const r1 = document.getElementById("ppi-range-act");
     const r2 = document.getElementById("ppi-range-retail");
-    if (r1) r1.value = 0.2;
+    if (r1) r1.value = 0.4;
     if (r2) r2.value = 0.4;
     r1?.dispatchEvent(new Event("input"));
     setBtnActive(document.querySelector('[data-ev="ppi"][data-ev-asset="gold"]'), '[data-ev="ppi"][data-ev-asset]');
@@ -1171,16 +1173,20 @@ async function renderEventDiagPane(ev) {
 
   if (document.getElementById(verdictId)) {
     const vEl = document.getElementById(verdictId);
-    vEl.innerText = `t=${diag.beta_z_t_stat.toFixed(2)} vs ±${diag.t_crit_95.toFixed(3)} (p=${diag.beta_z_p_val.toFixed(4)}) -> ${diag.slope_valid_5pct ? "VALID (REJECT H0)" : "FAIL TO REJECT"}`;
-    vEl.style.color = diag.slope_valid_5pct ? "#ffffff" : "#ff4444";
+    const tier = diag.confidence_99 ? "99%" : (diag.confidence_95 ? "95%" : (diag.confidence_90 ? "90%" : "NONE"));
+    const tagTxt = diag.slope_valid_5pct
+      ? `VALID (${tier} / REJECT H0)`
+      : (diag.multi_valid_5pct ? `UNI FAIL | X-ASSET F VALID (p=${diag.f_p_val})` : "NO EDGE / LUCK RISK");
+    vEl.innerText = `t=${diag.beta_z_t_stat.toFixed(2)} vs ±${diag.t_crit_95.toFixed(3)} (p=${diag.beta_z_p_val.toFixed(4)}) -> ${tagTxt}`;
+    vEl.style.color = diag.slope_valid_5pct ? "#ffffff" : (diag.multi_valid_5pct ? "var(--amber-cmd)" : "#ff4444");
   }
   if (document.getElementById(luckId)) {
     const lEl = document.getElementById(luckId);
-    lEl.innerText = `${diag.binomial_wins}/${diag.binomial_trials} (${diag.binomial_accuracy_pct}%, p=${diag.binomial_p_val}) -> ${diag.beats_luck_5pct ? "NOT LUCK (α=5%)" : "LUCK RISK"}`;
+    lEl.innerText = `${diag.binomial_wins}/${diag.binomial_trials} (${diag.binomial_accuracy_pct}%, p=${diag.binomial_p_val}) -> ${diag.beats_luck_5pct ? "NOT LUCK (α=5%)" : "COIN-FLIP / LUCK RISK"}`;
     lEl.style.color = diag.beats_luck_5pct ? "#ffb000" : "#ff4444";
   }
   if (document.getElementById(hatId)) {
-    document.getElementById(hatId).innerText = `h*=${diag.leverage_threshold} | OOS R²=${diag.oos_r2} | F=${diag.f_stat} (${diag.high_leverage_outlier_count} outliers)`;
+    document.getElementById(hatId).innerText = `h*=${diag.leverage_threshold} | OOS R²=${diag.oos_r2} | F=${diag.f_stat} (F_p=${diag.f_p_val}, ${diag.high_leverage_outlier_count} outliers)`;
   }
 
   const w = container.clientWidth || 380;
@@ -1573,64 +1579,166 @@ function initDeepSeekControls() {
   });
 }
 
+const YOY_DOMAINS = {
+  cpi: {
+    subtitle: "46-MONTH MULTI-MACRO TIMELINE // CPI INFLATION YoY (2023-2026)",
+    refVal: 2.0,
+    refLabel: "FED 2.0% TARGET",
+    series: [
+      { key: "headline_yoy", label: "HEADLINE YoY", short: "HL", color: "#ffffff", width: 2.2, dash: "" },
+      { key: "core_yoy", label: "CORE YoY", short: "CORE", color: "#ffb000", width: 1.9, dash: "" },
+      { key: "supercore_yoy", label: "SUPERCORE YoY", short: "SUP", color: "#00e5ff", width: 1.6, dash: "4,3" },
+      { key: "shelter_yoy", label: "SHELTER YoY", short: "SHL", color: "#ff4444", width: 1.6, dash: "" }
+    ],
+    note: "Oct 2026 official YoY omitted due to Oct 2025 BLS shutdown gap (MoM +0.35% / Core +0.30%)."
+  },
+  nfp: {
+    subtitle: "46-MONTH MULTI-MACRO TIMELINE // NFP LABOR, WAGES & UNEMPLOYMENT (2023-2026)",
+    refVal: 4.0,
+    refLabel: "4.0% NAIRU / BENCHMARK",
+    series: [
+      { key: "unemp_rate", label: "UNEMP RATE (%)", short: "UNEMP", color: "#ff4444", width: 2.1, dash: "" },
+      { key: "ahe_yoy", label: "WAGE AHE YoY (%)", short: "WAGE", color: "#ffb000", width: 1.9, dash: "" },
+      { key: "nfp_yoy", label: "PAYROLLS YoY (%)", short: "NFP YoY", color: "#ffffff", width: 2.0, dash: "4,3" }
+    ],
+    note: "FRED PAYEMS, UNRATE, CES0500000003 through Oct 2026 (+165K Oct jobs beat vs +65K fcst)."
+  },
+  ppi: {
+    subtitle: "45-MONTH MULTI-MACRO TIMELINE // PPI WHOLESALE & RETAIL DEMAND YoY (2023-2026)",
+    refVal: 2.0,
+    refLabel: "2.0% PIPELINE BENCHMARK",
+    series: [
+      { key: "ppi_yoy", label: "PPI FINAL YoY (%)", short: "PPI YoY", color: "#ff4444", width: 2.2, dash: "" },
+      { key: "retail_yoy", label: "RETAIL SALES YoY (%)", short: "RETAIL YoY", color: "#00e5ff", width: 1.9, dash: "" },
+      { key: "ppi_mom", label: "PPI MoM (%)", short: "PPI MoM", color: "#ffb000", width: 1.4, dash: "3,3" }
+    ],
+    note: "FRED PPIFIS & RSAFS through Sep 2026 (+1.34% PPI jump); Oct 2026 PPI releases Nov 13."
+  },
+  fomc: {
+    subtitle: "46-MONTH MULTI-MACRO TIMELINE // FOMC TARGET RATE, REAL RATE & 10Y-2Y CURVE",
+    refVal: 0.0,
+    refLabel: "0.0% ZERO BOUND / CURVE INVERSION",
+    series: [
+      { key: "fomc_target_upper", label: "FOMC UPPER TARGET (%)", short: "TARGET", color: "#ffffff", width: 2.3, dash: "" },
+      { key: "fed_funds_eff", label: "EFF FED FUNDS (%)", short: "EFFR", color: "#00e5ff", width: 1.6, dash: "4,3" },
+      { key: "real_policy_rate", label: "REAL POLICY RATE (%)", short: "REAL", color: "#ffb000", width: 1.9, dash: "" },
+      { key: "us10y_2y_spread", label: "10Y-2Y SPREAD (%)", short: "10s2s", color: "#ff4444", width: 1.5, dash: "" }
+    ],
+    note: "FRED DFEDTARU & FEDFUNDS through Oct/Nov 2026 (hiked +25 bps to 4.00% on Sep 16, held Oct 28)."
+  },
+  all: {
+    subtitle: "46-MONTH CROSS-MACRO OVERLAY // CORE CPI, PPI, NFP & FOMC TARGET RATE",
+    refVal: 2.0,
+    refLabel: "2.0% FED MANDATE",
+    series: [
+      { key: "fomc_target_upper", label: "FOMC TARGET (%)", short: "FOMC", color: "#ffffff", width: 2.2, dash: "" },
+      { key: "core_yoy", label: "CORE CPI YoY (%)", short: "CPI CORE", color: "#ffb000", width: 1.9, dash: "" },
+      { key: "ppi_yoy", label: "PPI FINAL YoY (%)", short: "PPI YoY", color: "#ff4444", width: 1.7, dash: "" },
+      { key: "nfp_yoy", label: "PAYROLLS YoY (%)", short: "NFP YoY", color: "#00e5ff", width: 1.7, dash: "4,3" }
+    ],
+    note: "Unified 4-pillar cycle overlay linking Policy Rate, Consumer Inflation, Producer Costs & Labor Growth."
+  }
+};
+
+function renderYoyPills() {
+  const wrap = document.getElementById("yoy-series-pills");
+  const cfg = YOY_DOMAINS[yoyDomain] || YOY_DOMAINS.cpi;
+  if (!wrap) return;
+  wrap.innerHTML = cfg.series.map(s => {
+    const isOn = yoyActiveKeys[s.key] !== false;
+    return `<button class="bbg-btn-mini ${isOn ? 'active' : ''}" data-yoy-key="${s.key}" style="border-bottom:2px solid ${s.color}; opacity:${isOn ? '1' : '0.45'};">${s.label}</button>`;
+  }).join("");
+  wrap.querySelectorAll("[data-yoy-key]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const k = btn.getAttribute("data-yoy-key");
+      yoyActiveKeys[k] = !(yoyActiveKeys[k] !== false);
+      renderYoyPills();
+      renderYoyTimeline();
+    });
+  });
+}
+
 function initYoyControls() {
-  const pHL = document.getElementById("pill-hl"), pCore = document.getElementById("pill-core"), pSuper = document.getElementById("pill-super"), pShelter = document.getElementById("pill-shelter");
-  pHL?.addEventListener("click", () => { yoySeries.headline = !yoySeries.headline; pHL.classList.toggle("active"); renderYoyTimeline(); });
-  pCore?.addEventListener("click", () => { yoySeries.core = !yoySeries.core; pCore.classList.toggle("active"); renderYoyTimeline(); });
-  pSuper?.addEventListener("click", () => { yoySeries.supercore = !yoySeries.supercore; pSuper.classList.toggle("active"); renderYoyTimeline(); });
-  pShelter?.addEventListener("click", () => { yoySeries.shelter = !yoySeries.shelter; pShelter.classList.toggle("active"); renderYoyTimeline(); });
+  document.querySelectorAll("[data-yoy-domain]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      setBtnActive(e.target, "[data-yoy-domain]");
+      yoyDomain = e.target.getAttribute("data-yoy-domain") || "cpi";
+      const cfg = YOY_DOMAINS[yoyDomain];
+      yoyActiveKeys = {};
+      cfg.series.forEach(s => { yoyActiveKeys[s.key] = true; });
+      renderYoyPills();
+      renderYoyTimeline();
+    });
+  });
+  renderYoyPills();
 }
 
 async function renderYoyTimeline() {
   const container = document.getElementById("canvas-yoy");
   const hudEl = document.getElementById("hud-yoy");
   if (!container) return;
-  let data = null;
-  try {
-    const res = await fetch("/api/yoy-timeline");
-    data = await res.json();
-  } catch (e) {
-    console.warn("renderYoyTimeline error:", e);
-    return;
-  }
 
-  let dates = [];
-  let series = { headline_yoy: [], core_yoy: [], supercore_yoy: [], shelter_yoy: [] };
-  if (Array.isArray(data)) {
-    dates = data.map(r => r.date);
-    series.headline_yoy = data.map(r => Number(r.headline_yoy));
-    series.core_yoy = data.map(r => Number(r.core_yoy));
-    series.supercore_yoy = data.map(r => Number(r.supercore_yoy));
-    series.shelter_yoy = data.map(r => Number(r.shelter_yoy));
-  } else if (data && data.timeline && data.timeline.series) {
-    dates = data.timeline.dates || [];
-    series = data.timeline.series;
+  if (!yoyTimelineCache) {
+    try {
+      const res = await fetch("/api/yoy-timeline");
+      yoyTimelineCache = await res.json();
+    } catch (e) {
+      console.warn("renderYoyTimeline error:", e);
+      return;
+    }
   }
-
-  const n = dates.length;
+  const data = Array.isArray(yoyTimelineCache) ? yoyTimelineCache : [];
+  const n = data.length;
   if (n < 2) {
     container.innerHTML = `<div style="padding:20px; color:#888;">NO YOY TIMELINE DATA AVAILABLE</div>`;
     return;
   }
 
-  const w = Math.max(container.clientWidth || 0, 920);
-  const h = Math.max(container.clientHeight || 0, 380);
-  const padL = 48, padR = 72, padT = 22, padB = 34;
-  const allVals = [];
-  if (yoySeries.headline) allVals.push(...series.headline_yoy);
-  if (yoySeries.core) allVals.push(...series.core_yoy);
-  if (yoySeries.supercore) allVals.push(...series.supercore_yoy);
-  if (yoySeries.shelter) allVals.push(...series.shelter_yoy);
-  if (!allVals.length) allVals.push(2.0, 6.0);
+  const cfg = YOY_DOMAINS[yoyDomain] || YOY_DOMAINS.cpi;
+  const subEl = document.getElementById("yoy-pane-subtitle");
+  if (subEl) subEl.innerText = cfg.subtitle;
 
-  const minY = Math.max(0, Math.floor(Math.min(...allVals, 1.5) * 2) / 2 - 0.5);
-  const maxY = Math.ceil(Math.max(...allVals, 7.0) * 2) / 2 + 0.5;
+  const dates = data.map(r => r.date);
+  const activeSeries = cfg.series.filter(s => yoyActiveKeys[s.key] !== false);
+  const allVals = [];
+  activeSeries.forEach(s => {
+    data.forEach(r => {
+      const v = r[s.key];
+      if (v !== null && v !== undefined && !isNaN(v)) allVals.push(Number(v));
+    });
+  });
+  if (!allVals.length) allVals.push(0.0, 5.0);
+
+  const rawMin = Math.min(...allVals, cfg.refVal);
+  const rawMax = Math.max(...allVals, cfg.refVal + 0.5);
+  const minY = Math.floor(rawMin * 2) / 2 - 0.5;
+  const maxY = Math.ceil(rawMax * 2) / 2 + 0.5;
+
+  const w = Math.max(container.clientWidth || 0, 920);
+  const h = Math.max(container.clientHeight || 0, 390);
+  const padL = 52, padR = 88, padT = 22, padB = 34;
+
   function getX(i) { return padL + (i / (n - 1)) * (w - padL - padR); }
   function getY(v) { return padT + (1 - (v - minY) / Math.max(0.1, maxY - minY)) * (h - padT - padB); }
-  function buildPath(arr) { return arr.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i).toFixed(1)} ${getY(v).toFixed(1)}`).join(" "); }
 
+  function buildNullablePath(key) {
+    let d = "";
+    let openSeg = false;
+    for (let i = 0; i < n; i++) {
+      const v = data[i][key];
+      if (v === null || v === undefined || isNaN(v)) {
+        openSeg = false;
+        continue;
+      }
+      d += `${openSeg ? "L" : "M"} ${getX(i).toFixed(1)} ${getY(Number(v)).toFixed(1)} `;
+      openSeg = true;
+    }
+    return d.trim();
+  }
+
+  const yStep = (maxY - minY) > 6 ? 1.0 : 0.5;
   let gridSvg = "";
-  for (let yVal = Math.ceil(minY); yVal <= Math.floor(maxY); yVal += 1) {
+  for (let yVal = Math.ceil(minY / yStep) * yStep; yVal <= maxY; yVal += yStep) {
     const yy = getY(yVal);
     gridSvg += `<line x1="${padL}" y1="${yy}" x2="${w - padR}" y2="${yy}" class="grid-dot"/>`;
     gridSvg += `<text x="${padL - 6}" y="${yy + 3}" text-anchor="end">${yVal.toFixed(1)}%</text>`;
@@ -1638,93 +1746,145 @@ async function renderYoyTimeline() {
 
   let pathsSvg = "";
   const rawEndLabels = [];
-  const last = n - 1;
-  if (yoySeries.headline) {
-    pathsSvg += `<path d="${buildPath(series.headline_yoy)}" fill="none" stroke="#ffffff" stroke-width="2.2"/>`;
-    rawEndLabels.push({ y: getY(series.headline_yoy[last]), text: `HL ${series.headline_yoy[last].toFixed(2)}%`, color: "#ffffff", weight: 800 });
-  }
-  if (yoySeries.core) {
-    pathsSvg += `<path d="${buildPath(series.core_yoy)}" fill="none" stroke="#ffb000" stroke-width="1.9"/>`;
-    rawEndLabels.push({ y: getY(series.core_yoy[last]), text: `CORE ${series.core_yoy[last].toFixed(2)}%`, color: "#ffb000", weight: 800 });
-  }
-  if (yoySeries.supercore) {
-    pathsSvg += `<path d="${buildPath(series.supercore_yoy)}" fill="none" stroke="#00e5ff" stroke-width="1.6" stroke-dasharray="4,3"/>`;
-    rawEndLabels.push({ y: getY(series.supercore_yoy[last]), text: `SUP ${series.supercore_yoy[last].toFixed(2)}%`, color: "#00e5ff", weight: 700 });
-  }
-  if (yoySeries.shelter) {
-    pathsSvg += `<path d="${buildPath(series.shelter_yoy)}" fill="none" stroke="#ff4444" stroke-width="1.6"/>`;
-    rawEndLabels.push({ y: getY(series.shelter_yoy[last]), text: `SHL ${series.shelter_yoy[last].toFixed(2)}%`, color: "#ff4444", weight: 700 });
-  }
+  activeSeries.forEach(s => {
+    const dStr = buildNullablePath(s.key);
+    if (dStr) {
+      pathsSvg += `<path d="${dStr}" fill="none" stroke="${s.color}" stroke-width="${s.width}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""}/>`;
+    }
+    for (let i = n - 1; i >= 0; i--) {
+      const v = data[i][s.key];
+      if (v !== null && v !== undefined && !isNaN(v)) {
+        rawEndLabels.push({ y: getY(Number(v)), text: `${s.short} ${Number(v).toFixed(2)}%`, color: s.color, weight: 800 });
+        break;
+      }
+    }
+  });
+
   rawEndLabels.sort((a, b) => a.y - b.y);
   for (let i = 1; i < rawEndLabels.length; i++) {
     if (rawEndLabels[i].y - rawEndLabels[i - 1].y < 13) rawEndLabels[i].y = rawEndLabels[i - 1].y + 13;
   }
   const endLabels = rawEndLabels.map(l => `<text x="${w - padR + 6}" y="${l.y + 3}" fill="${l.color}" font-weight="${l.weight}">${l.text}</text>`).join("");
 
+  const last = n - 1;
   let ticksSvg = "";
   for (let i = 0; i < n; i += 6) {
     if (last - i >= 3) ticksSvg += `<text x="${getX(i)}" y="${h - 10}" text-anchor="middle">${dates[i]}</text>`;
   }
   ticksSvg += `<text x="${getX(last)}" y="${h - 10}" text-anchor="end">${dates[last]}</text>`;
 
-  const yTarget = getY(2.0);
+  const yTarget = getY(cfg.refVal);
+  const dotsSvg = activeSeries.map(s => `<circle id="yoy-dot-${s.key}" r="3.5" fill="${s.color}" style="display:none; pointer-events:none;"/>`).join("");
+
   container.innerHTML = `
-    <svg id="svg-yoy" viewBox="0 0 ${w} ${h}" class="bbg-svg" style="cursor:crosshair; min-height:380px;">
+    <svg id="svg-yoy" viewBox="0 0 ${w} ${h}" class="bbg-svg" style="cursor:crosshair; min-height:390px;">
       ${gridSvg}
       <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" class="axis-line"/>
       <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="axis-line"/>
       <line x1="${padL}" y1="${yTarget}" x2="${w - padR}" y2="${yTarget}" stroke="#666" stroke-width="1" stroke-dasharray="3,3"/>
-      <text x="${padL + 6}" y="${yTarget - 5}" fill="#888">FED 2.0% TARGET</text>
+      <text x="${padL + 6}" y="${yTarget - 5}" fill="#888">${cfg.refLabel}</text>
       ${pathsSvg}
       ${endLabels}
       ${ticksSvg}
       <line id="yoy-scrubber" x1="0" y1="0" x2="0" y2="0" class="crosshair" style="display:none; pointer-events:none;"/>
-      <circle id="yoy-dot-hl" r="3.5" fill="#ffffff" style="display:none; pointer-events:none;"/>
-      <circle id="yoy-dot-core" r="3.5" fill="#ffb000" style="display:none; pointer-events:none;"/>
-      <circle id="yoy-dot-sup" r="3.5" fill="#00e5ff" style="display:none; pointer-events:none;"/>
-      <circle id="yoy-dot-shl" r="3.5" fill="#ff4444" style="display:none; pointer-events:none;"/>
+      ${dotsSvg}
     </svg>
   `;
+
+  const primaryKey = cfg.series[0].key;
+  let latestRec = null, latestIdx = n - 1;
+  for (let i = n - 1; i >= 0; i--) {
+    if (data[i][primaryKey] !== null && data[i][primaryKey] !== undefined) { latestRec = data[i]; latestIdx = i; break; }
+  }
+  const badgeEl = document.getElementById("yoy-latest-badge");
+  if (badgeEl && latestRec) badgeEl.innerText = `LATEST (${latestRec.date}): ${cfg.series[0].short} ${Number(latestRec[primaryKey]).toFixed(2)}%`;
+
+  if (latestRec) {
+    const latStr = activeSeries.map(s => {
+      const v = latestRec[s.key];
+      return `${s.short}: ${v !== null && v !== undefined ? Number(v).toFixed(2) + "%" : "N/A"}`;
+    }).join(" | ");
+    const prior12 = data[Math.max(0, latestIdx - 12)];
+    const p12Val = prior12 ? prior12[primaryKey] : null;
+    const diff12 = (p12Val !== null && p12Val !== undefined) ? (Number(latestRec[primaryKey]) - Number(p12Val)) : null;
+    if (document.getElementById("yoy-val-latest")) document.getElementById("yoy-val-latest").innerText = `${latestRec.date} // ${latStr}`;
+    if (document.getElementById("yoy-val-prior")) document.getElementById("yoy-val-prior").innerText = p12Val !== null ? `${prior12.date}: ${Number(p12Val).toFixed(2)}% (12M Δ: ${diff12 >= 0 ? "+" : ""}${diff12.toFixed(2)} pp)` : "--";
+    const gap = Number(latestRec[primaryKey]) - cfg.refVal;
+    if (document.getElementById("yoy-val-gap")) document.getElementById("yoy-val-gap").innerText = `${gap >= 0 ? "+" : ""}${gap.toFixed(2)} pp vs ${cfg.refLabel}`;
+    if (document.getElementById("yoy-val-note")) document.getElementById("yoy-val-note").innerText = cfg.note;
+  }
 
   const svgEl = document.getElementById("svg-yoy");
   const scrub = document.getElementById("yoy-scrubber");
   const tt = getOrCreateTooltip(container);
-  const dots = {
-    hl: document.getElementById("yoy-dot-hl"),
-    core: document.getElementById("yoy-dot-core"),
-    sup: document.getElementById("yoy-dot-sup"),
-    shl: document.getElementById("yoy-dot-shl")
-  };
-
   if (svgEl && hudEl) {
     svgEl.addEventListener("mousemove", (ev) => {
       const rect = svgEl.getBoundingClientRect();
       const mouseX = Math.max(padL, Math.min(w - padR, ((ev.clientX - rect.left) / rect.width) * w));
       const idx = Math.max(0, Math.min(n - 1, Math.round(((mouseX - padL) / (w - padL - padR)) * (n - 1))));
       const xPos = getX(idx);
-      const hl = series.headline_yoy[idx], co = series.core_yoy[idx], su = series.supercore_yoy[idx], sh = series.shelter_yoy[idx];
+      const row = data[idx];
 
-      hudEl.innerHTML = `${dates[idx]} | Headline: <span class="highlight">${hl.toFixed(2)}%</span> | Core: <span style="color:#ffb000; font-weight:700;">${co.toFixed(2)}%</span> | Supercore: <span style="color:#00e5ff;">${su.toFixed(2)}%</span> | Shelter: <span style="color:#ff4444;">${sh.toFixed(2)}%</span>`;
       if (scrub) { scrub.style.display = "block"; scrub.setAttribute("x1", xPos); scrub.setAttribute("x2", xPos); scrub.setAttribute("y1", padT); scrub.setAttribute("y2", h - padB); }
-      if (dots.hl) { dots.hl.style.display = yoySeries.headline ? "block" : "none"; dots.hl.setAttribute("cx", xPos); dots.hl.setAttribute("cy", getY(hl)); }
-      if (dots.core) { dots.core.style.display = yoySeries.core ? "block" : "none"; dots.core.setAttribute("cx", xPos); dots.core.setAttribute("cy", getY(co)); }
-      if (dots.sup) { dots.sup.style.display = yoySeries.supercore ? "block" : "none"; dots.sup.setAttribute("cx", xPos); dots.sup.setAttribute("cy", getY(su)); }
-      if (dots.shl) { dots.shl.style.display = yoySeries.shelter ? "block" : "none"; dots.shl.setAttribute("cx", xPos); dots.shl.setAttribute("cy", getY(sh)); }
+      const hudParts = activeSeries.map(s => {
+        const v = row[s.key];
+        const dotEl = document.getElementById(`yoy-dot-${s.key}`);
+        if (dotEl) {
+          if (v !== null && v !== undefined && !isNaN(v)) {
+            dotEl.style.display = "block"; dotEl.setAttribute("cx", xPos); dotEl.setAttribute("cy", getY(Number(v)));
+          } else {
+            dotEl.style.display = "none";
+          }
+        }
+        const txt = (v !== null && v !== undefined && !isNaN(v)) ? `${Number(v).toFixed(2)}%` : "N/A";
+        return `${s.short}: <span style="color:${s.color}; font-weight:700;">${txt}</span>`;
+      });
+      let extraLine = "";
+      if (yoyDomain === "nfp" && row.nfp_mom_k !== null && row.nfp_mom_k !== undefined) extraLine = `Net Payrolls MoM: <strong>${row.nfp_mom_k >= 0 ? "+" : ""}${row.nfp_mom_k}K</strong>`;
+      else if (yoyDomain === "cpi" && row.headline_mom !== null) extraLine = `Headline MoM: <strong>${row.headline_mom >= 0 ? "+" : ""}${row.headline_mom.toFixed(2)}%</strong> | Core MoM: <strong>${row.core_mom >= 0 ? "+" : ""}${row.core_mom.toFixed(2)}%</strong>`;
+      else if (yoyDomain === "ppi" && row.retail_mom !== null) extraLine = `Retail MoM: <strong>${row.retail_mom >= 0 ? "+" : ""}${row.retail_mom.toFixed(2)}%</strong>`;
 
+      hudEl.innerHTML = `${row.date} | ${hudParts.join(" | ")}`;
       positionTooltip(tt, container, ev.clientX, ev.clientY,
-        `<strong>${dates[idx]} // BLS CPI YoY</strong><br/>` +
-        `Headline: <strong style="color:#fff;">${hl.toFixed(2)}%</strong> | Core: <strong style="color:#ffb000;">${co.toFixed(2)}%</strong><br/>` +
-        `Supercore: <span style="color:#00e5ff;">${su.toFixed(2)}%</span> | Shelter: <span style="color:#ff4444;">${sh.toFixed(2)}%</span><br/>` +
-        `<span style="color:#888;">Fed Target Gap (Core): ${(co - 2.0 >= 0 ? "+" : "")}${(co - 2.0).toFixed(2)} pp</span>`
+        `<strong>${row.date} // ${yoyDomain.toUpperCase()} TELEMETRY</strong><br/>` +
+        activeSeries.map(s => {
+          const v = row[s.key];
+          return `<span style="color:${s.color};">${s.label}:</span> <strong>${v !== null && v !== undefined && !isNaN(v) ? Number(v).toFixed(2) + "%" : "N/A (Shutdown)"}</strong>`;
+        }).join("<br/>") +
+        (extraLine ? `<br/><span style="color:#aaa;">${extraLine}</span>` : "")
       );
     });
     svgEl.addEventListener("mouseleave", () => {
       if (scrub) scrub.style.display = "none";
-      Object.values(dots).forEach(d => { if (d) d.style.display = "none"; });
+      activeSeries.forEach(s => {
+        const dotEl = document.getElementById(`yoy-dot-${s.key}`);
+        if (dotEl) dotEl.style.display = "none";
+      });
       tt.style.display = "none";
-      hudEl.innerText = "HOVER DATE TICK // HEADLINE, CORE, SUPERCORE, SHELTER (2023-2026)";
+      hudEl.innerText = "HOVER DATE TICK // MULTI-MACRO HISTORICAL SERIES (2023-2026)";
     });
   }
+}
+
+async function fetchCalendarData() {
+  try {
+    const res = await fetch("/api/high-impact-calendar");
+    const data = await res.json();
+    const tbody = document.getElementById("cal-tbody");
+    if (!tbody || !Array.isArray(data)) return;
+    tbody.innerHTML = data.map(ev => `
+      <tr>
+        <td><strong>${ev.date}</strong></td>
+        <td>${ev.time}</td>
+        <td><strong style="color:var(--amber-cmd);">${ev.title}</strong></td>
+        <td><span style="color:${ev.impact === 'MAXIMUM' ? '#ff4444' : '#ffffff'}; font-weight:800;">[ ${ev.impact} ]</span></td>
+        <td style="color:${ev.actual ? '#00e5ff' : '#666'}; font-weight:800;">${ev.actual || 'PENDING'}</td>
+        <td>${ev.forecast || '-'}</td>
+        <td style="color:#777;">${ev.previous || '-'}</td>
+        <td style="color:#fff;">${ev.effect_xauusd}</td>
+      </tr>
+    `).join("");
+  } catch (e) {}
 }
 
 // ==============================================================
@@ -1743,6 +1903,8 @@ async function fetchAuditLedger() {
     const data = await res.json();
     const tbody = document.getElementById("bbg-audit-tbody");
     if (!tbody || !data.events) return;
+    const cpiTit = document.getElementById("audit-title-cpi");
+    if (cpiTit && data.count) cpiTit.innerText = `[ 07 // AUDIT <GO> : ${data.count}-RELEASE EMPIRICAL POST-NEWS PRICE MOVEMENT RECORD ]`;
     const { mean, sd } = computeMeanAndSd(data.events);
     tbody.innerHTML = data.events.map(e => {
       const distSd = (e.gold_return_pct - mean) / sd;
@@ -1770,6 +1932,8 @@ async function fetchFomcData() {
     const data = await res.json();
     const tbody = document.getElementById("fomc-tbody");
     if (!tbody || !data.events) return;
+    const fomcTit = document.getElementById("audit-title-fomc");
+    if (fomcTit && data.count) fomcTit.innerText = `[ 07 // AUDIT <GO> : ${data.count}-MEETING FOMC POST-NEWS PRICE MOVEMENT RECORD ]`;
     const { mean, sd } = computeMeanAndSd(data.events);
     tbody.innerHTML = data.events.map(e => {
       const distSd = (e.gold_return_pct - mean) / sd;
@@ -1797,6 +1961,8 @@ async function fetchNfpData() {
     const data = await res.json();
     const tbody = document.getElementById("nfp-tbody");
     if (!tbody || !data.events) return;
+    const nfpTit = document.getElementById("audit-title-nfp");
+    if (nfpTit && data.count) nfpTit.innerText = `[ 07 // AUDIT <GO> : ${data.count}-RELEASE NFP POST-NEWS PRICE MOVEMENT RECORD ]`;
     const { mean, sd } = computeMeanAndSd(data.events);
     tbody.innerHTML = data.events.map(e => {
       const distSd = (e.gold_return_pct - mean) / sd;
@@ -1806,7 +1972,7 @@ async function fetchNfpData() {
           <td>${e.nfp_actual_k}k</td>
           <td>${e.nfp_forecast_k}k</td>
           <td>${Number(e.unemp_actual_pct).toFixed(1)}%</td>
-          <td>${Number(e.ahe_actual_pct).toFixed(1)}%</td>
+          <td>${Number(e.ahe_actual_pct).toFixed(2)}%</td>
           <td style="color:${e.z_score_composite > 0 ? '#ff4444' : (e.z_score_composite < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${Number(e.z_score_composite).toFixed(2)}σ</td>
           <td>$${Number(e.gold_open).toFixed(1)} → $${Number(e.gold_close).toFixed(1)}</td>
           <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${Number(e.gold_return_pct).toFixed(2)}%</td>
@@ -1825,16 +1991,18 @@ async function fetchPpiData() {
     const data = await res.json();
     const tbody = document.getElementById("ppi-tbody");
     if (!tbody || !data.events) return;
+    const ppiTit = document.getElementById("audit-title-ppi");
+    if (ppiTit && data.count) ppiTit.innerText = `[ 07 // AUDIT <GO> : ${data.count}-RELEASE PPI & DEMAND POST-NEWS MOVEMENT RECORD ]`;
     const { mean, sd } = computeMeanAndSd(data.events);
     tbody.innerHTML = data.events.map(e => {
       const distSd = (e.gold_return_pct - mean) / sd;
       return `
         <tr>
           <td><strong>${e.date}</strong></td>
-          <td>${Number(e.ppi_actual).toFixed(1)}%</td>
-          <td>${Number(e.ppi_forecast).toFixed(1)}%</td>
-          <td>${Number(e.retail_actual).toFixed(1)}%</td>
-          <td>${Number(e.retail_forecast).toFixed(1)}%</td>
+          <td>${Number(e.ppi_actual).toFixed(2)}%</td>
+          <td>${Number(e.ppi_forecast).toFixed(2)}%</td>
+          <td>${Number(e.retail_actual).toFixed(2)}%</td>
+          <td>${Number(e.retail_forecast).toFixed(2)}%</td>
           <td style="color:${e.z_score_composite > 0 ? '#ff4444' : (e.z_score_composite < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${Number(e.z_score_composite).toFixed(2)}σ</td>
           <td>$${Number(e.gold_open).toFixed(1)} → $${Number(e.gold_close).toFixed(1)}</td>
           <td style="color:${e.gold_return_pct >= 0 ? '#ffffff' : '#ff4444'}; font-weight:700;">${e.gold_return_pct > 0 ? '+' : ''}${Number(e.gold_return_pct).toFixed(2)}%</td>
@@ -1847,25 +2015,6 @@ async function fetchPpiData() {
   } catch (e) { console.warn("fetchPpiData error:", e); }
 }
 
-async function fetchCalendarData() {
-  try {
-    const res = await fetch("/api/high-impact-calendar");
-    const data = await res.json();
-    const tbody = document.getElementById("cal-tbody");
-    if (!tbody || !Array.isArray(data)) return;
-    tbody.innerHTML = data.map(ev => `
-      <tr>
-        <td><strong>${ev.date}</strong></td>
-        <td>${ev.time}</td>
-        <td><strong style="color:var(--amber-cmd);">${ev.title}</strong></td>
-        <td><span style="color:${ev.impact === 'MAXIMUM' ? '#ff4444' : '#ffffff'}; font-weight:800;">[ ${ev.impact} ]</span></td>
-        <td>${ev.forecast || '-'}</td>
-        <td style="color:#777;">${ev.previous || '-'}</td>
-        <td style="color:#fff;">${ev.effect_xauusd}</td>
-      </tr>
-    `).join("");
-  } catch (e) {}
-}
 
 async function fetchAcademicLit() {
   try {
