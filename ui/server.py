@@ -176,6 +176,9 @@ def get_confidence_ladder():
 @app.get("/api/paper-trade-backtest")
 def get_paper_trade_backtest(min_confidence: int = 95, starting_equity: float = 10000.0):
     return quant_model.run_paper_trade_backtest(starting_equity=starting_equity, min_confidence=min_confidence)
+@app.get("/api/us-economy-atlas")
+def get_us_economy_atlas(min_confidence: int = 95):
+    return quant_model.get_us_economy_atlas_analysis(min_confidence=min_confidence)
 
 
 class SimReq(BaseModel):

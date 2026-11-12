@@ -72,6 +72,7 @@
     <button class="nav-tab-btn" data-mod="mod-ai">[ 07: DEEPSEEK AI ]</button>
     <button class="nav-tab-btn" data-mod="mod-yoy">[ 08: YoY TIMELINE ]</button>
     <button class="nav-tab-btn" data-mod="mod-lit">[ 09: ACADEMIC LIT ]</button>
+    <button class="nav-tab-btn" data-mod="mod-us">[ 10: US MACRO &amp; DEBT ]</button>
   </nav>
 
   <!-- ==================== MODULE 01: CPI WORKSTATION ==================== -->
@@ -1224,6 +1225,88 @@
             <tbody id="lit-tbody">
               <!-- Dynamically populated -->
             </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ==================== MODULE 10: US MACRO, DEBT & PROBABILITY ATLAS ==================== -->
+  <main class="module-view" id="mod-us">
+    <div style="padding:14px; display:flex; flex-direction:column; gap:12px;">
+      <div class="cockpit-ribbon">
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+          <div class="slider-inline"><label>FRED SERIES:</label><span class="val" id="us-fred-count" style="color:var(--amber-cmd);">--</span></div>
+          <div class="slider-inline"><label>DOMINANT REGIME:</label><span class="val" id="us-dom-regime" style="color:#00e5ff;">--</span></div>
+          <div class="slider-inline"><label>PROBIT 6M STRESS PROB:</label><span class="val" id="us-probit-prob" style="color:var(--amber-cmd);">--</span></div>
+          <div class="slider-inline"><label>TAYLOR RULE GAP:</label><span class="val" id="us-taylor-gap">--</span></div>
+        </div>
+        <button class="bbg-btn" id="btn-refresh-us-atlas" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">REFRESH US MACRO &lt;GO&gt;</button>
+      </div>
+
+      <div class="bbg-workstation-grid">
+        <section class="bbg-pane">
+          <div class="bbg-pane-header">
+            <div class="bbg-pane-title"><span class="tag">01 // REGIME &lt;GO&gt;</span><span>4-REGIME COPULA PROBABILITY &amp; 4×4 MAHALANOBIS</span></div>
+          </div>
+          <div class="bbg-pane-body">
+            <table class="bbg-mini-table">
+              <tr><td class="label">P(GOLDILOCKS):</td><td class="val" id="us-p-goldilocks" style="color:#00e5ff; font-weight:800;">--</td></tr>
+              <tr><td class="label">P(REFLATION):</td><td class="val" id="us-p-reflation" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
+              <tr><td class="label">P(STAGFLATION):</td><td class="val" id="us-p-stagflation" style="color:#ff4444; font-weight:800;">--</td></tr>
+              <tr><td class="label">P(CRISIS / STRESS):</td><td class="val" id="us-p-crisis" style="color:#ff4444; font-weight:800;">--</td></tr>
+              <tr><td class="label">MAHALANOBIS DISTANCE (4×4):</td><td class="val" id="us-mahal-dist">--</td></tr>
+            </table>
+          </div>
+        </section>
+
+        <section class="bbg-pane">
+          <div class="bbg-pane-header">
+            <div class="bbg-pane-title"><span class="tag">02 // POLICY &lt;GO&gt;</span><span>32Y PROBIT STRESS &amp; TAYLOR ORDERED-LOGIT</span></div>
+          </div>
+          <div class="bbg-pane-body">
+            <table class="bbg-mini-table">
+              <tr><td class="label">6M MACRO STRESS PROB (PROBIT):</td><td class="val" id="us-probit-detail" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
+              <tr><td class="label">TAYLOR IMPLIED i* vs FED:</td><td class="val" id="us-taylor-rate">--</td></tr>
+              <tr><td class="label">POLICY RATE PROBS (T / H / E):</td><td class="val" id="us-policy-probs" style="color:#00e5ff; font-weight:800;">--</td></tr>
+              <tr><td class="label">CREDIT/NFCI 4W GOLD IMPULSE:</td><td class="val" id="us-credit-impulse">--</td></tr>
+            </table>
+          </div>
+        </section>
+
+        <section class="bbg-pane">
+          <div class="bbg-pane-header">
+            <div class="bbg-pane-title"><span class="tag">03 // BLS.BEA &lt;GO&gt;</span><span>LABOR (DOL/ETA), GROWTH (BEA) &amp; CORE PCE</span></div>
+          </div>
+          <div class="bbg-pane-body">
+            <table class="bbg-mini-table">
+              <tbody id="us-labor-growth-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="bbg-pane">
+          <div class="bbg-pane-header">
+            <div class="bbg-pane-title"><span class="tag">04 // DEBT.FED &lt;GO&gt;</span><span>DEBT, TREASURY CURVE, LIQUIDITY &amp; FINANCIAL COND</span></div>
+          </div>
+          <div class="bbg-pane-body">
+            <table class="bbg-mini-table">
+              <tbody id="us-debt-fin-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="bbg-pane">
+        <div class="bbg-pane-header">
+          <div class="bbg-pane-title"><span class="tag">05 // VERIFY &lt;GO&gt;</span><span>80%–99% U.S. ECONOMY PROBABILITY HYPOTHESIS AUDIT</span></div>
+        </div>
+        <div class="bbg-pane-body" style="padding:0; overflow-x:auto;">
+          <table class="bbg-audit-table">
+            <thead>
+              <tr><th>QUANTITATIVE MODEL</th><th>N</th><th>STATISTIC &amp; p-VAL</th><th>CONFIDENCE TIER</th><th>SELECTED GATE</th><th>LIVE PROBABILITY OUTPUT</th></tr>
+            </thead>
+            <tbody id="us-econ-audit-tbody"></tbody>
           </table>
         </div>
       </section>

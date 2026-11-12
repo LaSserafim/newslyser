@@ -42,6 +42,7 @@ async function init() {
   fetchPpiData();
   fetchCalendarData();
   fetchAcademicLit();
+  fetchUsEconomyAtlas();
   fetchAstarData();
   initAutoRefreshLoop();
 
@@ -133,7 +134,8 @@ function initModuleNavigation() {
     "mod-cal": "ECO.CAL <GO>",
     "mod-ai": "AI.MEMO <GO>",
     "mod-yoy": "TIMELN.YOY <GO>",
-    "mod-lit": "LIT.ACADEMIC <GO>"
+    "mod-lit": "LIT.ACADEMIC <GO>",
+    "mod-us": "ECO.US <GO>"
   };
 
   const navBtns = document.querySelectorAll(".nav-tab-btn");
@@ -161,6 +163,7 @@ function initModuleNavigation() {
       else if (modId === "mod-astar") fetchAstarData();
       else if (modId === "mod-cal") fetchCalendarData();
       else if (modId === "mod-yoy") renderYoyTimeline();
+      else if (modId === "mod-us") fetchUsEconomyAtlas();
       else if (modId === "mod-lit") fetchAcademicLit();
     });
   });
@@ -385,13 +388,14 @@ function initAllControls() {
   document.getElementById("conf-level-select")?.addEventListener("change", (e) => {
     window.SELECTED_CONFIDENCE = parseInt(e.target.value || "95", 10);
     ["cpi", "fomc", "nfp", "ppi"].forEach(ev => renderEventMcPane(ev));
+    fetchUsEconomyAtlas();
   });
   // Update All Economy & Statistics Data <GO>
   async function runFullDataUpdate(btnEl, defaultLabel) {
     if (btnEl) btnEl.innerText = "UPDATING ALL DATA...";
     try { await fetch("/api/update-all-data", { method: "POST" }); } catch (e) {}
     yoyTimelineCache = null;
-    await Promise.all([fetchPremarketSnapshot(false), fetchState(), fetchAuditLedger(), fetchFomcData(), fetchNfpData(), fetchPpiData(), fetchCalendarData(), fetchAstarData()]);
+    await Promise.all([fetchPremarketSnapshot(false), fetchState(), fetchAuditLedger(), fetchFomcData(), fetchNfpData(), fetchPpiData(), fetchCalendarData(), fetchAstarData(), fetchUsEconomyAtlas()]);
     const mod = getActiveModuleId();
     if (mod === "mod-cpi") renderWorkstation("cpi");
     else if (mod === "mod-fomc") renderWorkstation("fomc");
@@ -399,6 +403,7 @@ function initAllControls() {
     else if (mod === "mod-ppi") renderWorkstation("ppi");
     else if (mod === "mod-cal") fetchCalendarData();
     else if (mod === "mod-yoy") renderYoyTimeline();
+    else if (mod === "mod-us") fetchUsEconomyAtlas();
     if (btnEl) setTimeout(() => { btnEl.innerText = defaultLabel; }, 600);
   }
   document.getElementById("btn-update-all-data")?.addEventListener("click", (e) => {
@@ -2272,5 +2277,86 @@ async function fetchAcademicLit() {
     `).join("");
   } catch (e) {}
 }
+async function fetchUsEconomyAtlas() {
+  try {
+    const confLvl = window.SELECTED_CONFIDENCE || 95;
+    const res = await fetch(`/api/us-economy-atlas?min_confidence=${confLvl}`);
+    const data = await res.json();
+    if (!data || !data.domains) return;
+    const dom = data.domains;
+    const mod = data.models || {};
+    const reg = mod.macro_regimes_copula || {};
+    const prob = mod.probit_stress || {};
+    const tay = mod.taylor_policy || {};
+    const fl = mod.fiscal_liquidity_hc3 || {};
+    const probs = reg.regime_probabilities_pct || {};
+
+    if (document.getElementById("us-fred-count")) document.getElementById("us-fred-count").innerText = `${data.total_fred_series || 40} VERIFIED SERIES`;
+    if (document.getElementById("us-dom-regime")) document.getElementById("us-dom-regime").innerText = `${reg.dominant_regime || "GOLDILOCKS"} (${probs[reg.dominant_regime] || "--"}%)`;
+    if (document.getElementById("us-probit-prob")) document.getElementById("us-probit-prob").innerText = `${prob.stress_prob_6m_pct || 0}% (LR χ²=${prob.lr_chi2 || 0})`;
+    if (document.getElementById("us-taylor-gap")) document.getElementById("us-taylor-gap").innerText = `${tay.taylor_gap_pct >= 0 ? "+" : ""}${tay.taylor_gap_pct || 0}% (i*=${tay.taylor_implied_rate_pct || 4.0}%)`;
+
+    if (document.getElementById("us-p-goldilocks")) document.getElementById("us-p-goldilocks").innerText = `${probs.GOLDILOCKS ?? "--"}%`;
+    if (document.getElementById("us-p-reflation")) document.getElementById("us-p-reflation").innerText = `${probs.REFLATION ?? "--"}%`;
+    if (document.getElementById("us-p-stagflation")) document.getElementById("us-p-stagflation").innerText = `${probs.STAGFLATION ?? "--"}%`;
+    if (document.getElementById("us-p-crisis")) document.getElementById("us-p-crisis").innerText = `${probs.CRISIS_STRESS ?? "--"}%`;
+    if (document.getElementById("us-mahal-dist")) document.getElementById("us-mahal-dist").innerText = `${reg.mahalanobis_sigma || 0}σ (D²=${reg.mahalanobis_d2 || 0}, χ² p=${reg.chi2_anomaly_p_val || 1})`;
+
+    if (document.getElementById("us-probit-detail")) document.getElementById("us-probit-detail").innerText = `${prob.stress_prob_6m_pct || 0}% (McFadden R²=${prob.mcfadden_r2 || 0}, Brier=${prob.brier_score || 0})`;
+    if (document.getElementById("us-taylor-rate")) document.getElementById("us-taylor-rate").innerText = `i*=${tay.taylor_implied_rate_pct || 4.0}% vs Fed ${tay.fed_actual_rate_pct || 4.0}% (Gap ${tay.taylor_gap_pct >= 0 ? "+" : ""}${tay.taylor_gap_pct || 0}%)`;
+    if (document.getElementById("us-policy-probs")) document.getElementById("us-policy-probs").innerText = `Tighten ${tay.p_tightening_pct || 0}% | Hold ${tay.p_hold_pct || 0}% | Ease ${tay.p_easing_pct || 0}%`;
+    if (document.getElementById("us-credit-impulse")) document.getElementById("us-credit-impulse").innerText = `${fl.current_4w_gold_impulse_pct >= 0 ? "+" : ""}${fl.current_4w_gold_impulse_pct || 0}% (F=${fl.pruned_f_stat || 0}, p=${fl.pruned_f_p || 1})`;
+
+    const lab = dom.labor_dol || {}, grw = dom.growth_bea || {}, inf = dom.inflation_pce || {};
+    const lgEl = document.getElementById("us-labor-growth-tbody");
+    if (lgEl) {
+      const rows1 = [
+        ["UNEMPLOYMENT / SAHM DELTA:", `${lab.unemployment_rate_pct}% (+${lab.sahm_rule_delta_pp}pp vs 12M low)`],
+        ["NFP 3M AVG / WAGE YoY:", `${lab.nfp_3m_avg_k}K / +${lab.wage_ahe_yoy_pct}%`],
+        ["DOL CLAIMS (ICSA / CCSA):", `${lab.initial_claims_k}K / ${lab.continuing_claims_k}K`],
+        ["JOLTS / QUITS / HOURS:", `${lab.jolts_openings_k}K | ${lab.quits_rate_jtsqur_pct}% | ${lab.weekly_hours_awhaetp}h (Part ${lab.participation_civpart_pct}%)`],
+        ["REAL GDP (BEA) / INDPRO:", `$${grw.real_gdp_trillions}T (${grw.real_gdp_qoq_ann_pct >= 0 ? "+" : ""}${grw.real_gdp_qoq_ann_pct}% QoQ) | INDPRO ${grw.indpro_yoy_pct >= 0 ? "+" : ""}${grw.indpro_yoy_pct}% YoY`],
+        ["CORE PCE / CORE CPI / 10Y BE:", `${inf.core_pce_yoy_pct}% PCE | ${inf.core_cpi_est_yoy_pct}% CPI | ${inf.breakeven_10y_pct}% 10Y BE`]
+      ];
+      lgEl.innerHTML = rows1.map(([k, v]) => `<tr><td class="label">${k}</td><td class="val">${v}</td></tr>`).join("");
+    }
+
+    const dbt = dom.debt_fiscal || {}, tr = dom.treasury_liquidity || {}, fc = dom.financial_conditions_micro || {};
+    const dfEl = document.getElementById("us-debt-fin-tbody");
+    if (dfEl) {
+      const rows2 = [
+        ["PUBLIC DEBT / DEBT-TO-GDP:", `$${dbt.public_debt_trillions}T (${dbt.debt_to_gdp_pct}% GDP)`],
+        ["FEDERAL DEFICIT (OMB/TREAS):", `${dbt.federal_deficit_trillions}T (${dbt.deficit_to_gdp_pct}% GDP)`],
+        ["TREASURY CURVE (2Y/10Y/30Y):", `${tr.dgs2_pct}% / ${tr.dgs10_pct}% / ${tr.dgs30_pct}% (TIPS ${tr.tips_10y_real_pct}%)`],
+        ["CURVE SLOPES (10Y-2Y / 10Y-3M):", `${tr.curve_10y_2y_pct >= 0 ? "+" : ""}${tr.curve_10y_2y_pct}% / ${tr.curve_10y_3m_pct >= 0 ? "+" : ""}${tr.curve_10y_3m_pct}%`],
+        ["FED BALANCE SHEET / NET LIQ / M2:", `$${tr.fed_balance_sheet_t}T / Net $${tr.net_fed_liquidity_t}T | M2 $${tr.m2_money_supply_t}T (${tr.m2_yoy_pct >= 0 ? "+" : ""}${tr.m2_yoy_pct}% YoY)`],
+        ["NFCI / STLFSI4 / HY OAS:", `${fc.chicago_nfci} | ${fc.stl_stress_stlfsi4} | HY ${fc.high_yield_oas_pct}% (UMich ${fc.michigan_sentiment_umcsent}, Save ${fc.personal_saving_psavert_pct}%)`]
+      ];
+      dfEl.innerHTML = rows2.map(([k, v]) => `<tr><td class="label">${k}</td><td class="val">${v}</td></tr>`).join("");
+    }
+
+    const audEl = document.getElementById("us-econ-audit-tbody");
+    if (audEl) {
+      audEl.innerHTML = (data.hypothesis_tests || []).map(t => {
+        const tc = t.passes_selected ? "#00e5ff" : "#ff4444";
+        return `
+          <tr>
+            <td><strong>${t.model}</strong></td>
+            <td>${t.n}</td>
+            <td style="color:var(--amber-cmd);">${t.stat} (p=${t.p_val})</td>
+            <td><span style="color:${tc}; border:1px solid ${tc}; padding:1px 4px; font-size:8.5px; font-weight:800;">${t.tier}</span></td>
+            <td style="color:${tc}; font-weight:800;">${t.passes_selected ? `PASS @ ${confLvl}%` : `FAIL @ ${confLvl}%`}</td>
+            <td>${t.output}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+  } catch (e) { console.warn("fetchUsEconomyAtlas error:", e); }
+}
+document.getElementById("btn-refresh-us-atlas")?.addEventListener("click", (e) => {
+  const b = e.target;
+  b.innerText = "REFRESHING US DATA...";
+  fetch("/api/update-all-data", { method: "POST" }).then(() => fetchUsEconomyAtlas()).finally(() => { setTimeout(() => { b.innerText = "REFRESH US MACRO <GO>"; }, 600); });
+});
 
 document.addEventListener("DOMContentLoaded", init);

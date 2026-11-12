@@ -1,0 +1,149 @@
+{
+  "generated_at_utc": "2026-11-12 15:01:21 UTC",
+  "total_fred_series_ingested": 40,
+  "domains": {
+    "labor_dol": {
+      "title": "LABOR & U.S. DOL / BLS (CES + ETA + JOLTS)",
+      "unemployment_rate_pct": 4.1,
+      "sahm_rule_delta_pp": 0.0,
+      "nfp_3m_avg_k": 137.0,
+      "wage_ahe_yoy_pct": 3.12,
+      "initial_claims_k": 200.0,
+      "continuing_claims_k": 1697.0,
+      "jolts_openings_k": 7523.0,
+      "participation_civpart_pct": 61.9,
+      "weekly_hours_awhaetp": 34.4,
+      "quits_rate_jtsqur_pct": 2.1
+    },
+    "growth_bea": {
+      "title": "GROWTH & OUTPUT (BEA + FED + CENSUS)",
+      "real_gdp_trillions": 24.611,
+      "real_gdp_qoq_ann_pct": 3.4,
+      "indpro_index": 103.951,
+      "indpro_yoy_pct": 2.25,
+      "retail_sales_3m_avg_mom_pct": 0.55
+    },
+    "inflation_pce": {
+      "title": "INFLATION & EXPECTATIONS (BLS + BEA)",
+      "core_pce_yoy_pct": 3.12,
+      "core_cpi_est_yoy_pct": 2.77,
+      "supercore_cpi_yoy_pct": 3.51,
+      "shelter_cpi_yoy_pct": 3.61,
+      "ppi_3m_avg_mom_pct": 0.66,
+      "breakeven_10y_pct": 2.2
+    },
+    "debt_fiscal": {
+      "title": "SOVEREIGN DEBT & FISCAL POLICY (TREASURY + OMB)",
+      "public_debt_trillions": 39.462,
+      "debt_to_gdp_pct": 121.188,
+      "federal_deficit_trillions": -1.992,
+      "deficit_to_gdp_pct": -8.09
+    },
+    "treasury_liquidity": {
+      "title": "U.S. TREASURY CURVE, BOND & FED LIQUIDITY",
+      "fed_target_upper_pct": 4.0,
+      "effr_pct": 3.88,
+      "zq_futures_implied_pct": 4.165,
+      "dgs2_pct": 4.56,
+      "dgs10_pct": 4.88,
+      "dgs30_pct": 5.26,
+      "tips_10y_real_pct": 2.66,
+      "curve_10y_2y_pct": 0.25,
+      "curve_10y_3m_pct": 0.68,
+      "term_30y_2y_pct": 0.7,
+      "fed_balance_sheet_t": 6.748,
+      "reverse_repo_b": 0.152,
+      "net_fed_liquidity_t": 6.748,
+      "m2_money_supply_t": 23.414,
+      "m2_yoy_pct": 5.71
+    },
+    "financial_conditions_micro": {
+      "title": "FINANCIAL CONDITIONS, CREDIT & MICRO HOUSEHOLD",
+      "chicago_nfci": -0.462,
+      "stl_stress_stlfsi4": -0.522,
+      "high_yield_oas_pct": 3.3,
+      "michigan_sentiment_umcsent": 48.1,
+      "personal_saving_psavert_pct": 3.8,
+      "housing_starts_k": 1221.0
+    }
+  },
+  "models": {
+    "probit_stress": {
+      "n_weeks": 1689,
+      "base_rate_pct": 54.4,
+      "lr_chi2": 1069.6,
+      "p_val": 0.0,
+      "mcfadden_r2": 0.4594,
+      "brier_score": 0.1213,
+      "z_stats": {
+        "t10y3m": -2.97,
+        "nfci": 13.07,
+        "stlfsi4": 3.55,
+        "sahm": 9.02
+      },
+      "stress_prob_6m_pct": 41.83
+    },
+    "taylor_policy": {
+      "n_months": 668,
+      "taylor_implied_rate_pct": 4.08,
+      "fed_actual_rate_pct": 4.0,
+      "taylor_gap_pct": -0.08,
+      "p_tightening_pct": 50.2,
+      "p_hold_pct": 43.0,
+      "p_easing_pct": 6.8
+    },
+    "macro_regimes_copula": {
+      "n_months": 668,
+      "mahalanobis_d2": 1.6,
+      "mahalanobis_sigma": 1.26,
+      "chi2_anomaly_p_val": 0.8093,
+      "dominant_regime": "REFLATION",
+      "regime_probabilities_pct": {
+        "GOLDILOCKS": 32.1,
+        "REFLATION": 38.4,
+        "STAGFLATION": 28.9,
+        "CRISIS_STRESS": 0.5
+      }
+    },
+    "fiscal_liquidity_hc3": {
+      "n_weeks": 149,
+      "full_f_stat": 2.02,
+      "full_f_p": 0.094719,
+      "full_r2": 0.0532,
+      "pruned_f_stat": 2.96,
+      "pruned_f_p": 0.054937,
+      "pruned_r2": 0.039,
+      "factors": {
+        "d_liq": {
+          "beta_raw": -0.2312,
+          "beta_filtered": 0.0,
+          "t_stat": -0.79,
+          "p_val": 0.4333,
+          "significant_5pct": false
+        },
+        "d_hy": {
+          "beta_raw": 3.625,
+          "beta_filtered": 3.625,
+          "t_stat": 2.09,
+          "p_val": 0.0385,
+          "significant_5pct": true
+        },
+        "d_nfci": {
+          "beta_raw": -49.923,
+          "beta_filtered": -49.923,
+          "t_stat": -2.03,
+          "p_val": 0.0445,
+          "significant_5pct": true
+        },
+        "d_tips": {
+          "beta_raw": -3.0788,
+          "beta_filtered": 0.0,
+          "t_stat": -1.18,
+          "p_val": 0.2388,
+          "significant_5pct": false
+        }
+      },
+      "current_4w_gold_impulse_pct": -1.33
+    }
+  }
+}
