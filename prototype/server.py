@@ -159,6 +159,10 @@ def get_transmission_curves(event_type: str = "cpi"):
 def get_hypothesis_diagnostics(event_type: str = "cpi"):
     return quant_model.get_event_hypothesis_diagnostics(event_type=event_type)
 
+@app.get("/api/hypothesis-audit-all")
+def get_hypothesis_audit_all():
+    return quant_model.get_all_methods_hypothesis_audit()
+
 class SimReq(BaseModel):
     actual_mom: float
     actual_core_yoy: float

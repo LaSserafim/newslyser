@@ -640,9 +640,31 @@ def build_all_datasets():
     ppi_3m_avg = round(float(ppi_mom.dropna().iloc[-3:].mean()), 2)
     retail_3m_avg = round(float(retail_mom.dropna().iloc[-3:].mean()), 2)
 
+    # Compute 2Y+ Daily Cross-Asset White HC3 OLS (GC=F ~ DX-Y.NYB + ZT=F + CL=F) directly from mkt
+    import quant_model as _qm
+    ca_df = mkt["Close"][["GC=F", "DX-Y.NYB", "ZT=F", "CL=F"]].dropna().iloc[-505:]
+    ca_rets = np.log(ca_df / ca_df.shift(1)).dropna() * 100.0
+    ca_ols = _qm.run_regression_ols(ca_rets[["DX-Y.NYB", "ZT=F", "CL=F"]].values, ca_rets["GC=F"].values)
+    ca_n = len(ca_rets)
+    ca_f_p = _qm._f_pvalue(ca_ols["f_stat"], 3, max(1, ca_n - 4))
+    daily_ca_block = {
+        "n": ca_n, "f_stat": ca_ols["f_stat"], "f_p_val": ca_f_p, "r2": ca_ols["r2"],
+        "beta_dxy_raw": ca_ols["beta"][1], "t_dxy": ca_ols["t_stats"][1], "p_dxy": ca_ols["p_values"][1],
+        "beta_zt_raw": ca_ols["beta"][2], "t_zt": ca_ols["t_stats"][2], "p_zt": ca_ols["p_values"][2],
+        "beta_cl_raw": ca_ols["beta"][3], "t_cl": ca_ols["t_stats"][3], "p_cl": ca_ols["p_values"][3],
+        "filtered_betas": {
+            "dxy": round(float(ca_ols["beta"][1]) if ca_ols["p_values"][1] < 0.05 else 0.0, 4),
+            "zt":  round(float(ca_ols["beta"][2]) if ca_ols["p_values"][2] < 0.05 else 0.0, 4),
+            "cl":  round(float(ca_ols["beta"][3]) if ca_ols["p_values"][3] < 0.05 else 0.0, 4),
+        },
+        "dxy_daily_sd_pct": round(float(np.std(ca_rets["DX-Y.NYB"].values, ddof=1)), 4),
+        "gold_daily_sd_pct": round(float(np.std(ca_rets["GC=F"].values, ddof=1)), 4)
+    }
+
     premarket_snapshot = {
         "generated_at_utc": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "snapshot_policy": "FROZEN_MACRO_CONDITION (UPDATES ONLY ON STARTUP / SYNC LIVE / OFFICIAL RELEASE)",
+        "daily_cross_asset_ols": daily_ca_block,
         "global_macro": {
             "global_surprise_index_gsi": gsi,
             "g7_ex_us_cpi_avg_pct": g7_cpi_avg,

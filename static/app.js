@@ -1232,16 +1232,25 @@ async function renderEventDiagPane(ev) {
   if (document.getElementById(verdictId)) {
     const vEl = document.getElementById(verdictId);
     const tier = diag.confidence_99 ? "99%" : (diag.confidence_95 ? "95%" : (diag.confidence_90 ? "90%" : "NONE"));
-    const tagTxt = diag.slope_valid_5pct
-      ? `VALID (${tier} / REJECT H0)`
-      : (diag.multi_valid_5pct ? `UNI FAIL | X-ASSET F VALID (p=${diag.f_p_val})` : "NO EDGE / LUCK RISK");
-    vEl.innerText = `t=${diag.beta_z_t_stat.toFixed(2)} vs ±${diag.t_crit_95.toFixed(3)} (p=${diag.beta_z_p_val.toFixed(4)}) -> ${tagTxt}`;
-    vEl.style.color = diag.slope_valid_5pct ? "#ffffff" : (diag.multi_valid_5pct ? "var(--amber-cmd)" : "#ff4444");
+    if (diag.valid_at_5pct) {
+      vEl.innerText = `t=${diag.beta_z_t_stat.toFixed(2)} vs ±${diag.t_crit_95.toFixed(3)} (p=${diag.beta_z_p_val.toFixed(4)}) -> VALID ${tier} (DIRECT + 2SLS)`;
+      vEl.style.color = "#ffffff";
+    } else if (diag.stage1_valid_5pct && diag.stage2_valid_5pct) {
+      vEl.innerText = `2SLS X-ASSET VALID ${tier} (2Y p=${diag.stage1_2y_p} | F=${diag.stage2_cross_f}, p=${diag.stage2_cross_p})`;
+      vEl.style.color = "#00e5ff";
+    } else if (diag.stage1_valid_5pct) {
+      vEl.innerText = `STAGE-1 VALID ${tier} (DXY t=${diag.stage1_dxy_t}, 2Y t=${diag.stage1_2y_t}) | WAVE-2 ONLY`;
+      vEl.style.color = "var(--amber-cmd)";
+    } else {
+      vEl.innerText = `t=${diag.beta_z_t_stat.toFixed(2)} (p=${diag.beta_z_p_val.toFixed(4)}) -> NO EDGE / LUCK RISK`;
+      vEl.style.color = "#ff4444";
+    }
   }
   if (document.getElementById(luckId)) {
     const lEl = document.getElementById(luckId);
-    lEl.innerText = `${diag.binomial_wins}/${diag.binomial_trials} (${diag.binomial_accuracy_pct}%, p=${diag.binomial_p_val}) -> ${diag.beats_luck_5pct ? "NOT LUCK (α=5%)" : "COIN-FLIP / LUCK RISK"}`;
-    lEl.style.color = diag.beats_luck_5pct ? "#ffb000" : "#ff4444";
+    const vrNote = diag.vr5_p_val < 0.05 ? ` | VR(5)=${diag.vr5_mean}x (p=${diag.vr5_p_val})` : "";
+    lEl.innerText = `${diag.binomial_wins}/${diag.binomial_trials} (${diag.binomial_accuracy_pct}%, p=${diag.binomial_p_val}) -> ${diag.beats_luck_5pct ? "NOT LUCK (α=5%)" : "DIRECT COIN-FLIP"}${vrNote}`;
+    lEl.style.color = diag.beats_luck_5pct ? "#ffb000" : (diag.vr5_p_val < 0.05 ? "#00e5ff" : "#ff4444");
   }
   if (document.getElementById(hatId)) {
     document.getElementById(hatId).innerText = `h*=${diag.leverage_threshold} | OOS R²=${diag.oos_r2} | F=${diag.f_stat} (F_p=${diag.f_p_val}, ${diag.high_leverage_outlier_count} outliers)`;
