@@ -297,6 +297,10 @@
               <td class="val" id="val-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td>
             </tr>
             <tr>
+              <td class="label">CRR OPTIONS p^Q vs p^P:</td>
+              <td class="val" id="val-ticket-crr" style="color:var(--amber-cmd); font-weight:700;">--</td>
+            </tr>
+            <tr>
               <td class="label">TRADE DIRECTIVE:</td>
               <td class="val" id="val-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td>
             </tr>
@@ -503,6 +507,7 @@
             <table class="bbg-mini-table" style="margin-top:8px;">
               <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-fomc-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
               <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-fomc-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
+              <tr><td class="label">CRR OPTIONS p^Q vs p^P:</td><td class="val" id="val-fomc-ticket-crr" style="color:var(--amber-cmd); font-weight:700;">--</td></tr>
               <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-fomc-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
               <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-fomc-ticket-entry">--</td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-fomc-ticket-sl" style="color:#ff4444;">--</td></tr>
@@ -681,6 +686,7 @@
             <table class="bbg-mini-table" style="margin-top:8px;">
               <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-nfp-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
               <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-nfp-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
+              <tr><td class="label">CRR OPTIONS p^Q vs p^P:</td><td class="val" id="val-nfp-ticket-crr" style="color:var(--amber-cmd); font-weight:700;">--</td></tr>
               <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-nfp-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
               <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-nfp-ticket-entry">--</td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-nfp-ticket-sl" style="color:#ff4444;">--</td></tr>
@@ -854,6 +860,7 @@
             <table class="bbg-mini-table" style="margin-top:8px;">
               <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-ppi-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
               <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-ppi-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
+              <tr><td class="label">CRR OPTIONS p^Q vs p^P:</td><td class="val" id="val-ppi-ticket-crr" style="color:var(--amber-cmd); font-weight:700;">--</td></tr>
               <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-ppi-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
               <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-ppi-ticket-entry">--</td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-ppi-ticket-sl" style="color:#ff4444;">--</td></tr>
@@ -948,6 +955,8 @@
               <tr><td class="label">4. CROSS-ASSET MATRIX (25 pts):</td><td class="val" id="ast-p4">--</td></tr>
               <tr><td class="label">LO-MACKINLAY VR(5m) TEST:</td><td class="val" id="ast-vr5">--</td></tr>
               <tr><td class="label">KYLE'S LAMBDA (λ):</td><td class="val" id="ast-lambda">--</td></tr>
+              <tr><td class="label">HAR-RV VOL TARGETING:</td><td class="val" id="ast-har-vol" style="color:#00e5ff;">--</td></tr>
+              <tr><td class="label">GLD GEX / O-U / VPIN:</td><td class="val" id="ast-q8-live">--</td></tr>
             </table>
           </div>
         </section>
@@ -1008,6 +1017,21 @@
             </table>
           </div>
         </section>
+        <section class="bbg-pane" id="pane-ast-quant8" style="grid-column: span 2;">
+          <div class="bbg-pane-header">
+            <div class="bbg-pane-title"><span class="tag">07 // QUANT.8 &lt;GO&gt;</span><span>8-MODEL EMPIRICAL HYPOTHESIS MATRIX (VERIFIED EDGE vs LUCK)</span></div>
+            <div id="quant8-pass-badge" style="font-size:9px; color:var(--amber-cmd); font-weight:900;">AUDIT LOADING...</div>
+          </div>
+          <div class="bbg-pane-body" style="padding:0; overflow-x:auto;">
+            <table class="bbg-audit-table">
+              <thead>
+                <tr><th>PILLAR</th><th>METHOD</th><th>N</th><th>TEST STAT &amp; p-VAL</th><th>TIER</th><th>LIVE READING</th><th>HONEST SCOPE / LIMIT</th></tr>
+              </thead>
+              <tbody id="quant8-audit-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
 
       </div>
 

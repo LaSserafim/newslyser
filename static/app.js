@@ -651,6 +651,12 @@ function updateExecTicket(ev, directive, plan, avwapBands = null, preModel = nul
       dirEl.innerText = `GOLD UP: ${preModel.p_gold_up}% | DOWN: ${preModel.p_gold_down}% (${preModel.expected_return_pct >= 0 ? "+" : ""}${preModel.expected_return_pct}%)`;
       dirEl.style.color = preModel.p_gold_up >= 58 ? "#00e5ff" : (preModel.p_gold_down >= 58 ? "#ff4444" : "var(--amber-cmd)");
     }
+    const crrId = ev === "cpi" ? "val-ticket-crr" : `val-${ev}-ticket-crr`;
+    if (document.getElementById(crrId) && preModel.stage_b) {
+      const sb = preModel.stage_b;
+      const dp = Number(sb.prob_mispricing_pp || 0);
+      document.getElementById(crrId).innerText = `p^P ${preModel.p_gold_up}% vs GLD p^Q ${sb.crr_p_q_pct}% (${dp >= 0 ? "+" : ""}${dp.toFixed(1)}pp) | ±$${sb.straddle_implied_move_usd}`;
+    }
   }
 }
 
@@ -1457,6 +1463,13 @@ async function fetchAstarData() {
     if (document.getElementById("ast-p4") && pil.cross_asset_confirmation) document.getElementById("ast-p4").innerText = `${pil.cross_asset_confirmation.score}/25 (${pil.cross_asset_confirmation.status})`;
     if (document.getElementById("ast-vr5")) document.getElementById("ast-vr5").innerText = fp.footprint_verdict || `VR=${fp.lo_mackinlay_vr5}x (p=${fp.p_value})`;
     if (document.getElementById("ast-lambda")) document.getElementById("ast-lambda").innerText = `λ = ${fp.kyles_lambda}% | Amihud = ${fp.amihud_illiq} (n=${fp.n_bars})`;
+    const q8p = aStar.quant_8_pillars || {};
+    if (document.getElementById("ast-har-vol")) {
+      document.getElementById("ast-har-vol").innerText = `${q8p.vol_targeting_scalar || 1.0}x Cap $${q8p.target_risk_usd || 30.0} (Fcst ${q8p.har_rv_forecast_pct || 1.19}%/d | t5 VaR99 ${q8p.var99_student_t5_pct || -3.52}%)`;
+    }
+    if (document.getElementById("ast-q8-live")) {
+      document.getElementById("ast-q8-live").innerText = `GEX $${q8p.net_gex_usd_m || 0}M (Flip $${q8p.gamma_flip_xau || 0}) | O-U s=${q8p.ou_fair_value_s_score >= 0 ? "+" : ""}${q8p.ou_fair_value_s_score || 0}σ | VPIN=${q8p.vpin_now || 0.44}`;
+    }
     if (document.getElementById("val-ast-pwin")) document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (P_up: ${mcq.p_upward_pct}% / P_down: ${mcq.p_downward_pct}%)`;
     if (document.getElementById("val-ast-var")) document.getElementById("val-ast-var").innerText = `${mcq.var_95_pct}% (CVaR: ${mcq.cvar_95_pct}% | ${(mcq.n_paths || 10000).toLocaleString()} paths)`;
 
@@ -1511,6 +1524,7 @@ async function fetchAstarData() {
 
     renderEventMcPane("astar");
     fetchGlobalMacroMatrix();
+    fetchQuant8AuditTable();
     renderSetupLedgerTable();
   } catch (err) {
     console.warn("fetchAstarData error:", err);
@@ -1579,6 +1593,34 @@ async function fetchGlobalMacroMatrix() {
     }).join("");
   } catch (e) { console.warn("fetchGlobalMacroMatrix error:", e); }
 }
+async function fetchQuant8AuditTable() {
+  const tbody = document.getElementById("quant8-audit-tbody");
+  const badge = document.getElementById("quant8-pass-badge");
+  if (!tbody) return;
+  try {
+    const res = await fetch("/api/quant-models-audit");
+    const data = await res.json();
+    if (badge) {
+      badge.innerText = `${data.passed_models_count}/${data.total_models} VERIFIED (${data.generated_at_utc || "LIVE"})`;
+    }
+    tbody.innerHTML = (data.models || []).map(m => {
+      const isOk = m.tier && (m.tier.includes("99%") || m.tier.includes("95%") || m.tier.includes("CALIBRATED"));
+      const tc = m.tier.includes("99%") ? "#ffffff" : (m.tier.includes("95%") ? "var(--amber-cmd)" : (m.tier.includes("90%") ? "#ffb000" : "#ff4444"));
+      return `
+        <tr>
+          <td><strong>${m.pillar}</strong></td>
+          <td>${m.model_name}</td>
+          <td>${m.n}</td>
+          <td style="color:var(--amber-cmd);">${m.primary_stat} (p=${m.p_val})</td>
+          <td><span style="color:${tc}; border:1px solid ${tc}; padding:1px 4px; font-size:8.5px; font-weight:800;">${m.tier}</span></td>
+          <td style="color:${isOk ? '#00e5ff' : '#aaa'};">${m.live_reading}</td>
+          <td style="color:#aaa; font-size:9px;">${m.honest_limit}</td>
+        </tr>
+      `;
+    }).join("");
+  } catch (e) { console.warn("fetchQuant8AuditTable error:", e); }
+}
+
 
 function initAutoRefreshLoop() {
   setInterval(async () => {

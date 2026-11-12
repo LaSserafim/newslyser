@@ -162,6 +162,10 @@ def get_hypothesis_diagnostics(event_type: str = "cpi"):
 @app.get("/api/hypothesis-audit-all")
 def get_hypothesis_audit_all():
     return quant_model.get_all_methods_hypothesis_audit()
+@app.get("/api/quant-models-audit")
+def get_quant_models_audit():
+    return quant_model.get_eight_model_quant_audit()
+
 
 class SimReq(BaseModel):
     actual_mom: float
@@ -229,7 +233,8 @@ def get_premarket_snapshot():
             "fomc": quant_model.calculate_fomc_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
             "nfp": quant_model.calculate_nfp_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
             "ppi": quant_model.calculate_ppi_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
-        }
+        },
+        "quant_8": quant_model.get_eight_model_quant_audit()
     }
 
 @app.get("/api/live-ticks")

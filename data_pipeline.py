@@ -14,6 +14,7 @@ Zero fabricated numbers. Strictly <= today (no future historical records).
 import os
 import io
 import json
+import math
 import datetime
 import subprocess
 import urllib.request
@@ -210,6 +211,311 @@ def _safe_yoy_pct(series):
     """Computes YoY % strictly comparing t vs t-12 WITHOUT forward-filling missing shutdown months."""
     return ((series / series.shift(12)) - 1.0) * 100.0
 
+def _kupiec_p(breaches, total_n, alpha_tail=0.01):
+    if total_n <= 0:
+        return 0.0, 1.0
+    ph = max(1e-6, min(1.0 - 1e-6, breaches / float(total_n)))
+    lr = max(0.0, -2.0 * (breaches * math.log(alpha_tail / ph) + (total_n - breaches) * math.log((1.0 - alpha_tail) / (1.0 - ph))))
+    pval = 1.0 - math.erf(math.sqrt(lr / 2.0))
+    return round(float(lr), 2), round(float(max(0.0, min(1.0, pval))), 4)
+
+
+def _bs_delta_gamma(spot, strike, t_yr, r_rf, sigma, is_call=True):
+    sigma = max(1e-4, float(sigma))
+    rt = sigma * math.sqrt(max(1e-5, float(t_yr)))
+    d1 = (math.log(max(1e-6, spot) / max(1e-6, strike)) + (r_rf + 0.5 * sigma * sigma) * t_yr) / rt
+    nd1 = 0.5 * (1.0 + math.erf(d1 / math.sqrt(2.0)))
+    pdf1 = math.exp(-0.5 * d1 * d1) / math.sqrt(2.0 * math.pi)
+    delta = nd1 if is_call else (nd1 - 1.0)
+    gamma = pdf1 / max(1e-6, spot * rt)
+    return delta, gamma
+
+
+def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy):
+    """
+    Computes empirical calibration + formal hypothesis tests across ALL 8 Quantitative Pillars:
+    2: HAR-RV + GVZ Volatility Targeting (Corsi 2009 / Moreira & Muir 2017)
+    3 & 4 & 8(Opt): Live GLD Black-Scholes IV, VRP, CRR Binomial p^Q, Dealer Net GEX & 25d Skew
+    5: 6-Factor Macro Zoo (from daily_ca_block)
+    6: Avellaneda-Lee O-U Gold-DXY Macro Fair-Value Spread
+    7: Bell Curve Jarque-Bera + Dynamic HAR-RV Student-t(5) vs Gaussian 99% VaR Kupiec Backtest
+    8(Flow): 60D M5 GC=F Bulk-Volume VPIN, Kyle's Lambda & Signed OFI
+    """
+    out = {"generated_at_utc": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}
+    try:
+        gc_o = mkt["Open"]["GC=F"]
+        gc_h = mkt["High"]["GC=F"]
+        gc_l = mkt["Low"]["GC=F"]
+        gc_c = mkt["Close"]["GC=F"]
+        gc_df = pd.DataFrame({"Open": gc_o, "High": gc_h, "Low": gc_l, "Close": gc_c}).dropna()
+        rg = (np.log(gc_df["Close"] / gc_df["Close"].shift(1)) * 100.0).dropna()
+        gk_var = (
+            0.5 * (np.log(gc_df["High"] / gc_df["Low"]) ** 2)
+            - (2.0 * math.log(2.0) - 1.0) * (np.log(gc_df["Close"] / gc_df["Open"]) ** 2)
+        ).clip(lower=1e-10)
+        rv1 = (np.sqrt(gk_var) * 100.0).reindex(rg.index).dropna()
+        gvz_s = (mkt["Close"]["^GVZ"].dropna() / math.sqrt(252.0)) if ("Close" in mkt and "^GVZ" in mkt["Close"]) else pd.Series(dtype=float)
+
+        # --- Pillar 2: HAR-RV + ^GVZ Hybrid Volatility Targeting (3Y Walk-Forward OOS) ---
+        h_df = pd.DataFrame({
+            "rv_next": rv1.shift(-1),
+            "rv1": rv1,
+            "rv5": rv1.rolling(5).mean(),
+            "rv22": rv1.rolling(22).mean(),
+            "gvz": gvz_s.reindex(rv1.index).ffill(),
+            "ret_next": rg.shift(-1)
+        }).dropna()
+        if len(h_df) >= 150:
+            har_ols = qm.run_regression_ols(h_df[["rv1", "rv5", "rv22", "gvz"]].values, h_df["rv_next"].values)
+            har_fp = qm._f_pvalue(har_ols["f_stat"], 4, max(1, len(h_df) - 5))
+            r_raw, r_vt, rv_hat_list = [], [], []
+            for i in range(120, len(h_df)):
+                tr = h_df.iloc[:i]
+                Xtr = np.column_stack([np.ones(len(tr)), tr[["rv1", "rv5", "rv22", "gvz"]].values])
+                b_tr = np.linalg.pinv(Xtr.T @ Xtr) @ Xtr.T @ tr["rv_next"].values
+                x_cur = np.array([1.0, h_df.iloc[i]["rv1"], h_df.iloc[i]["rv5"], h_df.iloc[i]["rv22"], h_df.iloc[i]["gvz"]])
+                rh = max(0.25, float(x_cur @ b_tr))
+                tgt = float(tr["rv1"].median())
+                w = max(0.25, min(1.50, tgt / rh))
+                r_raw.append(float(h_df.iloc[i]["ret_next"]))
+                r_vt.append(w * float(h_df.iloc[i]["ret_next"]))
+                rv_hat_list.append(rh)
+            r_raw, r_vt, rv_hat_arr = np.array(r_raw), np.array(r_vt), np.array(rv_hat_list)
+            sr_raw = round(float(np.mean(r_raw) / max(1e-6, np.std(r_raw, ddof=1)) * math.sqrt(252.0)), 2)
+            sr_vt = round(float(np.mean(r_vt) / max(1e-6, np.std(r_vt, ddof=1)) * math.sqrt(252.0)), 2)
+            cvar_raw = round(float(np.mean(r_raw[r_raw <= np.percentile(r_raw, 5)])), 2)
+            cvar_vt = round(float(np.mean(r_vt[r_vt <= np.percentile(r_vt, 5)])), 2)
+            mm_reg = qm.run_regression_ols(r_raw, r_vt)
+            # Live today's HAR-RV + GVZ vol forecast and target scalar
+            cur_rv_hat = max(0.25, float(har_ols["beta"][0] + np.array([rv1.iloc[-1], rv1.iloc[-5:].mean(), rv1.iloc[-22:].mean(), float(gvz_s.iloc[-1]) if not gvz_s.empty else rv1.iloc[-1]]) @ np.array(har_ols["beta"][1:])))
+            cur_target = float(rv1.median())
+            cur_w = round(max(0.25, min(1.50, cur_target / cur_rv_hat)), 3)
+            out["har_rv_vol"] = {
+                "n": len(h_df), "oos_n": len(r_raw),
+                "f_stat": har_ols["f_stat"], "f_p_val": har_fp, "r2": har_ols["r2"],
+                "t_gvz": har_ols["t_stats"][4], "p_gvz": har_ols["p_values"][4],
+                "raw_sharpe": sr_raw, "vt_sharpe": sr_vt,
+                "raw_cvar95_pct": cvar_raw, "vt_cvar95_pct": cvar_vt,
+                "mm_alpha_t": mm_reg["t_stats"][0], "mm_alpha_p": mm_reg["p_values"][0],
+                "forecast_daily_vol_pct": round(cur_rv_hat, 3),
+                "target_daily_vol_pct": round(cur_target, 3),
+                "vol_target_scalar": cur_w,
+                "vol_scale_ratio": round(float(np.std(r_raw, ddof=1) / max(1e-4, np.mean(rv_hat_arr))), 3)
+            }
+
+            # --- Pillar 7: Bell Curve Rejection (Jarque-Bera) & Dynamic HAR-RV Student-t(5) 99% VaR Kupiec ---
+            rg_arr = rg.values
+            skew_g = round(float(pd.Series(rg_arr).skew()), 3)
+            ekurt_g = round(float(pd.Series(rg_arr).kurt()), 3)
+            jb_stat = round(float((len(rg_arr) / 6.0) * (skew_g ** 2 + (ekurt_g ** 2) / 4.0)), 1)
+            jb_p = float(math.exp(-jb_stat / 2.0))
+            # 60d Rolling Static Gaussian vs Dynamic HAR-RV Student-t(5)
+            sig_dyn = rv_hat_arr * float(np.std(r_raw, ddof=1) / max(1e-4, np.mean(rv_hat_arr)))
+            mu_roll = pd.Series(rg_arr).rolling(60).mean().shift(1).dropna()
+            sd_roll = pd.Series(rg_arr).rolling(60).std(ddof=1).shift(1).dropna()
+            rg_static_oos = rg_arr[mu_roll.index]
+            exc_static_g = int((rg_static_oos < (mu_roll.values - 2.32635 * sd_roll.values)).sum())
+            lr_sg, kp_sg = _kupiec_p(exc_static_g, len(rg_static_oos), 0.01)
+            exc_dyn_g = int((r_raw < (-2.32635 * sig_dyn)).sum())
+            lr_dg, kp_dg = _kupiec_p(exc_dyn_g, len(r_raw), 0.01)
+            exc_dyn_t5 = int((r_raw < (-2.6065 * sig_dyn)).sum())
+            lr_t5, kp_t5 = _kupiec_p(exc_dyn_t5, len(r_raw), 0.01)
+            out["fat_tail_var"] = {
+                "n_returns": len(rg_arr), "oos_n": len(r_raw),
+                "skewness": skew_g, "excess_kurtosis": ekurt_g,
+                "jarque_bera": jb_stat, "jb_p_val": jb_p,
+                "static_gauss_var99_breaches": exc_static_g, "static_gauss_n": len(rg_static_oos),
+                "static_gauss_pct": round(exc_static_g / max(1, len(rg_static_oos)) * 100.0, 2),
+                "static_gauss_kupiec_lr": lr_sg, "static_gauss_kupiec_p": kp_sg,
+                "dyn_gauss_var99_breaches": exc_dyn_g, "dyn_gauss_kupiec_p": kp_dg,
+                "dyn_t5_var99_breaches": exc_dyn_t5,
+                "dyn_t5_pct": round(exc_dyn_t5 / max(1, len(r_raw)) * 100.0, 2),
+                "dyn_t5_kupiec_lr": lr_t5, "dyn_t5_kupiec_p": kp_t5,
+                "var99_dynamic_today_pct": round(-2.6065 * cur_rv_hat * out["har_rv_vol"]["vol_scale_ratio"], 2)
+            }
+
+        # --- Pillar 4 (Hist): 3Y ^GVZ -> Next Realized Vol & VRP Crush ---
+        if not gvz_s.empty:
+            vrp_df = pd.DataFrame({
+                "iv": gvz_s, "rv": rv1, "rv_next": rv1.shift(-1),
+                "vrp_chg_5d": (gvz_s - rv1).shift(-5) - (gvz_s - rv1)
+            }).dropna()
+            vrp_df["vrp"] = vrp_df["iv"] - vrp_df["rv"]
+            if len(vrp_df) >= 60:
+                reg_iv_rv = qm.run_regression_ols(vrp_df["iv"].values, vrp_df["rv_next"].values)
+                reg_vrp_mr = qm.run_regression_ols(vrp_df["vrp"].values, vrp_df["vrp_chg_5d"].values)
+                out["gvz_vrp_history"] = {
+                    "n": len(vrp_df),
+                    "iv_to_rv_beta": reg_iv_rv["beta"][1], "iv_to_rv_t": reg_iv_rv["t_stats"][1],
+                    "iv_to_rv_p": reg_iv_rv["p_values"][1], "iv_to_rv_r2": reg_iv_rv["r2"],
+                    "vrp_crush_beta": reg_vrp_mr["beta"][1], "vrp_crush_t": reg_vrp_mr["t_stats"][1],
+                    "vrp_crush_p": reg_vrp_mr["p_values"][1], "vrp_crush_r2": reg_vrp_mr["r2"],
+                    "mean_vrp_daily_pct": round(float(vrp_df["vrp"].mean()), 3),
+                    "current_gvz_daily_pct": round(float(vrp_df["iv"].iloc[-1]), 3),
+                    "current_vrp_daily_pct": round(float(vrp_df["vrp"].iloc[-1]), 3)
+                }
+
+        # --- Pillar 6: Avellaneda-Lee O-U Macro Gold-DXY Cointegration Spread ---
+        pair = mkt["Close"][["GC=F", "DX-Y.NYB"]].dropna()
+        if len(pair) >= 120:
+            lgc = np.log(pair["GC=F"].values)
+            ldx = np.log(pair["DX-Y.NYB"].values)
+            sa_list, rf5_list, hdg5_list = [], [], []
+            last_phi, last_hl, last_s = 0.90, 6.5, 0.0
+            for i in range(60, len(pair) - 5):
+                w_gc, w_dx = lgc[i - 60:i + 1], ldx[i - 60:i + 1]
+                Xw = np.column_stack([np.ones(len(w_dx)), w_dx])
+                b = np.linalg.pinv(Xw.T @ Xw) @ Xw.T @ w_gc
+                res = w_gc - (b[0] + b[1] * w_dx)
+                rl, rc = res[:-1], res[1:]
+                Xo = np.column_stack([np.ones(len(rl)), rl])
+                bo = np.linalg.pinv(Xo.T @ Xo) @ Xo.T @ rc
+                phi_o = max(0.01, min(0.99, float(bo[1])))
+                sig_o = max(1e-6, float(np.std(rc - (bo[0] + phi_o * rl), ddof=1)) / math.sqrt(1.0 - phi_o * phi_o))
+                s_now = (res[-1] - bo[0] / (1.0 - phi_o)) / sig_o
+                sa_list.append(float(s_now))
+                rf5_list.append(float((lgc[i + 5] - lgc[i]) * 100.0))
+                hdg5_list.append(float(((lgc[i + 5] - (b[0] + b[1] * ldx[i + 5])) - res[-1]) * 100.0))
+            # Live latest window for today's s_score & half-life
+            w_gc_now, w_dx_now = lgc[-61:], ldx[-61:]
+            Xw_now = np.column_stack([np.ones(len(w_dx_now)), w_dx_now])
+            b_now = np.linalg.pinv(Xw_now.T @ Xw_now) @ Xw_now.T @ w_gc_now
+            res_now = w_gc_now - (b_now[0] + b_now[1] * w_dx_now)
+            rl_n, rc_n = res_now[:-1], res_now[1:]
+            Xo_n = np.column_stack([np.ones(len(rl_n)), rl_n])
+            bo_n = np.linalg.pinv(Xo_n.T @ Xo_n) @ Xo_n.T @ rc_n
+            last_phi = max(0.01, min(0.99, float(bo_n[1])))
+            last_hl = math.log(2.0) / max(1e-4, -math.log(last_phi))
+            sig_n = max(1e-6, float(np.std(rc_n - (bo_n[0] + last_phi * rl_n), ddof=1)) / math.sqrt(1.0 - last_phi * last_phi))
+            last_s = float((res_now[-1] - bo_n[0] / (1.0 - last_phi)) / sig_n)
+
+            sa, rf5, hdg5 = np.array(sa_list), np.array(rf5_list), np.array(hdg5_list)
+            ou_reg = qm.run_regression_ols(sa, rf5)
+            hdg_reg = qm.run_regression_ols(sa, hdg5)
+            m2 = np.abs(sa) >= 2.0
+            hits2 = ((sa[m2] > 0) & (rf5[m2] < 0)) | ((sa[m2] < 0) & (rf5[m2] > 0))
+            n2, k2 = int(m2.sum()), int(hits2.sum())
+            pb2 = qm._binom_two_sided_pval(k2, n2) if n2 > 0 else 1.0
+            out["ou_macro_spread"] = {
+                "n": len(sa), "beta_5d": ou_reg["beta"][1], "t_5d": ou_reg["t_stats"][1], "p_5d": ou_reg["p_values"][1],
+                "hedged_beta_5d": hdg_reg["beta"][1], "hedged_t_5d": hdg_reg["t_stats"][1], "hedged_p_5d": hdg_reg["p_values"][1],
+                "extreme_s2_hits": k2, "extreme_s2_trials": n2,
+                "extreme_s2_pct": round(k2 / max(1, n2) * 100.0, 1), "extreme_s2_binom_p": pb2,
+                "current_s_score": round(last_s, 2), "current_phi": round(last_phi, 4),
+                "half_life_days": round(last_hl, 1)
+            }
+    except Exception as e:
+        print(f"[QUANT8 DAILY WARN] {e}")
+
+    # --- Pillar 3, 4 & 8(Options): Live GLD Option Chain (BS IV, CRR p^Q, Net GEX, Walls, 25d Skew) ---
+    try:
+        gld = yf.Ticker("GLD")
+        gld_spot = float(gld.fast_info["lastPrice"])
+        exps = gld.options
+        if exps:
+            today_d = datetime.date.today()
+            chosen_exp = exps[1] if len(exps) > 1 and exps[0] == str(today_d) else exps[0]
+            dte = max(1, (datetime.date.fromisoformat(chosen_exp) - today_d).days)
+            T = dte / 365.0
+            r_rf = 0.045
+            ch = gld.option_chain(chosen_exp)
+            calls = ch.calls[ch.calls["openInterest"].fillna(0) > 0].copy()
+            puts = ch.puts[ch.puts["openInterest"].fillna(0) > 0].copy()
+            calls["mid"] = np.where((calls["bid"] > 0) & (calls["ask"] > 0), 0.5 * (calls["bid"] + calls["ask"]), calls["lastPrice"])
+            puts["mid"] = np.where((puts["bid"] > 0) & (puts["ask"] > 0), 0.5 * (puts["bid"] + puts["ask"]), puts["lastPrice"])
+            atm_k = float(calls.iloc[(calls["strike"] - gld_spot).abs().argsort()[:1]]["strike"].iloc[0])
+            c_atm = calls[calls["strike"] == atm_k].iloc[0]
+            p_atm = puts[puts["strike"] == atm_k].iloc[0] if len(puts[puts["strike"] == atm_k]) else puts.iloc[(puts["strike"] - atm_k).abs().argsort()[:1]].iloc[0]
+            iv_atm = float(0.5 * (c_atm["impliedVolatility"] + p_atm["impliedVolatility"]))
+            straddle_pct = round(float((c_atm["mid"] + p_atm["mid"]) * 0.80 / max(1e-6, gld_spot) * 100.0), 2)
+            ratio_gc_gld = spot_gc / max(1.0, gld_spot)
+            straddle_usd = round(spot_gc * (straddle_pct / 100.0), 2)
+            gex_map = {}
+            call_oi_by_k, put_oi_by_k = {}, {}
+            for _, row in calls.iterrows():
+                k = float(row["strike"]); iv = float(row["impliedVolatility"] or iv_atm); oi = float(row["openInterest"] or 0)
+                _, gm = _bs_delta_gamma(gld_spot, k, T, r_rf, iv, True)
+                gex_map[k] = gex_map.get(k, 0.0) + oi * gm * 100.0 * (gld_spot ** 2) * 0.01
+                call_oi_by_k[k] = oi
+            for _, row in puts.iterrows():
+                k = float(row["strike"]); iv = float(row["impliedVolatility"] or iv_atm); oi = float(row["openInterest"] or 0)
+                _, gm = _bs_delta_gamma(gld_spot, k, T, r_rf, iv, False)
+                gex_map[k] = gex_map.get(k, 0.0) - oi * gm * 100.0 * (gld_spot ** 2) * 0.01
+                put_oi_by_k[k] = oi
+            net_gex_m = round(sum(gex_map.values()) / 1e6, 2)
+            call_wall_gld = max(call_oi_by_k, key=call_oi_by_k.get) if call_oi_by_k else gld_spot
+            put_wall_gld = max(put_oi_by_k, key=put_oi_by_k.get) if put_oi_by_k else gld_spot
+            # Gamma flip strike nearest zero cumulative GEX sign change
+            near_ks = [k for k in gex_map.keys() if abs(k - gld_spot) / max(1.0, gld_spot) <= 0.15]
+            flip_gld = min(near_ks, key=lambda kk: abs(gex_map[kk])) if near_ks else gld_spot
+            u_crr = math.exp(iv_atm * math.sqrt(T / 50.0))
+            d_crr = 1.0 / u_crr
+            p_q = round((math.exp(r_rf * (T / 50.0)) - d_crr) / max(1e-9, u_crr - d_crr), 4)
+            calls["delta"] = [_bs_delta_gamma(gld_spot, float(rw["strike"]), T, r_rf, float(rw["impliedVolatility"] or iv_atm), True)[0] for _, rw in calls.iterrows()]
+            puts["delta"] = [_bs_delta_gamma(gld_spot, float(rw["strike"]), T, r_rf, float(rw["impliedVolatility"] or iv_atm), False)[0] for _, rw in puts.iterrows()]
+            iv_25c = float(calls.iloc[(calls["delta"] - 0.25).abs().argsort()[:1]]["impliedVolatility"].iloc[0])
+            iv_25p = float(puts.iloc[(puts["delta"] + 0.25).abs().argsort()[:1]]["impliedVolatility"].iloc[0])
+            out["gld_options"] = {
+                "gld_spot": round(gld_spot, 2), "xau_gld_ratio": round(ratio_gc_gld, 4),
+                "expiration": chosen_exp, "dte": dte,
+                "atm_iv_pct": round(iv_atm * 100.0, 2),
+                "daily_iv_pct": round((iv_atm * 100.0) / math.sqrt(252.0), 3),
+                "straddle_implied_move_pct": straddle_pct,
+                "straddle_implied_move_usd": straddle_usd,
+                "net_gex_usd_m": net_gex_m,
+                "gex_regime": "LONG_GAMMA_STABILIZER (+GEX)" if net_gex_m >= 0 else "SHORT_GAMMA_AMPLIFIER (-GEX)",
+                "gamma_flip_xau": round(flip_gld * ratio_gc_gld, 2),
+                "call_wall_xau": round(call_wall_gld * ratio_gc_gld, 2),
+                "put_wall_xau": round(put_wall_gld * ratio_gc_gld, 2),
+                "skew_25d_pct": round((iv_25p - iv_25c) * 100.0, 2),
+                "crr_binomial_p_q": p_q
+            }
+    except Exception as e:
+        print(f"[QUANT8 OPTIONS WARN] {e}")
+
+    # --- Pillar 8(Flow): 60D M5 GC=F Order Flow (VPIN, Kyle's Lambda, Signed OFI) ---
+    try:
+        m5 = yf.download("GC=F", period="60d", interval="5m", progress=False, auto_adjust=False)
+        if isinstance(m5.columns, pd.MultiIndex):
+            m5 = m5.xs("GC=F", axis=1, level=1)
+        m5 = m5[m5["Volume"] > 0].dropna()
+        if len(m5) >= 200:
+            rng5 = (m5["High"] - m5["Low"]).replace(0, np.nan)
+            r5 = (np.log(m5["Close"] / m5["Close"].shift(1)) * 100.0).fillna(0.0)
+            signed_vol = ((m5["Close"] - m5["Open"]) / rng5).fillna(0.0) * m5["Volume"]
+            v_buy = 0.5 * (1.0 + ((m5["Close"] - m5["Open"]) / rng5).fillna(0.0)) * m5["Volume"]
+            v_sell = m5["Volume"] - v_buy
+            vpin50 = ((v_buy - v_sell).abs().rolling(50).sum() / m5["Volume"].rolling(50).sum().replace(0, 1.0)).fillna(0.0)
+            kyle_lam = (r5.abs() / (m5["Volume"] / 1000.0).clip(lower=0.1)).rolling(12).mean()
+            ofi_1 = signed_vol / m5["Volume"].rolling(20).mean().replace(0, 1.0)
+            df5 = pd.DataFrame({
+                "ofi": ofi_1, "vpin": vpin50, "kyle": kyle_lam,
+                "r_next": r5.shift(-1),
+                "abs_r_next6": (np.log(m5["Close"].shift(-6) / m5["Close"]) * 100.0).abs()
+            }).dropna().iloc[60:]
+            reg_ofi = qm.run_regression_ols(df5["ofi"].values, df5["r_next"].values)
+            reg_vpin = qm.run_regression_ols(df5["vpin"].values, df5["abs_r_next6"].values)
+            reg_kyle = qm.run_regression_ols(df5["kyle"].values, df5["abs_r_next6"].values)
+            ofi_z = (signed_vol - signed_vol.rolling(60).mean()) / signed_vol.rolling(60).std(ddof=1).replace(0, np.nan)
+            r5_f1 = r5.shift(-1)
+            valid_ex = (ofi_z.abs() >= 2.0) & r5_f1.notna() & (r5_f1 != 0)
+            hits_ex = ((ofi_z[valid_ex] > 0) & (r5_f1[valid_ex] < 0)) | ((ofi_z[valid_ex] < 0) & (r5_f1[valid_ex] > 0))
+            nex, kex = int(valid_ex.sum()), int(hits_ex.sum())
+            pex = qm._binom_two_sided_pval(kex, nex) if nex > 0 else 1.0
+            cur_vpin = round(float(vpin50.iloc[-1]), 3)
+            out["microstructure_flow"] = {
+                "n_m5_bars": len(df5),
+                "vpin_now": cur_vpin,
+                "vpin_toxic_gate": cur_vpin >= 0.70,
+                "vpin_to_30m_vol_beta": reg_vpin["beta"][1], "vpin_to_30m_vol_t": reg_vpin["t_stats"][1], "vpin_to_30m_vol_p": reg_vpin["p_values"][1],
+                "kyle_to_30m_vol_beta": reg_kyle["beta"][1], "kyle_to_30m_vol_t": reg_kyle["t_stats"][1], "kyle_to_30m_vol_p": reg_kyle["p_values"][1],
+                "ofi_to_next5m_beta": reg_ofi["beta"][1], "ofi_to_next5m_t": reg_ofi["t_stats"][1], "ofi_to_next5m_p": reg_ofi["p_values"][1],
+                "ofi_extreme_fade_hits": kex, "ofi_extreme_fade_trials": nex,
+                "ofi_extreme_fade_pct": round(kex / max(1, nex) * 100.0, 1), "ofi_extreme_fade_binom_p": pex
+            }
+    except Exception as e:
+        print(f"[QUANT8 M5 FLOW WARN] {e}")
+    return out
 
 def build_all_datasets():
     today_str = _today_str()
@@ -231,7 +537,7 @@ def build_all_datasets():
     # Download Yahoo Finance daily market history strictly through today + 1 (since yfinance end is exclusive)
     end_dt = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"[YFINANCE] Downloading market history 2023-12-15 -> {end_dt}...")
-    tickers = ["GC=F", "DX-Y.NYB", "ZT=F", "ZQ=F", "^TNX", "CL=F", "HG=F", "^VIX"]
+    tickers = ["GC=F", "DX-Y.NYB", "ZT=F", "ZQ=F", "^TNX", "CL=F", "HG=F", "^VIX", "^GVZ", "TIP"]
     mkt = yf.download(tickers, start="2023-12-15", end=end_dt, interval="1d", progress=False, auto_adjust=False)
     dgs2_df = fred["DGS2"].dropna() if "DGS2" in fred else None
     tips_df = fred["DFII10"].dropna() if "DFII10" in fred else None
@@ -640,31 +946,53 @@ def build_all_datasets():
     ppi_3m_avg = round(float(ppi_mom.dropna().iloc[-3:].mean()), 2)
     retail_3m_avg = round(float(retail_mom.dropna().iloc[-3:].mean()), 2)
 
-    # Compute 2Y+ Daily Cross-Asset White HC3 OLS (GC=F ~ DX-Y.NYB + ZT=F + CL=F) directly from mkt
+    # Compute 2Y+ 6-Factor Macro Zoo White HC3 OLS (GC=F ~ DXY + TIP + ZT + CL + VIX + HG) directly from mkt
     import quant_model as _qm
-    ca_df = mkt["Close"][["GC=F", "DX-Y.NYB", "ZT=F", "CL=F"]].dropna().iloc[-505:]
+    zoo_cols = ["DX-Y.NYB", "TIP", "ZT=F", "CL=F", "^VIX", "HG=F"]
+    ca_df = mkt["Close"][["GC=F"] + zoo_cols].dropna().iloc[-505:]
     ca_rets = np.log(ca_df / ca_df.shift(1)).dropna() * 100.0
-    ca_ols = _qm.run_regression_ols(ca_rets[["DX-Y.NYB", "ZT=F", "CL=F"]].values, ca_rets["GC=F"].values)
+    ca_rets["^VIX"] = ca_df["^VIX"].diff().dropna()
+    ca_rets = ca_rets.dropna()
+    ca_ols = _qm.run_regression_ols(ca_rets[zoo_cols].values, ca_rets["GC=F"].values)
     ca_n = len(ca_rets)
-    ca_f_p = _qm._f_pvalue(ca_ols["f_stat"], 3, max(1, ca_n - 4))
+    ca_f_p = _qm._f_pvalue(ca_ols["f_stat"], len(zoo_cols), max(1, ca_n - len(zoo_cols) - 1))
+    short_map = {"DX-Y.NYB": "dxy", "TIP": "tip", "ZT=F": "zt", "CL=F": "cl", "^VIX": "vix", "HG=F": "hg"}
+    factor_details = {}
+    filtered_betas = {}
+    for idx_c, sym_c in enumerate(zoo_cols, start=1):
+        sk = short_map[sym_c]
+        pv = float(ca_ols["p_values"][idx_c])
+        tv = float(ca_ols["t_stats"][idx_c])
+        bv = float(ca_ols["beta"][idx_c])
+        sig5 = pv < 0.05
+        filtered_betas[sk] = round(bv if sig5 else 0.0, 4)
+        factor_details[sk] = {
+            "ticker": sym_c,
+            "beta_raw": round(bv, 4),
+            "beta_filtered": filtered_betas[sk],
+            "t_stat": round(tv, 2),
+            "p_val": round(pv, 4),
+            "significant_5pct": bool(sig5)
+        }
     daily_ca_block = {
         "n": ca_n, "f_stat": ca_ols["f_stat"], "f_p_val": ca_f_p, "r2": ca_ols["r2"],
         "beta_dxy_raw": ca_ols["beta"][1], "t_dxy": ca_ols["t_stats"][1], "p_dxy": ca_ols["p_values"][1],
-        "beta_zt_raw": ca_ols["beta"][2], "t_zt": ca_ols["t_stats"][2], "p_zt": ca_ols["p_values"][2],
-        "beta_cl_raw": ca_ols["beta"][3], "t_cl": ca_ols["t_stats"][3], "p_cl": ca_ols["p_values"][3],
-        "filtered_betas": {
-            "dxy": round(float(ca_ols["beta"][1]) if ca_ols["p_values"][1] < 0.05 else 0.0, 4),
-            "zt":  round(float(ca_ols["beta"][2]) if ca_ols["p_values"][2] < 0.05 else 0.0, 4),
-            "cl":  round(float(ca_ols["beta"][3]) if ca_ols["p_values"][3] < 0.05 else 0.0, 4),
-        },
+        "beta_zt_raw": ca_ols["beta"][3], "t_zt": ca_ols["t_stats"][3], "p_zt": ca_ols["p_values"][3],
+        "beta_cl_raw": ca_ols["beta"][4], "t_cl": ca_ols["t_stats"][4], "p_cl": ca_ols["p_values"][4],
+        "beta_hg_raw": ca_ols["beta"][6], "t_hg": ca_ols["t_stats"][6], "p_hg": ca_ols["p_values"][6],
+        "factor_zoo": factor_details,
+        "filtered_betas": filtered_betas,
         "dxy_daily_sd_pct": round(float(np.std(ca_rets["DX-Y.NYB"].values, ddof=1)), 4),
+        "hg_daily_sd_pct": round(float(np.std(ca_rets["HG=F"].values, ddof=1)), 4),
         "gold_daily_sd_pct": round(float(np.std(ca_rets["GC=F"].values, ddof=1)), 4)
     }
+    quant_8_snap = _build_quant_8_snapshot(mkt, _qm, daily_ca_block, float(ca_df["GC=F"].iloc[-1]), float(ca_df["DX-Y.NYB"].iloc[-1]))
 
     premarket_snapshot = {
         "generated_at_utc": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "snapshot_policy": "FROZEN_MACRO_CONDITION (UPDATES ONLY ON STARTUP / SYNC LIVE / OFFICIAL RELEASE)",
         "daily_cross_asset_ols": daily_ca_block,
+        "quant_8_snapshot": quant_8_snap,
         "global_macro": {
             "global_surprise_index_gsi": gsi,
             "g7_ex_us_cpi_avg_pct": g7_cpi_avg,

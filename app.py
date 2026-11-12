@@ -346,7 +346,8 @@ def get_premarket_snapshot():
             "fomc": quant_model.calculate_fomc_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
             "nfp": quant_model.calculate_nfp_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
             "ppi": quant_model.calculate_ppi_prenew_model(current_price=price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc),
-        }
+        },
+        "quant_8": quant_model.get_eight_model_quant_audit()
     }
 
 @app.get("/api/live-ticks")
@@ -684,6 +685,7 @@ AUTHENTIC EMPIRICAL TELEMETRY:
 - Confluence Score: {astar['confluence_score']}/100 ({astar['grade']})
 - Data Validation Gate: {gate.get('overall_status', '5/5 GATES VALIDATED')}
 - Cross-Asset Matrix: DXY at {dxy:.2f}, US 2Y Yield at {us2y:.2f}%, 10Y Yield at {us10y:.2f}%.
+- 8-Model Quant Lab: HAR-RV Vol Scalar {astar.get('quant_8_pillars', {}).get('vol_targeting_scalar', 1.0):.2f}x (Risk Cap ${astar.get('quant_8_pillars', {}).get('target_risk_usd', 30.0)}), GLD 1DTE IV {astar.get('quant_8_pillars', {}).get('gld_atm_iv_pct', 24.9)}% (+/-${astar.get('quant_8_pillars', {}).get('straddle_implied_move_usd', 46.2)}), Net GEX ${astar.get('quant_8_pillars', {}).get('net_gex_usd_m', -58.3)}M ({astar.get('quant_8_pillars', {}).get('gex_regime', '')}), O-U Gold-DXY s={astar.get('quant_8_pillars', {}).get('ou_fair_value_s_score', 0.0):+.2f}σ (HL={astar.get('quant_8_pillars', {}).get('ou_half_life_days', 3.5)}d), Dynamic Student-t5 VaR99 {astar.get('quant_8_pillars', {}).get('var99_student_t5_pct', -3.52)}%, M5 VPIN {astar.get('quant_8_pillars', {}).get('vpin_now', 0.44)}.
 - Structural Setup Rationale: {rat.get('bias_reason', '')}
 - Entry Logic: {rat.get('entry_reason', '')}
 - Invalidation Architecture: {rat.get('stop_loss_reason', '')}
@@ -714,6 +716,7 @@ AUTHENTIC EMPIRICAL CONTEXT:
 - Geopolitical Energy Factor: WTI Crude Oil live at ${wti_px:.2f} ({tomorrow.get('wti_oil_oct_change_pct', 0.0):+.2f}% 22D change).
 - Bayesian Probability Decomposition: Hawkish Beat {bayesian['p_hawkish_beat']}%, In-Line {bayesian['p_inline']}%, Dovish Miss {bayesian['p_dovish_miss']}%.
 - Pre-Release Bayesian Expected Value on Gold: {bayesian['expected_return_pct']}% ({bayesian['asymmetry_label']}).
+- Options & Binomial Divergence: Stage-B P(Gold Up)={bayesian['p_gold_up']}% vs CRR Binomial GLD p^Q={bayesian.get('stage_b', {}).get('crr_p_q_pct', 50.0)}% (Mispricing={bayesian.get('stage_b', {}).get('prob_mispricing_pp', 0.0):+.1f}pp), GLD Straddle Move +/-${bayesian.get('stage_b', {}).get('straddle_implied_move_usd', 46.2)}, Net GEX=${bayesian.get('stage_b', {}).get('net_gex_usd_m', 0.0)}M.
 - Dynamic Trade Directive: {bayesian['directive_title']} ({bayesian['directive_desc']}).
 - Live Baseline: Spot Gold ${prices.get('GC=F', 4000.0):.2f}, DXY {prices.get('DX-Y.NYB', 102.5):.2f}, US 2Y {prices.get('ZT=F', 4.75):.2f}%, US 10Y {prices.get('^TNX', 4.99):.2f}%.
 STRICT INSTRUCTIONS:
@@ -857,6 +860,7 @@ def get_state():
         "ppi_prenew": ppi_pre,
         "dynamic_levels": dyn,
         "daily_a_star": astar,
+        "quant_8": quant_model.get_eight_model_quant_audit(),
         "historical_count": len(hist)
     }
 
@@ -875,6 +879,10 @@ def get_hypothesis_diagnostics(event_type: str = "cpi"):
 @app.get("/api/hypothesis-audit-all")
 def get_hypothesis_audit_all():
     return quant_model.get_all_methods_hypothesis_audit()
+@app.get("/api/quant-models-audit")
+def get_quant_models_audit():
+    return quant_model.get_eight_model_quant_audit()
+
 
 class SimReq(BaseModel):
     actual_mom: float
