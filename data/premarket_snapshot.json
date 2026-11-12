@@ -1,6 +1,28 @@
 {
-  "generated_at_utc": "2026-11-12 02:43:20 UTC",
+  "generated_at_utc": "2026-11-12 03:55:27 UTC",
   "snapshot_policy": "FROZEN_MACRO_CONDITION (UPDATES ONLY ON STARTUP / SYNC LIVE / OFFICIAL RELEASE)",
+  "daily_cross_asset_ols": {
+    "n": 504,
+    "f_stat": 26.37,
+    "f_p_val": 0.0,
+    "r2": 0.1366,
+    "beta_dxy_raw": -1.3825,
+    "t_dxy": -5.52,
+    "p_dxy": 0.0,
+    "beta_zt_raw": 0.0693,
+    "t_zt": 0.06,
+    "p_zt": 0.9501,
+    "beta_cl_raw": 0.0018,
+    "t_cl": 0.07,
+    "p_cl": 0.9461,
+    "filtered_betas": {
+      "dxy": -1.3825,
+      "zt": 0.0,
+      "cl": 0.0
+    },
+    "dxy_daily_sd_pct": 0.4166,
+    "gold_daily_sd_pct": 1.5632
+  },
   "global_macro": {
     "global_surprise_index_gsi": 0.82,
     "g7_ex_us_cpi_avg_pct": 1.62,
@@ -8,16 +30,16 @@
     "us_minus_g7_rate_spread_pct": 1.53
   },
   "leading_indicators": {
-    "wti_last": 85.89,
-    "wti_22d_pct": -8.76,
+    "wti_last": 85.7,
+    "wti_22d_pct": -8.97,
     "vix_last": 17.49,
-    "copper_last": 6.269,
-    "copper_22d_pct": -6.12,
+    "copper_last": 6.24,
+    "copper_22d_pct": -6.55,
     "t10yie_last": 2.2,
     "t10yie_22d_chg": -0.13,
-    "zq_implied_rate_pct": 4.175,
+    "zq_implied_rate_pct": 4.17,
     "dfedtaru_pct": 4.0,
-    "zq_spread_bps": 17.5,
+    "zq_spread_bps": 17.0,
     "dgs2_last_pct": 4.56,
     "curve_2y_vs_ff_bps": 56.0,
     "icsa_last_k": 189.0,
@@ -44,7 +66,7 @@
       "date": "2026-12-09",
       "current_target": 4.0,
       "consensus_rate": 4.0,
-      "zq_implied": 4.175
+      "zq_implied": 4.17
     },
     "nfp": {
       "date": "2026-12-04",
