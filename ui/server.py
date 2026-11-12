@@ -173,6 +173,9 @@ def get_quant_models_audit():
 @app.get("/api/confidence-ladder")
 def get_confidence_ladder():
     return quant_model.get_eight_model_quant_audit().get("confidence_80_99_news", {})
+@app.get("/api/paper-trade-backtest")
+def get_paper_trade_backtest(min_confidence: int = 95, starting_equity: float = 10000.0):
+    return quant_model.run_paper_trade_backtest(starting_equity=starting_equity, min_confidence=min_confidence)
 
 
 class SimReq(BaseModel):
@@ -410,34 +413,38 @@ class DeepSeekReq(BaseModel):
     event_type: str = "cpi"
     actual_mom: float = 0.3
     actual_core_yoy: float = 2.8
+    min_confidence: int = 95
 
 @app.post("/api/deepseek-briefing")
 def deepseek_briefing(req: DeepSeekReq):
     api_key = get_deepseek_key()
+    _, tomorrow, _ = load_data()
+    prices = fetch_live_quotes()
+    prompt = quant_model.build_deepseek_prompt(
+        mode=req.mode,
+        event_type=req.event_type,
+        prices=prices,
+        tomorrow_meta=tomorrow,
+        min_confidence=req.min_confidence,
+        actual_mom=req.actual_mom,
+        actual_core_yoy=req.actual_core_yoy
+    )
     if not api_key:
-        return {
-            "status": "FALLBACK_OFFLINE",
-            "memo": f"""[ EXECUTIVE MACRO BRIEFING // {req.event_type.upper()} DUAL-KERNEL TELEMETRY ]
-- EVENT HORIZON: U.S. {req.event_type.upper()} MACROECONOMIC ANNOUNCEMENT
-- MODEL: TWO-STAGE LEAST SQUARES (2SLS) WITH WHITE (1980) HC3 COVARIANCE
-- REGIME VERDICT: PURIFIED COMPOSITE SHOCK AT +1.33σ (94.1TH PERCENTILE HISTORICAL EXTENSION)
-- CROSS-ASSET VECTOR: 2Y TREASURY EXPANSION (+4.5 bps/σ) EXERTS DOWNWARD IMPULSE ON GOLD ($XAUUSD)
-- MICROSTRUCTURE RULE: STRICT 60-SECOND WAVE 1 FIREWALL LOCKOUT. NO MARKET ORDERS. FADE SPIKES AT S2/R2 BOUNDARIES."""
-        }
+        return {"status": "FALLBACK_OFFLINE", "memo": prompt}
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-        _, tomorrow, _ = load_data()
-        prompt = f"""You are the Chief Quantitative Macroeconomist at a Tier-1 macro proprietary trading desk.
-Deliver an executive institutional execution memo for {req.event_type.upper()} ahead of release.
-Write in stark uppercase industrial format [ SECTION ] and hyphen bullets (- ). Every statement must be a quantitative fact or defined risk."""
         res = client.chat.completions.create(
             model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=600
+            messages=[
+                {"role": "system", "content": "You are an elite quantitative macro analyst. Strictly obey the MANDATORY QUANTITATIVE OVERRIDE and never invent trades when STAND ASIDE is mandated. Output clean plain text without asterisks."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=950
         )
-        return {"status": "SUCCESS", "memo": res.choices[0].message.content}
+        clean_text = res.choices[0].message.content.replace("**", "").replace("*", "").replace("### ", "").replace("## ", "").replace("# ", "")
+        return {"status": "success", "memo": clean_text, "briefing": clean_text}
     except Exception as e:
         return {"status": "FALLBACK_OFFLINE", "memo": f"DeepSeek API error: {str(e)}"}
 

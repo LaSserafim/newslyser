@@ -1646,6 +1646,18 @@ async function fetchQuant8AuditTable() {
         return `<span style="margin-right:16px;"><strong style="color:var(--amber-cmd);">${k.toUpperCase()}</strong>: Direct=<strong style="color:${d80 >= 95 ? '#00e5ff' : (d80 >= 80 ? '#ffb000' : '#ff4444')}">${d80}%</strong> | 2SLS=<strong style="color:${w80 >= 95 ? '#00e5ff' : (w80 >= 80 ? '#ffb000' : '#ff4444')}">${w80}%</strong> | VR5=<strong style="color:#ffffff;">${vr}%</strong></span>`;
       }).join("");
       strip.innerHTML = `<strong style="color:#ffffff; margin-right:10px;">[ 80%–99% ZERO-LUCK PASS CEILING ]</strong>${items}`;
+      const jc = data.jobless_claims_audit;
+      const pt = data.paper_trade_summary;
+      const extra = [];
+      if (jc && jc.n) {
+        extra.push(`<strong style="color:#ff4444;">JOBLESS CLAIMS (n=${jc.n})</strong>: Gold t=${jc.gold_t} (p=${jc.gold_p}), Hit=${jc.hit_pct}% -> <strong style="color:#ff4444;">REJECTED STANDALONE</strong>`);
+      }
+      if (pt && pt.gated_trades) {
+        extra.push(`<strong style="color:#00e5ff;">WALK-FORWARD PAPER TRADE (95%)</strong>: Naive=${pt.naive_win_pct}% (${pt.naive_ret_pct >= 0 ? "+" : ""}${pt.naive_ret_pct}%, PF ${pt.naive_pf}) vs Gated=<strong style="color:#ffffff;">${pt.gated_win_pct}% (${pt.gated_ret_pct >= 0 ? "+" : ""}${pt.gated_ret_pct}%, PF ${pt.gated_pf}, p=${pt.gated_binom_p})</strong>`);
+      }
+      if (extra.length) {
+        strip.innerHTML += `<div style="margin-top:5px; border-top:1px dashed #222; padding-top:4px;">${extra.join(" &nbsp;|&nbsp; ")}</div>`;
+      }
     }
   } catch (e) { console.warn("fetchQuant8AuditTable error:", e); }
 }
@@ -1701,12 +1713,22 @@ function initDeepSeekControls() {
       const res = await fetch("/api/deepseek-briefing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: currentAiMode,
-          event_type: eventSel.value,
-          actual_mom: parseFloat(document.getElementById("bbg-range-headline")?.value || 0.4),
-          actual_core_yoy: parseFloat(document.getElementById("bbg-range-core")?.value || 3.4)
-        })
+        body: JSON.stringify((() => {
+          const ev = eventSel.value;
+          let a1 = parseFloat(document.getElementById("bbg-range-headline")?.value || 0.3);
+          let a2 = parseFloat(document.getElementById("bbg-range-core")?.value || 2.9);
+          if (ev === "fomc") {
+            a1 = parseFloat(document.getElementById("fomc-range-rate")?.value || 4.0);
+            a2 = parseFloat(document.getElementById("fomc-range-dots")?.value || 0.0);
+          } else if (ev === "nfp") {
+            a1 = parseFloat(document.getElementById("nfp-range-act")?.value || 135);
+            a2 = parseFloat(document.getElementById("nfp-range-unemp")?.value || 4.1);
+          } else if (ev === "ppi_retail" || ev === "ppi") {
+            a1 = parseFloat(document.getElementById("ppi-range-act")?.value || 0.4);
+            a2 = parseFloat(document.getElementById("ppi-range-retail")?.value || 0.4);
+          }
+          return { mode: currentAiMode, event_type: ev, actual_mom: a1, actual_core_yoy: a2, min_confidence: window.SELECTED_CONFIDENCE || 95 };
+        })())
       });
       const data = await res.json();
       if (outputEl) outputEl.innerText = data.memo || data.briefing || "No response received.";

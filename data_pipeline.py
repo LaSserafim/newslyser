@@ -232,7 +232,7 @@ def _bs_delta_gamma(spot, strike, t_yr, r_rf, sigma, is_call=True):
     return delta, gamma
 
 
-def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy):
+def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy, icsa_series=None):
     """
     Computes empirical calibration + formal hypothesis tests across ALL 8 Quantitative Pillars:
     2: HAR-RV + GVZ Volatility Targeting (Corsi 2009 / Moreira & Muir 2017)
@@ -448,8 +448,8 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy):
             T = dte / 365.0
             r_rf = 0.045
             ch = gld.option_chain(chosen_exp)
-            calls = ch.calls[ch.calls["openInterest"].fillna(0) > 0].copy()
-            puts = ch.puts[ch.puts["openInterest"].fillna(0) > 0].copy()
+            calls = ch.calls[(ch.calls["openInterest"].fillna(0) > 0) & (ch.calls["impliedVolatility"] > 0.05) & (ch.calls["impliedVolatility"] < 1.20)].copy()
+            puts = ch.puts[(ch.puts["openInterest"].fillna(0) > 0) & (ch.puts["impliedVolatility"] > 0.05) & (ch.puts["impliedVolatility"] < 1.20)].copy()
             calls["mid"] = np.where((calls["bid"] > 0) & (calls["ask"] > 0), 0.5 * (calls["bid"] + calls["ask"]), calls["lastPrice"])
             puts["mid"] = np.where((puts["bid"] > 0) & (puts["ask"] > 0), 0.5 * (puts["bid"] + puts["ask"]), puts["lastPrice"])
             atm_k = float(calls.iloc[(calls["strike"] - gld_spot).abs().argsort()[:1]]["strike"].iloc[0])
@@ -489,8 +489,10 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy):
             p_q = round((math.exp(r_rf * (T / 50.0)) - d_crr) / max(1e-9, u_crr - d_crr), 4)
             calls["delta"] = [_bs_delta_gamma(gld_spot, float(rw["strike"]), T, r_rf, float(rw["impliedVolatility"] or iv_atm), True)[0] for _, rw in calls.iterrows()]
             puts["delta"] = [_bs_delta_gamma(gld_spot, float(rw["strike"]), T, r_rf, float(rw["impliedVolatility"] or iv_atm), False)[0] for _, rw in puts.iterrows()]
-            iv_25c = float(calls.iloc[(calls["delta"] - 0.25).abs().argsort()[:1]]["impliedVolatility"].iloc[0])
-            iv_25p = float(puts.iloc[(puts["delta"] + 0.25).abs().argsort()[:1]]["impliedVolatility"].iloc[0])
+            liq_c = calls[calls["bid"] > 0] if (calls["bid"] > 0).any() else calls
+            liq_p = puts[puts["bid"] > 0] if (puts["bid"] > 0).any() else puts
+            iv_25c = float(liq_c.iloc[(liq_c["delta"] - 0.25).abs().argsort()[:1]]["impliedVolatility"].iloc[0])
+            iv_25p = float(liq_p.iloc[(liq_p["delta"] + 0.25).abs().argsort()[:1]]["impliedVolatility"].iloc[0])
             out["gld_options"] = {
                 "gld_spot": round(gld_spot, 2), "xau_gld_ratio": round(ratio_gc_gld, 4),
                 "expiration": chosen_exp, "dte": dte,
@@ -551,6 +553,36 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy):
             }
     except Exception as e:
         print(f"[QUANT8 M5 FLOW WARN] {e}")
+    # --- Weekly Thursday Initial Jobless Claims (ICSA) Standalone Hypothesis Test ---
+    if icsa_series is not None and not icsa_series.empty:
+        try:
+            ic_k = icsa_series.dropna() / 1000.0
+            ic_fcst = ic_k.rolling(4).mean().shift(1)
+            ic_surp = (ic_k - ic_fcst).dropna()
+            gc_oc = (np.log(mkt["Close"]["GC=F"] / mkt["Open"]["GC=F"]) * 100.0).dropna()
+            dx_oc = (np.log(mkt["Close"]["DX-Y.NYB"] / mkt["Open"]["DX-Y.NYB"]) * 100.0).dropna()
+            c_rows = []
+            for dt_sat, sk_v in ic_surp.items():
+                r_dt = dt_sat + pd.Timedelta(days=5)
+                if r_dt in gc_oc.index and r_dt in dx_oc.index and dt_sat >= pd.Timestamp("2024-01-01"):
+                    c_rows.append((float(sk_v), float(gc_oc.loc[r_dt]), float(dx_oc.loc[r_dt])))
+            if len(c_rows) >= 20:
+                arr = np.array(c_rows)
+                rg_c = qm.run_regression_ols(arr[:, 0], arr[:, 1])
+                rd_c = qm.run_regression_ols(arr[:, 0], arr[:, 2])
+                nz_c = arr[np.abs(arr[:, 0]) >= 3.0]
+                wins_c = int(np.sum(((nz_c[:, 0] > 0) & (nz_c[:, 1] > 0)) | ((nz_c[:, 0] < 0) & (nz_c[:, 1] < 0))))
+                p_bin_c = qm._binom_two_sided_pval(wins_c, len(nz_c)) if len(nz_c) > 0 else 1.0
+                out["jobless_claims_audit"] = {
+                    "n": len(arr), "gold_t": rg_c["t_stats"][1], "gold_p": rg_c["p_values"][1],
+                    "dxy_t": rd_c["t_stats"][1], "dxy_p": rd_c["p_values"][1],
+                    "hits": wins_c, "trials": len(nz_c),
+                    "hit_pct": round(wins_c / max(1, len(nz_c)) * 100.0, 1),
+                    "binom_p": p_bin_c,
+                    "verdict": "REJECT_LUCK / NON-TRADABLE STANDALONE (USE ONLY AS NFP BAYESIAN PRIOR)"
+                }
+        except Exception as e:
+            print(f"[QUANT8 CLAIMS WARN] {e}")
     return out
 
 def build_all_datasets():
@@ -1039,7 +1071,7 @@ def build_all_datasets():
         "hg_daily_sd_pct": round(float(np.std(ca_rets["HG=F"].values, ddof=1)), 4),
         "gold_daily_sd_pct": round(float(np.std(ca_rets["GC=F"].values, ddof=1)), 4)
     }
-    quant_8_snap = _build_quant_8_snapshot(mkt, _qm, daily_ca_block, float(ca_df["GC=F"].iloc[-1]), float(ca_df["DX-Y.NYB"].iloc[-1]))
+    quant_8_snap = _build_quant_8_snapshot(mkt, _qm, daily_ca_block, float(ca_df["GC=F"].iloc[-1]), float(ca_df["DX-Y.NYB"].iloc[-1]), icsa_series=icsa_s)
 
     premarket_snapshot = {
         "generated_at_utc": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),

@@ -657,119 +657,37 @@ def simulate(req: SimRequest):
     return sim_result
 
 class DeepSeekRequest(BaseModel):
-    mode: str = "pre_news" # "pre_news" or "post_news"
-    event_type: str = "cpi" # "cpi", "fomc", "nfp", "ppi_retail", "daily_astar"
+    mode: str = "pre_news"
+    event_type: str = "cpi"
     actual_mom: float = 0.3
     actual_core_yoy: float = 2.8
-    market_context: str = "Gold trading at $4,069.40, DXY at 101.82, US 2Y yield at 4.46%, 10Y yield at 4.84%, 10Y TIPS real yield at 2.60%, WTI Crude at $104.12."
+    min_confidence: int = 95
+    market_context: str = ""
 
 @app.post("/api/deepseek-briefing")
 def deepseek_briefing(req: DeepSeekRequest):
     _, tomorrow, _ = load_data()
-    
-    if req.event_type == "daily_astar":
-        live = fetch_live_macro_data()
-        prices = live.get("prices", {})
-        gold = prices.get("GC=F", 4047.30)
-        dxy = prices.get("DX-Y.NYB", 102.24)
-        us10y = prices.get("^TNX", 5.00)
-        us2y = prices.get("ZT=F", 4.75)
-        astar = quant_model.calculate_daily_a_star_setup(current_price=gold, atr_m30=prices.get("ATR_M30", 10.50), dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
-        ticket = astar["trade_ticket"]
-        rat = astar.get("setup_rationale", {})
-        gate = astar.get("data_validation_gate", {})
-        
-        prompt = f"""You are the Chief Market Strategist and Head of Institutional Execution at a proprietary macro trading desk.
-Deliver an executive institutional execution memo for the DAILY A* GRADE GOLD (XAUUSD) SETUP.
-
-AUTHENTIC EMPIRICAL TELEMETRY:
-- Live Spot Price: ${gold:.2f} (TradingView FX_IDC:XAUUSD Stream)
-- Institutional Action: {ticket['action']}
-- Entry Zone: {ticket['entry_zone']}
-- Stop Loss: {ticket['stop_loss']} (Structural Invalidation)
-- Targets: TP1 {ticket['take_profit_1']} | TP2 {ticket['take_profit_2']} (RR {ticket['risk_reward_ratio']})
-- Confluence Score: {astar['confluence_score']}/100 ({astar['grade']})
-- Data Validation Gate: {gate.get('overall_status', '5/5 GATES VALIDATED')}
-- Cross-Asset Matrix: DXY at {dxy:.2f}, US 2Y Yield at {us2y:.2f}%, 10Y Yield at {us10y:.2f}%.
-- 8-Model Quant Lab: HAR-RV Vol Scalar {astar.get('quant_8_pillars', {}).get('vol_targeting_scalar', 1.0):.2f}x (Risk Cap ${astar.get('quant_8_pillars', {}).get('target_risk_usd', 30.0)}), GLD 1DTE IV {astar.get('quant_8_pillars', {}).get('gld_atm_iv_pct', 24.9)}% (+/-${astar.get('quant_8_pillars', {}).get('straddle_implied_move_usd', 46.2)}), Net GEX ${astar.get('quant_8_pillars', {}).get('net_gex_usd_m', -58.3)}M ({astar.get('quant_8_pillars', {}).get('gex_regime', '')}), O-U Gold-DXY s={astar.get('quant_8_pillars', {}).get('ou_fair_value_s_score', 0.0):+.2f}σ (HL={astar.get('quant_8_pillars', {}).get('ou_half_life_days', 3.5)}d), Dynamic Student-t5 VaR99 {astar.get('quant_8_pillars', {}).get('var99_student_t5_pct', -3.52)}%, M5 VPIN {astar.get('quant_8_pillars', {}).get('vpin_now', 0.44)}.
-- Structural Setup Rationale: {rat.get('bias_reason', '')}
-- Entry Logic: {rat.get('entry_reason', '')}
-- Invalidation Architecture: {rat.get('stop_loss_reason', '')}
-- Profit Target Distribution: {rat.get('target_reason', '')}
-
-STRICT INSTRUCTIONS:
-1. DO NOT USE ANY MARKDOWN ASTERISKS (** or *), NO HASHTAG HEADINGS (###), AND NO CONVERSATIONAL FILLER.
-2. Write in stark, uppercase industrial engineering format using brackets [ SECTION NAME ] and hyphen bullets (- ).
-3. Deliver:
-   [ 1. DATA INTEGRITY & TELEMETRY VALIDATION (5/5 GATES) ]
-   [ 2. 4-PILLAR CONFLUENCE DECOMPOSITION ({astar['confluence_score']}/100) ]
-   [ 3. MATHEMATICAL RATIONALE: WHY THIS ACTION & ENTRY ZONE ]
-   [ 4. INTRADAY RISK ARCHITECTURE (STOP LOSS & INVALIDATION BOUNDS) ]
-   [ 5. TIME-OF-DAY EXECUTION DIRECTIVE (SESSION 3-WAVE RULES) ]
-4. Every statement must be a quantitative fact, decision, or defined risk. No marketing."""
-    elif req.mode == "pre_news":
-        live = fetch_live_macro_data()
-        prices = live.get("prices", {})
-        wti_px = prices.get("CL=F", 86.20)
-        bayesian = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=prices.get("GC=F", 4000.0), atr_m30=prices.get("ATR_M30", 12.5))
-        prompt = f"""You are the Chief Quantitative Macroeconomist and Head of Fixed Income & Commodities Trading at a Tier-1 macro hedge fund.
-Deliver an executive PRE-NEWS predictive macro memo ahead of the upcoming U.S. macroeconomic release ({tomorrow.get('ref_month', 'Upcoming')} / {tomorrow.get('date', '')}).
-
-EVENT TYPE: {req.event_type.upper()}
-AUTHENTIC EMPIRICAL CONTEXT:
-- Consensus Forecast: Headline MoM {tomorrow['forecast_mom']}%, Core YoY {tomorrow['forecast_core_yoy']}%.
-- Cleveland Fed Inflation Nowcast: Headline {tomorrow.get('cleveland_fed_nowcast_mom', 0.31)}% MoM, Core {tomorrow.get('cleveland_fed_nowcast_core_mom', 0.25)}% MoM.
-- Geopolitical Energy Factor: WTI Crude Oil live at ${wti_px:.2f} ({tomorrow.get('wti_oil_oct_change_pct', 0.0):+.2f}% 22D change).
-- Bayesian Probability Decomposition: Hawkish Beat {bayesian['p_hawkish_beat']}%, In-Line {bayesian['p_inline']}%, Dovish Miss {bayesian['p_dovish_miss']}%.
-- Pre-Release Bayesian Expected Value on Gold: {bayesian['expected_return_pct']}% ({bayesian['asymmetry_label']}).
-- Options & Binomial Divergence: Stage-B P(Gold Up)={bayesian['p_gold_up']}% vs CRR Binomial GLD p^Q={bayesian.get('stage_b', {}).get('crr_p_q_pct', 50.0)}% (Mispricing={bayesian.get('stage_b', {}).get('prob_mispricing_pp', 0.0):+.1f}pp), GLD Straddle Move +/-${bayesian.get('stage_b', {}).get('straddle_implied_move_usd', 46.2)}, Net GEX=${bayesian.get('stage_b', {}).get('net_gex_usd_m', 0.0)}M.
-- BS Stochastic-Vol First-Passage Entry (from Current Price): Decision={bayesian.get('entry_analysis', {}).get('decision', 'STAND ASIDE')} ({bayesian.get('entry_analysis', {}).get('best_side', 'SELL')}), P(Profit)={bayesian.get('entry_analysis', {}).get('p_profit_pct', 50.0)}% vs P(Loss)={bayesian.get('entry_analysis', {}).get('p_loss_pct', 50.0)}%, EV={bayesian.get('entry_analysis', {}).get('expected_payoff_bps', 0.0):+.1f}bps, Vol RoC={bayesian.get('bs_stoch_vol', {}).get('vol_roc_pct', 0.0):+.2f}% ({bayesian.get('bs_stoch_vol', {}).get('iv_start_pct', 24.9)}% -> {bayesian.get('bs_stoch_vol', {}).get('iv_terminal_median_pct', 24.9)}%).
-- Dynamic Trade Directive: {bayesian['directive_title']} ({bayesian['directive_desc']}).
-- Live Baseline: Spot Gold ${prices.get('GC=F', 4000.0):.2f}, DXY {prices.get('DX-Y.NYB', 102.5):.2f}, US 2Y {prices.get('ZT=F', 4.75):.2f}%, US 10Y {prices.get('^TNX', 4.99):.2f}%.
-STRICT INSTRUCTIONS:
-1. DO NOT USE ANY MARKDOWN ASTERISKS (** or *), NO HASHTAG HEADINGS (###), AND NO CONVERSATIONAL FILLER.
-2. Write in stark, uppercase industrial engineering format using brackets [ SECTION NAME ] and hyphen bullets (- ).
-3. Deliver:
-   [ 1. LEADING MACRO & GEOPOLITICAL ENERGY VECTOR ]
-   [ 2. BAYESIAN PROBABILITY DECOMPOSITION ]
-   [ 3. ASYMMETRIC EXPECTED PAYOFF ON GOLD (XAUUSD) ]
-   [ 4. PRE-NEWS POSITIONING DIRECTIVE (ENTRY, STOP, TARGET, RR) ]
-   [ 5. DUAL-STRATEGY COMPARISON: PRE-NEWS EXECUTION VS WAITING FOR POST-NEWS CONFIRMATION ]
-4. Every statement must be a quantitative fact, decision, or defined risk. No marketing."""
-    else:
-        sim = quant_model.simulate_tomorrow_scenario(req.actual_mom, req.actual_core_yoy, tomorrow)
-        prompt = f"""You are the Chief Quantitative Macroeconomist and Head of Trading at an institutional proprietary trading desk.
-Analyze the official macroeconomic release numbers through empirical econometric principles and cross-asset transmission.
-
-EVENT TYPE: {req.event_type.upper()}
-SCENARIO DATA:
-- Actual Headline: {req.actual_mom:.2f}% (Forecast: {tomorrow['forecast_mom']:.2f}%)
-- Actual Core YoY: {req.actual_core_yoy:.2f}% (Forecast: {tomorrow['forecast_core_yoy']:.2f}%)
-- Model Composite Z-Score: {sim['surprises']['z_score_composite']:+.2f} sigma (95% MoE: +-0.52 sigma)
-- Model Regime: {sim['model_forecast']['regime']}
-- Model Signal: {sim['model_forecast']['signal']}
-- Expected Gold Move: {sim['model_forecast']['expected_gold_return_pct']:+.2f}%
-- Expected DXY Move: {sim['model_forecast']['expected_dxy_return_pct']:+.2f}%
-- Live Baseline: {req.market_context}
-
-STRICT INSTRUCTIONS:
-1. DO NOT USE ANY MARKDOWN ASTERISKS (** or *), NO HASHTAG HEADINGS (###), AND NO CONVERSATIONAL FILLER.
-2. Write in stark uppercase industrial format with brackets [ SECTION NAME ] and hyphen bullets (- ).
-3. Deliver:
-   [ 1. COMPONENT REALITY (SUB-INDEX DISSECTION) ]
-   [ 2. CROSS-ASSET TRANSMISSION (2Y YIELDS & 10Y TIPS) ]
-   [ 3. 3-WAVE EXECUTION PROTOCOL (WAVE 1 FIREWALL, WAVE 2 FADE, WAVE 3 DRIFT) ]
-   [ 4. TACTICAL VERDICT (BIAS, ENTRY, INVALIDATION) ]"""
-
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {})
+    prompt = quant_model.build_deepseek_prompt(
+        mode=req.mode,
+        event_type=req.event_type,
+        prices=prices,
+        tomorrow_meta=tomorrow,
+        min_confidence=req.min_confidence,
+        actual_mom=req.actual_mom,
+        actual_core_yoy=req.actual_core_yoy,
+        market_context=req.market_context
+    )
     try:
         client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "You are an elite quantitative macro analyst. Output clean, raw plain text without asterisks or markdown styling."},
+                {"role": "system", "content": "You are an elite quantitative macro analyst. Strictly obey the MANDATORY QUANTITATIVE OVERRIDE and never invent trades when STAND ASIDE is mandated. Output clean raw plain text without asterisks or markdown styling."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.2,
+            temperature=0.1,
             max_tokens=950
         )
         content = response.choices[0].message.content
@@ -892,6 +810,9 @@ def get_quant_models_audit():
 @app.get("/api/confidence-ladder")
 def get_confidence_ladder():
     return quant_model.get_eight_model_quant_audit().get("confidence_80_99_news", {})
+@app.get("/api/paper-trade-backtest")
+def get_paper_trade_backtest(min_confidence: int = 95, starting_equity: float = 10000.0):
+    return quant_model.run_paper_trade_backtest(starting_equity=starting_equity, min_confidence=min_confidence)
 
 
 class SimReq(BaseModel):
