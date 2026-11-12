@@ -50,8 +50,11 @@ body::before {
   opacity: 0.28;
 }
 
-/* 1. Bloomberg Top Command Bar */
+/* 1. Bloomberg Top Command Bar (Sticky so SYNC LIVE <GO> never scrolls out of sight) */
 .bloomberg-cmd-bar {
+  position: sticky;
+  top: 0;
+  z-index: 500;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -251,6 +254,15 @@ input[type="range"].bbg-slider::-moz-range-thumb {
   border-color: var(--fg-bright);
 }
 
+#btn-sync-live {
+  border-color: var(--amber-cmd);
+  color: var(--amber-cmd);
+}
+
+#btn-sync-live:hover {
+  background: var(--amber-cmd);
+  color: #000000;
+}
 /* 4. The 6-Pane Tiled Terminal Workstation Grid */
 .bbg-workstation-grid {
   display: grid;

@@ -50,11 +50,11 @@ def load_data():
     return hist, tomorrow, macro
 
 def fetch_live_quotes():
-    tickers = ["FX:XAUUSD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!"]
+    tickers = ["FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!"]
     cmd = [
         "curl", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
         "-H", "Content-Type: application/json",
-        "-d", json.dumps({"symbols": {"tickers": tickers}, "columns": ["close", "bid", "ask", "change"]})
+        "-d", json.dumps({"symbols": {"tickers": tickers}, "columns": ["close", "bid", "ask", "change", "high", "low", "open", "ATR|30"]})
     ]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True)
@@ -65,11 +65,18 @@ def fetch_live_quotes():
                 s = row.get("s", "")
                 d = row.get("d", [])
                 if len(d) >= 1 and d[0] is not None:
-                    if s == "FX:XAUUSD":
-                        mapping["GC=F"] = round(float(d[0]), 2)
-                        mapping["XAUUSD_SPOT"] = round(float(d[0]), 2)
-                        mapping["XAUUSD_BID"] = round(float(d[1]), 2) if len(d) > 1 and d[1] else round(float(d[0]) - 0.15, 2)
-                        mapping["XAUUSD_ASK"] = round(float(d[2]), 2) if len(d) > 2 and d[2] else round(float(d[0]) + 0.15, 2)
+                    if s == "FX_IDC:XAUUSD":
+                        mid = round((float(d[1]) + float(d[2])) / 2.0, 2) if (len(d) > 2 and d[1] and d[2]) else round(float(d[0]), 2)
+                        mapping["GC=F"] = mid
+                        mapping["XAUUSD_SPOT"] = mid
+                        mapping["XAUUSD_BID"] = round(float(d[1]), 2) if len(d) > 1 and d[1] else mid
+                        mapping["XAUUSD_ASK"] = round(float(d[2]), 2) if len(d) > 2 and d[2] else mid
+                        if len(d) > 5 and d[4] is not None and d[5] is not None:
+                            mapping["SESSION_HIGH"] = round(float(d[4]), 2)
+                            mapping["SESSION_LOW"] = round(float(d[5]), 2)
+                            mapping["SESSION_CLOSE"] = round(float(d[0]), 2)
+                        if len(d) > 7 and d[7] is not None and float(d[7]) > 0:
+                            mapping["ATR_M30"] = round(float(d[7]), 2)
                     elif s == "TVC:DXY":
                         mapping["DX-Y.NYB"] = round(float(d[0]), 3)
                     elif s == "TVC:US02Y":
@@ -78,11 +85,19 @@ def fetch_live_quotes():
                         mapping["^TNX"] = round(float(d[0]), 3)
                     elif s == "NYMEX:CL1!":
                         mapping["CL=F"] = round(float(d[0]), 2)
+            if "GC=F" not in mapping:
+                for row in data:
+                    s = row.get("s", "")
+                    d = row.get("d", [])
+                    if s in ["FX:XAUUSD", "OANDA:XAUUSD"] and len(d) >= 1 and d[0] is not None:
+                        mapping["GC=F"] = round(float(d[0]), 2)
+                        mapping["XAUUSD_SPOT"] = mapping["GC=F"]
+                        break
             if mapping:
                 return mapping
     except Exception:
         pass
-    return {"GC=F": 4047.30, "DX-Y.NYB": 102.28, "ZT=F": 4.75, "^TNX": 5.00, "CL=F": 86.64}
+    return {"GC=F": 3975.0, "DX-Y.NYB": 102.28, "ZT=F": 4.75, "^TNX": 5.00, "CL=F": 86.64}
 
 @app.get("/")
 def get_index():
@@ -92,19 +107,27 @@ def get_index():
 def get_state():
     hist, tomorrow, macro = load_data()
     prices = fetch_live_quotes()
-    gold_price = prices.get("GC=F", 4047.30)
+    gold_price = prices.get("GC=F", 3975.0)
+    atr_val = prices.get("ATR_M30", 10.50)
+    sh, sl, sc = prices.get("SESSION_HIGH"), prices.get("SESSION_LOW"), prices.get("SESSION_CLOSE")
     dxy = prices.get("DX-Y.NYB", 102.28)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
-    
-    dyn = quant_model.calculate_dynamic_levels(current_price=gold_price)
-    astar = quant_model.calculate_daily_a_star_setup(current_price=gold_price, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y)
-    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=gold_price)
-    
+
+    dyn = quant_model.calculate_dynamic_levels(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
+    astar = quant_model.calculate_daily_a_star_setup(current_price=gold_price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
+    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=gold_price, atr_m30=atr_val)
+    fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
+    nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
+    ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
+
     return {
         "prices": prices,
         "tomorrow": tomorrow,
         "pre_news_model": pre_news,
+        "fomc_prenew": fomc_pre,
+        "nfp_prenew": nfp_pre,
+        "ppi_prenew": ppi_pre,
         "dynamic_levels": dyn,
         "daily_a_star": astar,
         "historical_count": len(hist)
@@ -115,189 +138,23 @@ def get_pdf_distribution(event_type: str = "cpi"):
     return quant_model.calculate_probability_density_function(event_type=event_type)
 
 @app.get("/api/monte-carlo")
-def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None):
+def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None, event_type: str = "cpi", n_paths: int = 10000):
     if price is None:
         prices = fetch_live_quotes()
-        price = prices.get("GC=F", 4047.30)
-    return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, event_type="cpi")
+        price = prices.get("GC=F", 3975.0)
+    return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, n_paths=n_paths, event_type=event_type)
 
 @app.get("/api/shock-frequency")
-def get_shock_frequency(z: float = 0.0):
-    hist, _, _ = load_data()
-    z_vals = np.array([e["z_score_composite"] for e in hist if "z_score_composite" in e])
-    n = len(z_vals)
-    
-    mean_z = float(np.mean(z_vals))
-    std_z = float(np.std(z_vals, ddof=1))
-    med_z = float(np.median(z_vals))
-    q25, q75 = float(np.percentile(z_vals, 25)), float(np.percentile(z_vals, 75))
-    iqr = q75 - q25
-    
-    # Silverman's rule of thumb bandwidth
-    h = 0.9 * min(std_z, iqr / 1.34) * (n ** (-0.2)) if iqr > 0 else 0.35
-    
-    # 10 discrete histogram bins across [-3.0, +3.0]
-    bins = np.linspace(-3.0, 3.0, 11)
-    counts, edges = np.histogram(z_vals, bins=bins)
-    
-    hist_bars = []
-    for i in range(len(counts)):
-        low, high = float(edges[i]), float(edges[i+1])
-        matching_events = [e for e in hist if low <= e["z_score_composite"] < high or (i == len(counts)-1 and e["z_score_composite"] == high)]
-        hist_bars.append({
-            "bin_index": i,
-            "range": [round(low, 2), round(high, 2)],
-            "label": f"{low:+.1f}σ to {high:+.1f}σ",
-            "count": int(counts[i]),
-            "pct": round(float(counts[i]) / n * 100.0, 1),
-            "events": [{"date": e["date"], "ref": e["ref_month"], "z": e["z_score_composite"], "gold_ret": e["gold_return_pct"]} for e in matching_events]
-        })
-        
-    # Smooth continuous Gaussian Kernel Density Estimation (KDE) curve
-    x_grid = np.linspace(-3.2, 3.2, 80)
-    kde_curve = []
-    for x in x_grid:
-        density = (1.0 / (n * h * math.sqrt(2 * math.pi))) * np.sum(np.exp(-0.5 * ((x - z_vals) / h) ** 2))
-        kde_curve.append({
-            "x": round(float(x), 3),
-            "density": round(float(density), 4)
-        })
-        
-    # Current shock empirical ranking
-    pct_rank = round(float(np.mean(z_vals <= z) * 100.0), 1)
-    dist_from_median = round(z - med_z, 3)
-    dist_from_mean_sigma = round((z - mean_z) / max(0.01, std_z), 2)
-    
-    return {
-        "n": n,
-        "mean_z": round(mean_z, 3),
-        "std_z": round(std_z, 3),
-        "median_z": round(med_z, 3),
-        "q25": round(q25, 3),
-        "q75": round(q75, 3),
-        "iqr": round(iqr, 3),
-        "bandwidth_h": round(h, 4),
-        "current_z": z,
-        "empirical_percentile_rank": pct_rank,
-        "distance_from_median": dist_from_median,
-        "distance_from_mean_sigma": dist_from_mean_sigma,
-        "histogram_bars": hist_bars,
-        "kde_curve": kde_curve
-    }
+def get_shock_frequency(z: float = 0.0, event_type: str = "cpi"):
+    return quant_model.get_event_shock_frequency(event_type=event_type, z=z)
 
 @app.get("/api/transmission-curves")
-def get_transmission_curves():
-    hist, _, _ = load_data()
-    z_vals = np.array([e["z_score_composite"] for e in hist])
-    gold_rets = np.array([e["gold_return_pct"] for e in hist])
-    dxy_rets = np.array([e["dxy_return_pct"] for e in hist])
-    zt_rets = np.array([e["zt_return_pct"] for e in hist])
-    
-    m_gold = quant_model.run_regression_ols(z_vals, gold_rets)
-    m_dxy = quant_model.run_regression_ols(z_vals, dxy_rets)
-    m_zt = quant_model.run_regression_ols(z_vals, zt_rets)
-    
-    z_grid = np.linspace(-3.0, 3.0, 61)
-    curves = []
-    
-    for z in z_grid:
-        pred_gold = m_gold["beta"][0] + m_gold["beta"][1] * z
-        pred_dxy = m_dxy["beta"][0] + m_dxy["beta"][1] * z
-        pred_zt = m_zt["beta"][0] + m_zt["beta"][1] * z
-        
-        curves.append({
-            "z": round(float(z), 2),
-            "gold_return": round(float(pred_gold), 3),
-            "gold_upper_95": round(float(pred_gold + m_gold["pred_moe_95"]), 3),
-            "gold_lower_95": round(float(pred_gold - m_gold["pred_moe_95"]), 3),
-            "dxy_return": round(float(pred_dxy), 3),
-            "zt_return": round(float(pred_zt), 3)
-        })
-        
-    scatter_points = []
-    for e in hist:
-        scatter_points.append({
-            "date": e["date"],
-            "ref_month": e["ref_month"],
-            "z": e["z_score_composite"],
-            "gold_ret": e["gold_return_pct"],
-            "dxy_ret": e["dxy_return_pct"],
-            "zt_ret": e["zt_return_pct"]
-        })
-        
-    return {
-        "models": {
-            "gold": {"beta": m_gold["beta"], "moe_95": m_gold["moe_95"], "r2": m_gold["r2"], "p_value": m_gold["p_values"][1]},
-            "dxy": {"beta": m_dxy["beta"], "moe_95": m_dxy["moe_95"], "r2": m_dxy["r2"], "p_value": m_dxy["p_values"][1]},
-            "zt_note": {"beta": m_zt["beta"], "moe_95": m_zt["moe_95"], "r2": m_zt["r2"], "p_value": m_zt["p_values"][1]}
-        },
-        "response_curves": curves,
-        "scatter_points": scatter_points
-    }
+def get_transmission_curves(event_type: str = "cpi"):
+    return quant_model.get_event_transmission_curves(event_type=event_type)
 
 @app.get("/api/hypothesis-diagnostics")
-def get_hypothesis_diagnostics():
-    hist, _, _ = load_data()
-    y = np.array([e["gold_return_pct"] for e in hist])
-    X = np.column_stack([
-        [e["z_score_composite"] for e in hist],
-        [e["dxy_return_pct"] for e in hist],
-        [e["zt_return_pct"] for e in hist]
-    ])
-    
-    m = quant_model.run_regression_ols(X, y)
-    df = m["degrees_of_freedom"]
-    t_crit = quant_model._student_t_crit(df, alpha=0.05)
-    
-    # Student's t distribution curve across [-4.5, +4.5]
-    t_grid = np.linspace(-4.5, 4.5, 80)
-    c_norm = math.exp(math.lgamma((df + 1) / 2.0) - math.lgamma(df / 2.0)) / math.sqrt(math.pi * df)
-    t_curve = []
-    for t in t_grid:
-        pdf_val = c_norm * ((1.0 + (t ** 2) / df) ** (-(df + 1) / 2.0))
-        is_reject = bool(abs(t) >= t_crit)
-        t_curve.append({
-            "t": round(float(t), 3),
-            "pdf": round(float(pdf_val), 4),
-            "is_reject": is_reject
-        })
-        
-    # Hat Matrix Leverage & Studentized Residuals
-    X_design = np.column_stack([np.ones(len(y)), X])
-    n, k = X_design.shape
-    invXtX = np.linalg.pinv(X_design.T @ X_design)
-    H = X_design @ invXtX @ X_design.T
-    h_diag = np.clip(np.diag(H), 0, 0.99)
-    
-    residuals = y - (X_design @ m["beta"])
-    sigma_resid = math.sqrt(np.sum(residuals ** 2) / df)
-    stud_res = residuals / (sigma_resid * np.sqrt(1.0 - h_diag))
-    h_threshold = 2.0 * k / n
-    
-    diagnostic_points = []
-    for i, e in enumerate(hist):
-        diagnostic_points.append({
-            "date": e["date"],
-            "ref_month": e["ref_month"],
-            "z": e["z_score_composite"],
-            "leverage_h": round(float(h_diag[i]), 4),
-            "studentized_resid": round(float(stud_res[i]), 3),
-            "is_high_leverage": bool(h_diag[i] > h_threshold),
-            "is_outlier": bool(abs(stud_res[i]) > 2.0)
-        })
-        
-    return {
-        "df": df,
-        "t_crit_95": t_crit,
-        "beta_z_t_stat": m["t_stats"][1],
-        "beta_z_p_val": m["p_values"][1],
-        "beta_dxy_t_stat": m["t_stats"][2],
-        "beta_zt_t_stat": m["t_stats"][3],
-        "f_stat": m["f_stat"],
-        "leverage_threshold": round(h_threshold, 4),
-        "t_curve": t_curve,
-        "diagnostic_points": diagnostic_points
-    }
+def get_hypothesis_diagnostics(event_type: str = "cpi"):
+    return quant_model.get_event_hypothesis_diagnostics(event_type=event_type)
 
 class SimReq(BaseModel):
     actual_mom: float
@@ -347,30 +204,33 @@ def get_tomorrow():
     return {"tomorrow_meta": tomorrow, "macro_summary": macro}
 
 @app.get("/api/pre-news-model")
-def get_pre_news_model(price: float = None, atr: float = 12.50):
+def get_pre_news_model(price: float = None, atr: float = None):
     _, tomorrow, _ = load_data()
-    if price is None:
-        price = fetch_live_quotes().get("GC=F", 4047.30)
-    return quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=price, atr_m30=atr)
+    prices = fetch_live_quotes()
+    price = price if price is not None else prices.get("GC=F", 3975.0)
+    atr_val = atr if atr is not None else prices.get("ATR_M30", 10.50)
+    return quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=price, atr_m30=atr_val)
 
 @app.get("/api/fomc-prenew-model")
-def get_fomc_prenew_model(price: float = None, atr: float = 12.50):
-    if price is None:
-        price = fetch_live_quotes().get("GC=F", 4047.30)
-    return quant_model.calculate_fomc_prenew_model(current_price=price, atr_m30=atr)
+def get_fomc_prenew_model(price: float = None, atr: float = None):
+    prices = fetch_live_quotes()
+    price = price if price is not None else prices.get("GC=F", 3975.0)
+    atr_val = atr if atr is not None else prices.get("ATR_M30", 10.50)
+    return quant_model.calculate_fomc_prenew_model(current_price=price, atr_m30=atr_val, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
 
 @app.get("/api/nfp-prenew-model")
-def get_nfp_prenew_model(price: float = None, atr: float = 12.50):
-    if price is None:
-        price = fetch_live_quotes().get("GC=F", 4047.30)
-    return quant_model.calculate_nfp_prenew_model(current_price=price, atr_m30=atr)
+def get_nfp_prenew_model(price: float = None, atr: float = None):
+    prices = fetch_live_quotes()
+    price = price if price is not None else prices.get("GC=F", 3975.0)
+    atr_val = atr if atr is not None else prices.get("ATR_M30", 10.50)
+    return quant_model.calculate_nfp_prenew_model(current_price=price, atr_m30=atr_val, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
 
 @app.get("/api/ppi-prenew-model")
-def get_ppi_prenew_model(price: float = None, atr: float = 12.50):
-    if price is None:
-        price = fetch_live_quotes().get("GC=F", 4047.30)
-    return quant_model.calculate_ppi_prenew_model(current_price=price, atr_m30=atr)
-
+def get_ppi_prenew_model(price: float = None, atr: float = None):
+    prices = fetch_live_quotes()
+    price = price if price is not None else prices.get("GC=F", 3975.0)
+    atr_val = atr if atr is not None else prices.get("ATR_M30", 10.50)
+    return quant_model.calculate_ppi_prenew_model(current_price=price, atr_m30=atr_val, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
 @app.get("/api/fomc-model")
 def get_fomc_model(actual_rate: float = 5.00, priced_rate: float = 5.00, dots_shift_bps: float = 0.0, price: float = None):
     if price is None:
@@ -422,38 +282,51 @@ def get_global_macro_matrix():
 @app.get("/api/daily-a-star")
 def get_daily_a_star(price: float = None):
     prices = fetch_live_quotes()
-    gold = price or prices.get("GC=F", 4047.30)
+    gold = price if price is not None else prices.get("GC=F", 3975.0)
+    atr_val = prices.get("ATR_M30", 10.50)
     dxy = prices.get("DX-Y.NYB", 102.28)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
-    return quant_model.calculate_daily_a_star_setup(current_price=gold, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y)
+    return quant_model.calculate_daily_a_star_setup(current_price=gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, n_paths=10000, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
 
 @app.get("/api/dynamic-levels")
 def get_dynamic_levels(price: float = None):
+    prices = fetch_live_quotes()
     if price is None:
-        price = fetch_live_quotes().get("GC=F", 4047.30)
-    return quant_model.calculate_dynamic_levels(current_price=price)
+        price = prices.get("GC=F", 3975.0)
+    atr_val = prices.get("ATR_M30", 10.50)
+    return quant_model.calculate_dynamic_levels(current_price=price, atr_m30=atr_val, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
 
 @app.post("/api/refresh-all")
 def refresh_all():
     prices = fetch_live_quotes()
     _, tomorrow, _ = load_data()
-    current_gold = prices.get("GC=F", 4047.30)
+    current_gold = prices.get("GC=F", 3975.0)
+    atr_val = prices.get("ATR_M30", 10.50)
+    sh, sl, sc = prices.get("SESSION_HIGH"), prices.get("SESSION_LOW"), prices.get("SESSION_CLOSE")
     dxy = prices.get("DX-Y.NYB", 102.28)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
-    
-    dyn_levels = quant_model.calculate_dynamic_levels(current_price=current_gold)
-    a_star = quant_model.calculate_daily_a_star_setup(current_price=current_gold, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y)
-    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=current_gold)
-    fomc = quant_model.calculate_fomc_model(5.00, 5.00, 0.0, current_price=current_gold)
-    nfp = quant_model.calculate_nfp_model(175.0, 175.0, 4.1, 4.1, 0.3, 0.3, current_price=current_gold)
-    ppi = quant_model.calculate_ppi_retail_model(0.2, 0.2, 0.4, 0.4, current_price=current_gold)
-    
+
+    dyn_levels = quant_model.calculate_dynamic_levels(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
+    mgr = quant_model.SetupLifecycleManager()
+    mgr.evaluate_live_tick(current_gold, live_high=sh, live_low=sl)
+    a_star = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
+    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=current_gold, atr_m30=atr_val)
+    fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
+    nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
+    ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
+    fomc = quant_model.calculate_fomc_model(5.00, 5.00, 0.0, current_price=current_gold, atr_m30=atr_val)
+    nfp = quant_model.calculate_nfp_model(175.0, 175.0, 4.1, 4.1, 0.3, 0.3, current_price=current_gold, atr_m30=atr_val)
+    ppi = quant_model.calculate_ppi_retail_model(0.2, 0.2, 0.4, 0.4, current_price=current_gold, atr_m30=atr_val)
+
     return {
         "status": "SUCCESS",
         "prices": prices,
         "pre_news_model": pre_news,
+        "fomc_prenew": fomc_pre,
+        "nfp_prenew": nfp_pre,
+        "ppi_prenew": ppi_pre,
         "dynamic_levels": dyn_levels,
         "daily_a_star": a_star,
         "fomc_model": fomc,

@@ -126,11 +126,11 @@
           <table class="bbg-mini-table">
             <tr>
               <td class="label">PRIOR BASE RATE:</td>
-              <td class="val">mu=0.00, sigma=0.075 (SURVEY DISPERSION)</td>
+              <td class="val" id="val-cpi-pdf-prior">mu=0.00, sigma=0.080 (SURVEY DISPERSION)</td>
             </tr>
             <tr>
               <td class="label">ENERGY POSTERIOR:</td>
-              <td class="val" id="val-pdf-peak">mu=+0.08, sigma=0.091 (+12.11% WTI CRUDE PASS)</td>
+              <td class="val" id="val-pdf-peak">mu=+0.08, sigma=0.090 (+12.11% WTI CRUDE PASS)</td>
             </tr>
           </table>
         </div>
@@ -141,7 +141,7 @@
         <div class="bbg-pane-header">
           <div class="bbg-pane-title">
             <span class="tag">02 // MCSG &lt;GO&gt;</span>
-            <span>KOU (2002) ASYMMETRIC JUMP SDE FAN</span>
+            <span>KOU (2002) ASYMMETRIC JUMP SDE (10,000 PATHS)</span>
           </div>
           <div class="bbg-pane-actions">
             <button class="bbg-btn-mini" data-z="0.0">Z=0</button>
@@ -151,16 +151,20 @@
           </div>
         </div>
         <div class="bbg-pane-body">
-          <div class="bbg-hud-bar" id="hud-mc">HOVER TIMESTEP // PERCENTILE ENVELOPE [P5, P25, P50, P75, P95]</div>
+          <div class="bbg-hud-bar" id="hud-mc">HOVER TIMESTEP // 10,000-PATH ENVELOPE [P5, P25, P50, P75, P95]</div>
           <div class="bbg-chart-canvas" id="canvas-mc"></div>
           <table class="bbg-mini-table">
             <tr>
               <td class="label">MEDIAN TERMINAL PRICE:</td>
-              <td class="val" id="val-mc-median">$4,019.20</td>
+              <td class="val" id="val-mc-median">--</td>
             </tr>
             <tr>
               <td class="label">95% VALUE-AT-RISK (VaR):</td>
-              <td class="val" id="val-mc-var">-4.35% (P_pos: 24.9% / P_neg: 75.1%)</td>
+              <td class="val" id="val-mc-var">--</td>
+            </tr>
+            <tr>
+              <td class="label">TAIL MOVE PROBABILITY:</td>
+              <td class="val" id="val-mc-tail">--</td>
             </tr>
           </table>
         </div>
@@ -171,7 +175,7 @@
         <div class="bbg-pane-header">
           <div class="bbg-pane-title">
             <span class="tag">03 // DIST &lt;GO&gt;</span>
-            <span>EMPIRICAL SHOCK FREQUENCY &amp; KDE</span>
+            <span>EMPIRICAL SHOCK FREQUENCY &amp; POST-NEWS MOVE</span>
           </div>
           <div class="bbg-pane-actions">
             <button class="bbg-btn-mini btn-maximize" data-pane="pane-freq">[+]</button>
@@ -183,11 +187,15 @@
           <table class="bbg-mini-table">
             <tr>
               <td class="label">EMPIRICAL RANK:</td>
-              <td class="val" id="val-freq-rank">94.1th PERCENTILE (DIST FROM MEDIAN: +1.51σ)</td>
+              <td class="val" id="val-freq-rank">--</td>
             </tr>
             <tr>
               <td class="label">SAMPLE PARAMETERS:</td>
-              <td class="val">Median = -0.18σ | IQR = 0.88σ | Silverman h = 0.294</td>
+              <td class="val" id="val-freq-params">--</td>
+            </tr>
+            <tr>
+              <td class="label">POST-NEWS GOLD MOVE (&ge;1σ):</td>
+              <td class="val" id="val-freq-extreme">--</td>
             </tr>
           </table>
         </div>
@@ -212,12 +220,12 @@
           <div class="bbg-chart-canvas" id="canvas-trans"></div>
           <table class="bbg-mini-table">
             <tr>
-              <td class="label">GOLD RESPONSE SLOPE:</td>
-              <td class="val">beta = -0.558% / sigma (R2 = 0.2139, p &lt; 0.0001)</td>
+              <td class="label">RESPONSE SLOPE (HC3):</td>
+              <td class="val" id="val-trans-slope">--</td>
             </tr>
             <tr>
-              <td class="label">TRANSMISSION VECTOR:</td>
-              <td class="val">Delta DXY: +0.182% / sigma | Delta 2Y: +4.5 bps / sigma</td>
+              <td class="label">TRANSMISSION &amp; VR(5m):</td>
+              <td class="val" id="val-trans-vr">--</td>
             </tr>
           </table>
         </div>
@@ -228,7 +236,7 @@
         <div class="bbg-pane-header">
           <div class="bbg-pane-title">
             <span class="tag">05 // DIAG &lt;GO&gt;</span>
-            <span>STUDENT'S t HYPOTHESIS &amp; HC3 LEVERAGE</span>
+            <span>STUDENT'S t HYPOTHESIS (α=5%) &amp; LEVERAGE</span>
           </div>
           <div class="bbg-pane-actions">
             <button class="bbg-btn-mini active" data-diag="tcurve">t-CURVE</button>
@@ -237,16 +245,20 @@
           </div>
         </div>
         <div class="bbg-pane-body">
-          <div class="bbg-hud-bar" id="hud-diag">STUDENT'S t (df=30): TWO-TAILED REJECTION REGIONS (|t| &gt;= 2.042)</div>
+          <div class="bbg-hud-bar" id="hud-diag">STUDENT'S t (α=0.05): TWO-TAILED REJECTION REGIONS</div>
           <div class="bbg-chart-canvas" id="canvas-diag"></div>
           <table class="bbg-mini-table">
             <tr>
-              <td class="label">HYPOTHESIS VERDICT:</td>
-              <td class="val" id="val-diag-verdict">t-stat = -3.85 &lt; -2.042 (REJECT NULL, p &lt; 0.001)</td>
+              <td class="label">HYPOTHESIS VERDICT (5%):</td>
+              <td class="val" id="val-diag-verdict">--</td>
+            </tr>
+            <tr>
+              <td class="label">DIRECTIONAL VS 50% LUCK:</td>
+              <td class="val" id="val-diag-luck">--</td>
             </tr>
             <tr>
               <td class="label">HAT-MATRIX THRESHOLD:</td>
-              <td class="val">h* = 2k/n = 0.235 (4 HIGH-LEVERAGE RELEASES FLAGGED)</td>
+              <td class="val" id="val-diag-hat">--</td>
             </tr>
           </table>
         </div>
@@ -309,10 +321,10 @@
     <!-- Collapsible 34-Release Historical Database -->
     <section class="audit-ledger-container">
       <div class="audit-ledger-header" id="audit-toggle-header">
-        <div>[ 07 // AUDIT &lt;GO&gt; : 34-RELEASE EMPIRICAL HISTORICAL RECORD ]</div>
-        <div id="audit-toggle-icon">[ + CLICK TO EXPAND FULL DATABASE ]</div>
+        <div>[ 07 // AUDIT &lt;GO&gt; : 34-RELEASE EMPIRICAL POST-NEWS PRICE MOVEMENT RECORD ]</div>
+        <div id="audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
       </div>
-      <div class="audit-table-scroll" id="audit-table-scroll" style="display:none;">
+      <div class="audit-table-scroll" id="audit-table-scroll" style="display:block;">
         <table class="bbg-audit-table">
           <thead>
             <tr>
@@ -322,25 +334,23 @@
               <th>FCST</th>
               <th>CORE YoY</th>
               <th>COMPOSITE Z</th>
-              <th>GOLD RETURN</th>
-              <th>DXY RETURN</th>
-              <th>2Y DELTA</th>
+              <th>GOLD OPEN → CLOSE</th>
+              <th>GOLD RET</th>
+              <th>DIST MEAN</th>
+              <th>DXY RET</th>
             </tr>
           </thead>
-          <tbody id="bbg-audit-tbody">
-            <!-- Dynamically populated -->
-          </tbody>
+          <tbody id="bbg-audit-tbody"></tbody>
         </table>
       </div>
     </section>
 
   </main>
 
-    <!-- ==================== MODULE 02: FOMC RATE ==================== -->
+  <!-- ==================== MODULE 02: FOMC RATE ==================== -->
   <main class="module-view" id="mod-fomc">
     <div style="padding:14px; display:flex; flex-direction:column; gap:12px;">
 
-      <!-- Cockpit Ribbon -->
       <div class="cockpit-ribbon">
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
           <div class="slider-inline">
@@ -360,21 +370,20 @@
           </div>
           <div class="slider-inline">
             <label>POLICY SHOCK:</label>
-            <span class="val" id="fomc-shock-summary" style="color:var(--amber-cmd);">0.0 bps (PAUSE)</span>
+            <span class="val" id="fomc-shock-summary" style="color:var(--amber-cmd);">0.0 bps (CONSENSUS PAUSE)</span>
           </div>
         </div>
 
         <div style="display:flex; align-items:center; gap:8px;">
           <button class="bbg-btn active" id="fomc-btn-horizon-1d">T+24h SDE</button>
           <button class="bbg-btn" id="fomc-btn-horizon-5d">5D SWING</button>
+          <button class="bbg-btn" id="fomc-btn-firewall">TRIGGER 60s FIREWALL</button>
           <button class="bbg-btn" id="fomc-btn-reset">RESET &lt;DEFAULT&gt;</button>
         </div>
       </div>
 
-      <!-- 6-Pane Tiled Workstation Grid -->
       <div class="bbg-workstation-grid">
 
-        <!-- PANE 01: PROBABILITY DENSITY FUNCTION (PDF) -->
         <section class="bbg-pane" id="pane-fomc-pdf">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">01 // PDF &lt;GO&gt;</span><span>POLICY SURPRISE PROBABILITY DENSITY</span></div>
@@ -384,106 +393,127 @@
             <div class="bbg-hud-bar" id="hud-fomc-pdf">HOVER NEEDLE // FEDWATCH PRIOR vs DOT PLOT POSTERIOR</div>
             <div class="bbg-chart-canvas" id="canvas-fomc-pdf"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">PRICED RATE (CME):</td><td class="val">5.00% (PAUSE PROBABILITY: 94.2%)</td></tr>
-              <tr><td class="label">FORWARD PATH SKEW:</td><td class="val">Dot Plot Median: 4.75% (-25 bps 2027 Path)</td></tr>
+              <tr><td class="label">PRIOR BASE RATE:</td><td class="val" id="val-fomc-pdf-prior">--</td></tr>
+              <tr><td class="label">POSTERIOR DENSITY:</td><td class="val" id="val-fomc-pdf-post">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 02: KOU JUMP MONTE CARLO SDE -->
         <section class="bbg-pane" id="pane-fomc-mc">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">02 // MCSG &lt;GO&gt;</span><span>POLICY SHOCK JUMP MONTE CARLO (2,000 PATHS)</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-mc">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">02 // MCSG &lt;GO&gt;</span><span>POLICY SHOCK JUMP SDE (10,000 PATHS)</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini" data-ev="fomc" data-ev-z="0.0">Z=0</button>
+              <button class="bbg-btn-mini" data-ev="fomc" data-ev-z="1.33">Z=+1.3</button>
+              <button class="bbg-btn-mini" data-ev="fomc" data-ev-z="-1.33">Z=-1.3</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-mc">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-fomc-mc">HOVER TIMESTEP // PERCENTILE ENVELOPE [P5, P25, P50, P75, P95]</div>
+            <div class="bbg-hud-bar" id="hud-fomc-mc">HOVER TIMESTEP // 10,000-PATH ENVELOPE [P5, P25, P50, P75, P95]</div>
             <div class="bbg-chart-canvas" id="canvas-fomc-mc"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-fomc-mc-median">$4,035.20</td></tr>
-              <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-fomc-mc-var">-2.10% (P_pos: 42.1% / P_neg: 57.9%)</td></tr>
+              <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-fomc-mc-median">--</td></tr>
+              <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-fomc-mc-var">--</td></tr>
+              <tr><td class="label">TAIL MOVE PROBABILITY:</td><td class="val" id="val-fomc-mc-tail">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 03: 24-MEETING SHOCK FREQUENCY & KDE -->
         <section class="bbg-pane" id="pane-fomc-freq">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>24-MEETING POLICY SHOCK FREQUENCY &amp; KDE</span></div>
+            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>24-MEETING SHOCK FREQUENCY &amp; POST-NEWS MOVE</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-freq">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-fomc-freq">HOVER HISTOGRAM BARS // N = 24 EMPIRICAL MEETINGS</div>
+            <div class="bbg-hud-bar" id="hud-fomc-freq">HOVER HISTOGRAM BARS // N = 24 EMPIRICAL FOMC MEETINGS</div>
             <div class="bbg-chart-canvas" id="canvas-fomc-freq"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">EMPIRICAL MEDIAN SHOCK:</td><td class="val">0.0 bps (79.2% OF MEETINGS FULLY PRICED)</td></tr>
-              <tr><td class="label">MAX POLICY SURPRISE:</td><td class="val">+50.0 bps (HISTORICAL HAWKISH BOUNDARY)</td></tr>
+              <tr><td class="label">EMPIRICAL RANK:</td><td class="val" id="val-fomc-freq-rank">--</td></tr>
+              <tr><td class="label">SAMPLE PARAMETERS:</td><td class="val" id="val-fomc-freq-params">--</td></tr>
+              <tr><td class="label">POST-NEWS GOLD MOVE (&ge;1σ):</td><td class="val" id="val-fomc-freq-extreme">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 04: 2Y TREASURY YIELD POLICY TRANSMISSION FRONTIER -->
         <section class="bbg-pane" id="pane-fomc-trans">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">04 // TRAN &lt;GO&gt;</span><span>2Y YIELD TRANSMISSION FRONTIER (VR = 4.42x)</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-trans">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">04 // TRAN &lt;GO&gt;</span><span>FOMC CROSS-ASSET TRANSMISSION FRONTIER</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini active" data-ev="fomc" data-ev-asset="gold">GOLD</button>
+              <button class="bbg-btn-mini" data-ev="fomc" data-ev-asset="dxy">DXY</button>
+              <button class="bbg-btn-mini" data-ev="fomc" data-ev-asset="2y">2Y NOTE</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-trans">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-fomc-trans">HOVER YIELD AXIS // WHITE HC3 95% PREDICTION BANDS</div>
+            <div class="bbg-hud-bar" id="hud-fomc-trans">HOVER Z-AXIS // WHITE HC3 95% PREDICTION BANDS</div>
             <div class="bbg-chart-canvas" id="canvas-fomc-trans"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">POLICY SHOCK ELASTICITY:</td><td class="val">beta = -0.054% / bps (R2 = 0.384, p &lt; 0.001)</td></tr>
-              <tr><td class="label">VOLATILITY RATIO VR(5m):</td><td class="val">VR = 4.42x (SPREAD WIDENS 8x AT T0)</td></tr>
+              <tr><td class="label">RESPONSE SLOPE (HC3):</td><td class="val" id="val-fomc-trans-slope">--</td></tr>
+              <tr><td class="label">TRANSMISSION &amp; VR(5m):</td><td class="val" id="val-fomc-trans-vr">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 05: STUDENT'S t HYPOTHESIS & TWO-FACTOR DECOMPOSITION -->
         <section class="bbg-pane" id="pane-fomc-diag">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">05 // DIAG &lt;GO&gt;</span><span>STUDENT'S t HYPOTHESIS &amp; TWO-FACTOR TEST</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-diag">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">05 // DIAG &lt;GO&gt;</span><span>STUDENT'S t HYPOTHESIS (α=5%) &amp; LEVERAGE</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini active" data-ev="fomc" data-ev-diag="tcurve">t-CURVE</button>
+              <button class="bbg-btn-mini" data-ev="fomc" data-ev-diag="leverage">LEVERAGE</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-diag">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-fomc-diag">STUDENT'S t (df=20): TARGET t=-2.20 (p=0.027) | PATH t=-4.28 (p&lt;0.001)</div>
+            <div class="bbg-hud-bar" id="hud-fomc-diag">STUDENT'S t (α=0.05): TWO-TAILED REJECTION REGIONS</div>
             <div class="bbg-chart-canvas" id="canvas-fomc-diag"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">GÜRKAYNAK JOINT F-TEST:</td><td class="val">F = 12.84 &gt; F_crit (REJECT NULL, p &lt; 0.001)</td></tr>
-              <tr><td class="label">PATH DOMINANCE THESIS:</td><td class="val">Forward path revisions explain 74.2% of post-FOMC variance.</td></tr>
+              <tr><td class="label">HYPOTHESIS VERDICT (5%):</td><td class="val" id="val-fomc-diag-verdict">--</td></tr>
+              <tr><td class="label">DIRECTIONAL VS 50% LUCK:</td><td class="val" id="val-fomc-diag-luck">--</td></tr>
+              <tr><td class="label">HAT-MATRIX THRESHOLD:</td><td class="val" id="val-fomc-diag-hat">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 06: TWO-FACTOR POLICY PATH INSTITUTIONAL TICKET -->
         <section class="bbg-pane" id="pane-fomc-exec">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">06 // EXEC &lt;GO&gt;</span><span>TWO-FACTOR POLICY PATH INSTITUTIONAL TICKET</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-fomc-exec">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <table class="bbg-mini-table">
-              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-fomc-ticket-action" style="color:var(--fg-bright); font-weight:900;">TWO-FACTOR POLICY PATH STRADDLE</td></tr>
-              <tr><td class="label">SHORT ENTRY ZONE:</td><td class="val" id="val-fomc-entry-short" style="color:#ff4444;">$4,052.00 - $4,058.00 (HAWKISH DOT SHIFT &ge; +25bps)</td></tr>
-              <tr><td class="label">LONG ENTRY ZONE:</td><td class="val" id="val-fomc-entry-long" style="color:#ffffff;">$4,028.00 - $4,034.00 (DOVISH CUT SURPRISE)</td></tr>
-              <tr><td class="label">STOP LOSS:</td><td class="val" id="val-fomc-ticket-sl">$4,068.50 (1.5 ATR INTRADAY BUFFER)</td></tr>
-              <tr><td class="label">TARGET 1 / TARGET 2:</td><td class="val" id="val-fomc-ticket-tp">$4,035.00 / $4,015.00 (RR: 1:1.8 / 1:3.2)</td></tr>
-              <tr><td class="label">RECOMMENDED LOT:</td><td class="val" style="color:var(--amber-cmd);">0.03 LOT ($30.00 / 3% Max Risk on $1,000 Equity)</td></tr>
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #161616; padding-bottom:6px;">
+              <div>
+                <div style="font-size:8.5px; color:var(--fg-dim);">FIREWALL LOCKOUT</div>
+                <div class="firewall-digit" id="val-fomc-firewall-timer" style="color:var(--amber-cmd);">ARMED</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="firewall-badge" id="val-fomc-firewall-status" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">STANDBY // TRIGGERS AT 02:00 EST</div>
+                <div style="font-size:8.5px; color:var(--fg-dim); margin-top:2px;">WAVE 1 FIREWALL ARMED. NO ORDERS DURING STATEMENT.</div>
+              </div>
+            </div>
+            <table class="bbg-mini-table" style="margin-top:8px;">
+              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-fomc-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
+              <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-fomc-ticket-entry">--</td></tr>
+              <tr><td class="label">STOP LOSS:</td><td class="val" id="val-fomc-ticket-sl" style="color:#ff4444;">--</td></tr>
+              <tr><td class="label">TAKE PROFIT:</td><td class="val" id="val-fomc-ticket-tp">--</td></tr>
+              <tr><td class="label">ANCHORED VWAP:</td><td class="val" id="val-fomc-ticket-avwap">--</td></tr>
+              <tr><td class="label">KYLE'S LAMBDA:</td><td class="val" id="val-fomc-ticket-lambda">--</td></tr>
             </table>
           </div>
         </section>
 
       </div>
 
-      <!-- Collapsible 24-Meeting Historical Database -->
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="fomc-audit-toggle-header">
-          <div>[ 07 // AUDIT &lt;GO&gt; : 24-MEETING POLICY SHOCK EMPIRICAL RECORD ]</div>
-          <div id="fomc-audit-toggle-icon">[ + CLICK TO EXPAND FULL DATABASE ]</div>
+          <div>[ 07 // AUDIT &lt;GO&gt; : 24-MEETING FOMC POST-NEWS PRICE MOVEMENT RECORD ]</div>
+          <div id="fomc-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
         </div>
-        <div class="audit-table-scroll" id="fomc-audit-table-scroll" style="display:none;">
+        <div class="audit-table-scroll" id="fomc-audit-table-scroll" style="display:block;">
           <table class="bbg-audit-table">
             <thead>
-              <tr><th>DATE</th><th>ACTUAL RATE</th><th>PRICED RATE</th><th>SHOCK (bps)</th><th>GOLD RETURN (%)</th><th>2Y YIELD DELTA</th><th>POLICY REGIME</th></tr>
+              <tr><th>DATE</th><th>ACTUAL RATE</th><th>PRICED RATE</th><th>SHOCK (bps)</th><th>GOLD OPEN → CLOSE</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>2Y DELTA</th><th>VR(5m)</th><th>REGIME</th></tr>
             </thead>
             <tbody id="fomc-tbody"></tbody>
           </table>
@@ -493,12 +523,10 @@
     </div>
   </main>
 
-
   <!-- ==================== MODULE 03: NFP JOBS ==================== -->
   <main class="module-view" id="mod-nfp">
     <div style="padding:14px; display:flex; flex-direction:column; gap:12px;">
 
-      <!-- Cockpit Ribbon -->
       <div class="cockpit-ribbon">
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
           <div class="slider-inline">
@@ -525,123 +553,143 @@
         <div style="display:flex; align-items:center; gap:8px;">
           <button class="bbg-btn active" id="nfp-btn-horizon-1d">T+24h SDE</button>
           <button class="bbg-btn" id="nfp-btn-horizon-5d">5D SWING</button>
+          <button class="bbg-btn" id="nfp-btn-firewall">TRIGGER 60s FIREWALL</button>
           <button class="bbg-btn" id="nfp-btn-reset">RESET &lt;DEFAULT&gt;</button>
         </div>
       </div>
 
-      <!-- 6-Pane Tiled Workstation Grid -->
       <div class="bbg-workstation-grid">
 
-        <!-- PANE 01: PROBABILITY DENSITY FUNCTION (PDF) -->
         <section class="bbg-pane" id="pane-nfp-pdf">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">01 // PDF &lt;GO&gt;</span><span>LABOR COMPOSITE PROBABILITY DENSITY</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-pdf">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-nfp-pdf">HOVER NEEDLE // PRIOR CONSENSUS vs POSTERIOR LIKELIHOOD</div>
+            <div class="bbg-hud-bar" id="hud-nfp-pdf">HOVER NEEDLE // PRIOR CONSENSUS vs ADP POSTERIOR</div>
             <div class="bbg-chart-canvas" id="canvas-nfp-pdf"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">CONSENSUS FORECAST:</td><td class="val">175k Payrolls | 4.1% Unemp | 0.3% AHE Wages</td></tr>
-              <tr><td class="label">COMPOSITE FORMULATION:</td><td class="val">Z_labor = 0.50*Z_nfp - 0.30*Z_unemp + 0.20*Z_wages</td></tr>
+              <tr><td class="label">PRIOR BASE RATE:</td><td class="val" id="val-nfp-pdf-prior">--</td></tr>
+              <tr><td class="label">POSTERIOR DENSITY:</td><td class="val" id="val-nfp-pdf-post">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 02: KOU JUMP MONTE CARLO SDE -->
         <section class="bbg-pane" id="pane-nfp-mc">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">02 // MCSG &lt;GO&gt;</span><span>LABOR SHOCK JUMP MONTE CARLO (2,000 PATHS)</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-mc">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">02 // MCSG &lt;GO&gt;</span><span>LABOR SHOCK JUMP SDE (10,000 PATHS)</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini" data-ev="nfp" data-ev-z="0.0">Z=0</button>
+              <button class="bbg-btn-mini" data-ev="nfp" data-ev-z="1.33">Z=+1.3</button>
+              <button class="bbg-btn-mini" data-ev="nfp" data-ev-z="-1.33">Z=-1.3</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-mc">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-nfp-mc">HOVER TIMESTEP // PERCENTILE ENVELOPE [P5, P25, P50, P75, P95]</div>
+            <div class="bbg-hud-bar" id="hud-nfp-mc">HOVER TIMESTEP // 10,000-PATH ENVELOPE [P5, P25, P50, P75, P95]</div>
             <div class="bbg-chart-canvas" id="canvas-nfp-mc"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-nfp-mc-median">$4,032.00</td></tr>
-              <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-nfp-mc-var">-3.15% (P_pos: 38.5% / P_neg: 61.5%)</td></tr>
+              <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-nfp-mc-median">--</td></tr>
+              <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-nfp-mc-var">--</td></tr>
+              <tr><td class="label">TAIL MOVE PROBABILITY:</td><td class="val" id="val-nfp-mc-tail">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 03: 36-RELEASE SHOCK FREQUENCY & KDE -->
         <section class="bbg-pane" id="pane-nfp-freq">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>36-RELEASE LABOR SHOCK FREQUENCY &amp; KDE</span></div>
+            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>36-RELEASE SHOCK FREQUENCY &amp; POST-NEWS MOVE</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-freq">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
             <div class="bbg-hud-bar" id="hud-nfp-freq">HOVER HISTOGRAM BARS // N = 36 EMPIRICAL LABOR RELEASES</div>
             <div class="bbg-chart-canvas" id="canvas-nfp-freq"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">EMPIRICAL MEDIAN SHOCK:</td><td class="val">+0.12σ | IQR = 0.94σ | Bandwidth h = 0.312</td></tr>
-              <tr><td class="label">EXTREME PRINTS:</td><td class="val">Z &gt; +2.0σ (6 releases) | Z &lt; -2.0σ (3 releases)</td></tr>
+              <tr><td class="label">EMPIRICAL RANK:</td><td class="val" id="val-nfp-freq-rank">--</td></tr>
+              <tr><td class="label">SAMPLE PARAMETERS:</td><td class="val" id="val-nfp-freq-params">--</td></tr>
+              <tr><td class="label">POST-NEWS GOLD MOVE (&ge;1σ):</td><td class="val" id="val-nfp-freq-extreme">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 04: WAGE GROWTH vs UNEMPLOYMENT TRANSMISSION FRONTIER -->
         <section class="bbg-pane" id="pane-nfp-trans">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">04 // TRAN &lt;GO&gt;</span><span>LABOR TRANSMISSION FRONTIER (VR = 4.81x)</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-trans">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">04 // TRAN &lt;GO&gt;</span><span>LABOR CROSS-ASSET TRANSMISSION FRONTIER</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini active" data-ev="nfp" data-ev-asset="gold">GOLD</button>
+              <button class="bbg-btn-mini" data-ev="nfp" data-ev-asset="dxy">DXY</button>
+              <button class="bbg-btn-mini" data-ev="nfp" data-ev-asset="2y">2Y NOTE</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-trans">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-nfp-trans">HOVER LABOR AXIS // WHITE HC3 95% PREDICTION BANDS</div>
+            <div class="bbg-hud-bar" id="hud-nfp-trans">HOVER Z-AXIS // WHITE HC3 95% PREDICTION BANDS</div>
             <div class="bbg-chart-canvas" id="canvas-nfp-trans"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">LABOR SHOCK ELASTICITY:</td><td class="val">beta = -0.960% / sigma (R2 = 0.442, p &lt; 0.0001)</td></tr>
-              <tr><td class="label">VOLATILITY RATIO VR(5m):</td><td class="val">VR = 4.81x (2nd LARGEST MACRO DISRUPTION)</td></tr>
+              <tr><td class="label">RESPONSE SLOPE (HC3):</td><td class="val" id="val-nfp-trans-slope">--</td></tr>
+              <tr><td class="label">TRANSMISSION &amp; VR(5m):</td><td class="val" id="val-nfp-trans-vr">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 05: STUDENT'S t HYPOTHESIS & QUANTILE ASYMMETRY -->
         <section class="bbg-pane" id="pane-nfp-diag">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">05 // DIAG &lt;GO&gt;</span><span>STUDENT'S t HYPOTHESIS &amp; ASYMMETRY TEST</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-diag">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">05 // DIAG &lt;GO&gt;</span><span>STUDENT'S t HYPOTHESIS (α=5%) &amp; LEVERAGE</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini active" data-ev="nfp" data-ev-diag="tcurve">t-CURVE</button>
+              <button class="bbg-btn-mini" data-ev="nfp" data-ev-diag="leverage">LEVERAGE</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-diag">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-nfp-diag">STUDENT'S t (df=34): t = -9.81 (p &lt; 0.00001) // REJECT NULL</div>
+            <div class="bbg-hud-bar" id="hud-nfp-diag">STUDENT'S t (α=0.05): TWO-TAILED REJECTION REGIONS</div>
             <div class="bbg-chart-canvas" id="canvas-nfp-diag"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">ASYMMETRIC QUANTILE WALD TEST:</td><td class="val">chi^2 = 8.42 (p = 0.0037 // 1.9x DOWNSIDE BIAS)</td></tr>
-              <tr><td class="label">LO-MACKINLAY VR(5m) TEST:</td><td class="val">VR = 4.81x (z = 3.91, p &lt; 0.0001 // REJECT RANDOM WALK)</td></tr>
+              <tr><td class="label">HYPOTHESIS VERDICT (5%):</td><td class="val" id="val-nfp-diag-verdict">--</td></tr>
+              <tr><td class="label">DIRECTIONAL VS 50% LUCK:</td><td class="val" id="val-nfp-diag-luck">--</td></tr>
+              <tr><td class="label">HAT-MATRIX THRESHOLD:</td><td class="val" id="val-nfp-diag-hat">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 06: DUAL-MANDATE LABOR MOMENTUM TICKET -->
         <section class="bbg-pane" id="pane-nfp-exec">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">06 // EXEC &lt;GO&gt;</span><span>DUAL-MANDATE LABOR MOMENTUM TICKET</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-nfp-exec">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <table class="bbg-mini-table">
-              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-nfp-ticket-action" style="color:var(--fg-bright); font-weight:900;">DUAL-MANDATE LABOR MOMENTUM BRACKET</td></tr>
-              <tr><td class="label">SHORT ENTRY ZONE:</td><td class="val" id="val-nfp-entry-short" style="color:#ff4444;">$4,048.00 - $4,054.00 (Z_labor &ge; +1.2σ // TIGHT LABOR)</td></tr>
-              <tr><td class="label">LONG ENTRY ZONE:</td><td class="val" id="val-nfp-entry-long" style="color:#ffffff;">$4,025.00 - $4,030.00 (Z_labor &le; -1.0σ // LABOR CRACK)</td></tr>
-              <tr><td class="label">STOP LOSS:</td><td class="val" id="val-nfp-ticket-sl">$4,064.00 (LOCAL M30 STRUCTURE CEILING)</td></tr>
-              <tr><td class="label">TARGET 1 / TARGET 2:</td><td class="val" id="val-nfp-ticket-tp">$4,032.00 / $4,012.00 (RR: 1:1.7 / 1:3.0)</td></tr>
-              <tr><td class="label">RECOMMENDED LOT:</td><td class="val" style="color:var(--amber-cmd);">0.03 LOT ($30.00 / 3% Max Risk on $1,000 Equity)</td></tr>
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #161616; padding-bottom:6px;">
+              <div>
+                <div style="font-size:8.5px; color:var(--fg-dim);">FIREWALL LOCKOUT</div>
+                <div class="firewall-digit" id="val-nfp-firewall-timer" style="color:var(--amber-cmd);">ARMED</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="firewall-badge" id="val-nfp-firewall-status" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">STANDBY // TRIGGERS AT 08:30 EST</div>
+                <div style="font-size:8.5px; color:var(--fg-dim); margin-top:2px;">WAVE 1 FIREWALL ARMED. STRICT 60s LOCKOUT UPON PRINT.</div>
+              </div>
+            </div>
+            <table class="bbg-mini-table" style="margin-top:8px;">
+              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-nfp-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
+              <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-nfp-ticket-entry">--</td></tr>
+              <tr><td class="label">STOP LOSS:</td><td class="val" id="val-nfp-ticket-sl" style="color:#ff4444;">--</td></tr>
+              <tr><td class="label">TAKE PROFIT:</td><td class="val" id="val-nfp-ticket-tp">--</td></tr>
+              <tr><td class="label">ANCHORED VWAP:</td><td class="val" id="val-nfp-ticket-avwap">--</td></tr>
+              <tr><td class="label">KYLE'S LAMBDA:</td><td class="val" id="val-nfp-ticket-lambda">--</td></tr>
             </table>
           </div>
         </section>
 
       </div>
 
-      <!-- Collapsible 36-Release Historical Database -->
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="nfp-audit-toggle-header">
-          <div>[ 07 // AUDIT &lt;GO&gt; : 36-RELEASE LABOR MARKET EMPIRICAL RECORD ]</div>
-          <div id="nfp-audit-toggle-icon">[ + CLICK TO EXPAND FULL DATABASE ]</div>
+          <div>[ 07 // AUDIT &lt;GO&gt; : 36-RELEASE NFP POST-NEWS PRICE MOVEMENT RECORD ]</div>
+          <div id="nfp-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
         </div>
-        <div class="audit-table-scroll" id="nfp-audit-table-scroll" style="display:none;">
+        <div class="audit-table-scroll" id="nfp-audit-table-scroll" style="display:block;">
           <table class="bbg-audit-table">
             <thead>
-              <tr><th>DATE</th><th>NFP ACTUAL (k)</th><th>NFP FCST (k)</th><th>UNEMP RATE</th><th>AHE WAGES</th><th>COMPOSITE Z</th><th>GOLD RET (%)</th><th>REGIME</th></tr>
+              <tr><th>DATE</th><th>NFP ACT (k)</th><th>NFP FCST (k)</th><th>UNEMP (%)</th><th>AHE (%)</th><th>Z_LABOR</th><th>GOLD OPEN → CLOSE</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>VR(5m)</th><th>REGIME</th></tr>
             </thead>
             <tbody id="nfp-tbody"></tbody>
           </table>
@@ -651,12 +699,10 @@
     </div>
   </main>
 
-
   <!-- ==================== MODULE 04: PPI DEMAND ==================== -->
   <main class="module-view" id="mod-ppi">
     <div style="padding:14px; display:flex; flex-direction:column; gap:12px;">
 
-      <!-- Cockpit Ribbon -->
       <div class="cockpit-ribbon">
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
           <div class="slider-inline">
@@ -678,123 +724,143 @@
         <div style="display:flex; align-items:center; gap:8px;">
           <button class="bbg-btn active" id="ppi-btn-horizon-1d">T+24h SDE</button>
           <button class="bbg-btn" id="ppi-btn-horizon-5d">5D SWING</button>
+          <button class="bbg-btn" id="ppi-btn-firewall">TRIGGER 60s FIREWALL</button>
           <button class="bbg-btn" id="ppi-btn-reset">RESET &lt;DEFAULT&gt;</button>
         </div>
       </div>
 
-      <!-- 6-Pane Tiled Workstation Grid -->
       <div class="bbg-workstation-grid">
 
-        <!-- PANE 01: PROBABILITY DENSITY FUNCTION (PDF) -->
         <section class="bbg-pane" id="pane-ppi-pdf">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">01 // PDF &lt;GO&gt;</span><span>DEMAND PIPELINE PROBABILITY DENSITY</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-pdf">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-ppi-pdf">HOVER NEEDLE // PRIOR PIPELINE vs POSTERIOR LIKELIHOOD</div>
+            <div class="bbg-hud-bar" id="hud-ppi-pdf">HOVER NEEDLE // PRIOR PIPELINE vs CRUDE POSTERIOR</div>
             <div class="bbg-chart-canvas" id="canvas-ppi-pdf"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">CONSENSUS FORECAST:</td><td class="val">PPI MoM: 0.2% | Retail Sales MoM: 0.4%</td></tr>
-              <tr><td class="label">DEMAND SPREAD:</td><td class="val">Z_demand = 0.55*Z_ppi + 0.45*Z_retail</td></tr>
+              <tr><td class="label">PRIOR BASE RATE:</td><td class="val" id="val-ppi-pdf-prior">--</td></tr>
+              <tr><td class="label">POSTERIOR DENSITY:</td><td class="val" id="val-ppi-pdf-post">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 02: KOU JUMP MONTE CARLO SDE -->
         <section class="bbg-pane" id="pane-ppi-mc">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">02 // MCSG &lt;GO&gt;</span><span>DEMAND PIPELINE JUMP MONTE CARLO (2,000 PATHS)</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-mc">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">02 // MCSG &lt;GO&gt;</span><span>DEMAND PIPELINE JUMP SDE (10,000 PATHS)</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini" data-ev="ppi" data-ev-z="0.0">Z=0</button>
+              <button class="bbg-btn-mini" data-ev="ppi" data-ev-z="1.33">Z=+1.3</button>
+              <button class="bbg-btn-mini" data-ev="ppi" data-ev-z="-1.33">Z=-1.3</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-mc">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-ppi-mc">HOVER TIMESTEP // PERCENTILE ENVELOPE [P5, P25, P50, P75, P95]</div>
+            <div class="bbg-hud-bar" id="hud-ppi-mc">HOVER TIMESTEP // 10,000-PATH ENVELOPE [P5, P25, P50, P75, P95]</div>
             <div class="bbg-chart-canvas" id="canvas-ppi-mc"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-ppi-mc-median">$4,034.50</td></tr>
-              <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-ppi-mc-var">-2.40% (P_pos: 40.2% / P_neg: 59.8%)</td></tr>
+              <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-ppi-mc-median">--</td></tr>
+              <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-ppi-mc-var">--</td></tr>
+              <tr><td class="label">TAIL MOVE PROBABILITY:</td><td class="val" id="val-ppi-mc-tail">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 03: 36-RELEASE SHOCK FREQUENCY & KDE -->
         <section class="bbg-pane" id="pane-ppi-freq">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>36-RELEASE DEMAND SHOCK FREQUENCY &amp; KDE</span></div>
+            <div class="bbg-pane-title"><span class="tag">03 // DIST &lt;GO&gt;</span><span>36-RELEASE SHOCK FREQUENCY &amp; POST-NEWS MOVE</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-freq">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
             <div class="bbg-hud-bar" id="hud-ppi-freq">HOVER HISTOGRAM BARS // N = 36 EMPIRICAL DEMAND RELEASES</div>
             <div class="bbg-chart-canvas" id="canvas-ppi-freq"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">EMPIRICAL MEDIAN SHOCK:</td><td class="val">-0.05σ | IQR = 0.82σ | Bandwidth h = 0.284</td></tr>
-              <tr><td class="label">UPSTREAM COMPRESSION:</td><td class="val">Energy pass-through: +12.11% WTI crude shift</td></tr>
+              <tr><td class="label">EMPIRICAL RANK:</td><td class="val" id="val-ppi-freq-rank">--</td></tr>
+              <tr><td class="label">SAMPLE PARAMETERS:</td><td class="val" id="val-ppi-freq-params">--</td></tr>
+              <tr><td class="label">POST-NEWS GOLD MOVE (&ge;1σ):</td><td class="val" id="val-ppi-freq-extreme">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 04: WHOLESALE PPI vs ADVANCE RETAIL SALES FRONTIER -->
         <section class="bbg-pane" id="pane-ppi-trans">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">04 // TRAN &lt;GO&gt;</span><span>DEMAND TRANSMISSION FRONTIER (VR = 3.92x)</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-trans">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">04 // TRAN &lt;GO&gt;</span><span>DEMAND CROSS-ASSET TRANSMISSION FRONTIER</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini active" data-ev="ppi" data-ev-asset="gold">GOLD</button>
+              <button class="bbg-btn-mini" data-ev="ppi" data-ev-asset="dxy">DXY</button>
+              <button class="bbg-btn-mini" data-ev="ppi" data-ev-asset="2y">2Y NOTE</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-trans">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-ppi-trans">HOVER PIPELINE AXIS // WHITE HC3 95% PREDICTION BANDS</div>
+            <div class="bbg-hud-bar" id="hud-ppi-trans">HOVER Z-AXIS // WHITE HC3 95% PREDICTION BANDS</div>
             <div class="bbg-chart-canvas" id="canvas-ppi-trans"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">DEMAND ELASTICITY:</td><td class="val">beta = -0.803% / sigma (R2 = 0.384, p &lt; 0.0001)</td></tr>
-              <tr><td class="label">VOLATILITY RATIO VR(5m):</td><td class="val">VR = 3.92x (UPSTREAM MARGIN SQUEEZE)</td></tr>
+              <tr><td class="label">RESPONSE SLOPE (HC3):</td><td class="val" id="val-ppi-trans-slope">--</td></tr>
+              <tr><td class="label">TRANSMISSION &amp; VR(5m):</td><td class="val" id="val-ppi-trans-vr">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 05: STUDENT'S t HYPOTHESIS & BIVARIATE LIKELIHOOD -->
         <section class="bbg-pane" id="pane-ppi-diag">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">05 // DIAG &lt;GO&gt;</span><span>STUDENT'S t HYPOTHESIS &amp; BIVARIATE LIKELIHOOD</span></div>
-            <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-diag">[+]</button></div>
+            <div class="bbg-pane-title"><span class="tag">05 // DIAG &lt;GO&gt;</span><span>STUDENT'S t HYPOTHESIS (α=5%) &amp; LEVERAGE</span></div>
+            <div class="bbg-pane-actions">
+              <button class="bbg-btn-mini active" data-ev="ppi" data-ev-diag="tcurve">t-CURVE</button>
+              <button class="bbg-btn-mini" data-ev="ppi" data-ev-diag="leverage">LEVERAGE</button>
+              <button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-diag">[+]</button>
+            </div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-ppi-diag">STUDENT'S t (df=32): PPI t=-13.57 (p&lt;0.00001) | RETAIL t=-2.88 (p=0.0068)</div>
+            <div class="bbg-hud-bar" id="hud-ppi-diag">STUDENT'S t (α=0.05): TWO-TAILED REJECTION REGIONS</div>
             <div class="bbg-chart-canvas" id="canvas-ppi-diag"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">BIVARIATE LIKELIHOOD RATIO:</td><td class="val">chi^2 = 14.28 (df = 2, p = 0.0008 &lt; 0.001 // REJECT H0)</td></tr>
-              <tr><td class="label">HAT MATRIX THRESHOLD:</td><td class="val">h* = 0.222 (3 HIGH-LEVERAGE PIPELINE PRINTS)</td></tr>
+              <tr><td class="label">HYPOTHESIS VERDICT (5%):</td><td class="val" id="val-ppi-diag-verdict">--</td></tr>
+              <tr><td class="label">DIRECTIONAL VS 50% LUCK:</td><td class="val" id="val-ppi-diag-luck">--</td></tr>
+              <tr><td class="label">HAT-MATRIX THRESHOLD:</td><td class="val" id="val-ppi-diag-hat">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 06: DEMAND-PULL VS COST-PUSH TICKET -->
         <section class="bbg-pane" id="pane-ppi-exec">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">06 // EXEC &lt;GO&gt;</span><span>DEMAND-PULL VS COST-PUSH INSTITUTIONAL TICKET</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ppi-exec">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <table class="bbg-mini-table">
-              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-ppi-ticket-action" style="color:var(--fg-bright); font-weight:900;">DEMAND PIPELINE STRADDLE</td></tr>
-              <tr><td class="label">SHORT ENTRY ZONE:</td><td class="val" id="val-ppi-entry-short" style="color:#ff4444;">$4,045.00 - $4,050.00 (STAGFLATIONARY COST-PUSH)</td></tr>
-              <tr><td class="label">LONG ENTRY ZONE:</td><td class="val" id="val-ppi-entry-long" style="color:#ffffff;">$4,022.00 - $4,028.00 (RECESSIONARY COOLING)</td></tr>
-              <tr><td class="label">STOP LOSS:</td><td class="val" id="val-ppi-ticket-sl">$4,058.00 (UPSTREAM CEILING)</td></tr>
-              <tr><td class="label">TARGET 1 / TARGET 2:</td><td class="val" id="val-ppi-ticket-tp">$4,030.00 / $4,015.00 (RR: 1:1.6 / 1:2.8)</td></tr>
-              <tr><td class="label">RECOMMENDED LOT:</td><td class="val" style="color:var(--amber-cmd);">0.03 LOT ($30.00 / 3% Max Risk on $1,000 Equity)</td></tr>
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #161616; padding-bottom:6px;">
+              <div>
+                <div style="font-size:8.5px; color:var(--fg-dim);">FIREWALL LOCKOUT</div>
+                <div class="firewall-digit" id="val-ppi-firewall-timer" style="color:var(--amber-cmd);">ARMED</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="firewall-badge" id="val-ppi-firewall-status" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">STANDBY // TRIGGERS AT 08:30 EST</div>
+                <div style="font-size:8.5px; color:var(--fg-dim); margin-top:2px;">WAVE 1 FIREWALL ARMED. STRICT 60s LOCKOUT UPON PRINT.</div>
+              </div>
+            </div>
+            <table class="bbg-mini-table" style="margin-top:8px;">
+              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-ppi-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
+              <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-ppi-ticket-entry">--</td></tr>
+              <tr><td class="label">STOP LOSS:</td><td class="val" id="val-ppi-ticket-sl" style="color:#ff4444;">--</td></tr>
+              <tr><td class="label">TAKE PROFIT:</td><td class="val" id="val-ppi-ticket-tp">--</td></tr>
+              <tr><td class="label">ANCHORED VWAP:</td><td class="val" id="val-ppi-ticket-avwap">--</td></tr>
+              <tr><td class="label">KYLE'S LAMBDA:</td><td class="val" id="val-ppi-ticket-lambda">--</td></tr>
             </table>
           </div>
         </section>
 
       </div>
 
-      <!-- Collapsible 36-Release Historical Database -->
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="ppi-audit-toggle-header">
-          <div>[ 07 // AUDIT &lt;GO&gt; : 36-RELEASE DEMAND &amp; PIPELINE EMPIRICAL RECORD ]</div>
-          <div id="ppi-audit-toggle-icon">[ + CLICK TO EXPAND FULL DATABASE ]</div>
+          <div>[ 07 // AUDIT &lt;GO&gt; : 36-RELEASE PPI &amp; DEMAND POST-NEWS MOVEMENT RECORD ]</div>
+          <div id="ppi-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
         </div>
-        <div class="audit-table-scroll" id="ppi-audit-table-scroll" style="display:none;">
+        <div class="audit-table-scroll" id="ppi-audit-table-scroll" style="display:block;">
           <table class="bbg-audit-table">
             <thead>
-              <tr><th>DATE</th><th>PPI ACTUAL (%)</th><th>PPI FCST (%)</th><th>RETAIL SALES (%)</th><th>RETAIL FCST (%)</th><th>COMPOSITE Z</th><th>GOLD RET (%)</th><th>DEMAND STANCE</th></tr>
+              <tr><th>DATE</th><th>PPI ACT (%)</th><th>PPI FCST (%)</th><th>RETAIL (%)</th><th>RET FCST (%)</th><th>Z_DEMAND</th><th>GOLD OPEN → CLOSE</th><th>GOLD RET (%)</th><th>DIST MEAN (σ)</th><th>VR(5m)</th><th>REGIME</th></tr>
             </thead>
             <tbody id="ppi-tbody"></tbody>
           </table>
@@ -804,12 +870,10 @@
     </div>
   </main>
 
-
   <!-- ==================== MODULE 05: DAILY A* SETUP ==================== -->
   <main class="module-view" id="mod-astar">
     <div style="padding:14px; display:flex; flex-direction:column; gap:12px;">
 
-      <!-- TTL Countdown & Alpha Decay Ribbon -->
       <div class="cockpit-ribbon" style="justify-content:space-between;">
         <div style="display:flex; align-items:center; gap:16px;">
           <div>[ ASTR.TTL &lt;GO&gt; ] <span style="color:var(--fg-dim);">VALIDITY WINDOW:</span> <strong id="astar-ttl-timer" style="color:var(--amber-cmd);">--m --s</strong></div>
@@ -821,10 +885,8 @@
         </button>
       </div>
 
-      <!-- 6-Pane Workstation Grid for A* -->
       <div class="bbg-workstation-grid">
 
-        <!-- PANE 01: CAMARILLA & CENTRAL PIVOT GEOMETRY -->
         <section class="bbg-pane" id="pane-ast-pivots">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">01 // PIVOT &lt;GO&gt;</span><span>CAMARILLA &amp; CENTRAL PIVOT GEOMETRY</span></div>
@@ -832,34 +894,32 @@
           </div>
           <div class="bbg-pane-body">
             <table class="bbg-mini-table">
-              <tr><td class="label">R3 (EXHAUSTION HIGH):</td><td class="val" id="ast-r3">$4,078.60</td></tr>
-              <tr><td class="label">R2 (CAMARILLA SUPPLY):</td><td class="val" id="ast-r2">$4,059.60</td></tr>
-              <tr><td class="label">R1 (VALUE AREA HIGH):</td><td class="val" id="ast-r1">$4,058.64</td></tr>
-              <tr><td class="label">PP (CENTRAL PIVOT):</td><td class="val" id="ast-pp" style="color:var(--amber-cmd); font-weight:900;">$4,046.30</td></tr>
-              <tr><td class="label">S1 (VALUE AREA LOW):</td><td class="val" id="ast-s1">$4,035.18</td></tr>
-              <tr><td class="label">S2 (CAMARILLA DEMAND):</td><td class="val" id="ast-s2">$4,026.00</td></tr>
-              <tr><td class="label">S3 (STRUCTURAL FLOOR):</td><td class="val" id="ast-s3">$4,017.51</td></tr>
+              <tr><td class="label">R3 (EXHAUSTION HIGH):</td><td class="val" id="ast-r3">--</td></tr>
+              <tr><td class="label">R2 (CAMARILLA SUPPLY):</td><td class="val" id="ast-r2">--</td></tr>
+              <tr><td class="label">R1 (VALUE AREA HIGH):</td><td class="val" id="ast-r1">--</td></tr>
+              <tr><td class="label">PP (CENTRAL PIVOT):</td><td class="val" id="ast-pp" style="color:var(--amber-cmd); font-weight:900;">--</td></tr>
+              <tr><td class="label">S1 (VALUE AREA LOW):</td><td class="val" id="ast-s1">--</td></tr>
+              <tr><td class="label">S2 (CAMARILLA DEMAND):</td><td class="val" id="ast-s2">--</td></tr>
+              <tr><td class="label">S3 (STRUCTURAL FLOOR):</td><td class="val" id="ast-s3">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 02: INTRADAY KOU JUMP MONTE CARLO SDE -->
         <section class="bbg-pane" id="pane-ast-mc">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">02 // SDE &lt;GO&gt;</span><span>INTRADAY JUMP MONTE CARLO (2,000 PATHS)</span></div>
+            <div class="bbg-pane-title"><span class="tag">02 // SDE &lt;GO&gt;</span><span>INTRADAY JUMP MONTE CARLO (10,000 PATHS)</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ast-mc">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
-            <div class="bbg-hud-bar" id="hud-ast-mc">HOVER TIMESTEP // PERCENTILE ENVELOPE [P5, P25, P50, P75, P95]</div>
+            <div class="bbg-hud-bar" id="hud-ast-mc">HOVER TIMESTEP // 10,000-PATH ENVELOPE [P5, P25, P50, P75, P95]</div>
             <div class="bbg-chart-canvas" id="canvas-astar-mc"></div>
             <table class="bbg-mini-table">
-              <tr><td class="label">FIRST-PASSAGE P(WIN):</td><td class="val" id="val-ast-pwin" style="color:var(--fg-bright); font-weight:800;">71.4% (P_up: 58.2% / P_down: 41.8%)</td></tr>
-              <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-ast-var">-1.31% (EXPECTED SHORTFALL -1.82%)</td></tr>
+              <tr><td class="label">FIRST-PASSAGE P(WIN):</td><td class="val" id="val-ast-pwin" style="color:var(--fg-bright); font-weight:800;">--</td></tr>
+              <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-ast-var">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 03: 4 CONFLUENCE PILLARS & LO-MACKINLAY TEST -->
         <section class="bbg-pane" id="pane-ast-gate">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">03 // GATE &lt;GO&gt;</span><span>4 CONFLUENCE PILLARS &amp; RANDOM WALK TEST</span></div>
@@ -867,45 +927,43 @@
           </div>
           <div class="bbg-pane-body">
             <table class="bbg-mini-table">
-              <tr><td class="label">CONFLUENCE SCORE:</td><td class="val" id="ast-score" style="color:var(--amber-cmd); font-weight:900;">97/100 (A* GRADE)</td></tr>
-              <tr><td class="label">1. MACRO TREND (25 pts):</td><td class="val">25/25 (10Y-2Y SPREAD +0.25%, DXY &gt; 102)</td></tr>
-              <tr><td class="label">2. STRUCTURAL SWEEP (25 pts):</td><td class="val">24/25 (M30 VWAP RETEST AT S2 BOUNDARY)</td></tr>
-              <tr><td class="label">3. VOLATILITY EXTENSION (25 pts):</td><td class="val">24/25 (ATR 12.50, SPREAD &lt; 40c)</td></tr>
-              <tr><td class="label">4. CROSS-ASSET MATRIX (25 pts):</td><td class="val">24/25 (2Y NOTE YIELD ALIGNED AT 4.75%)</td></tr>
-              <tr><td class="label">LO-MACKINLAY VR(5m) TEST:</td><td class="val">VR = 1.51x (z = 3.31, p = 0.0009 // REJECT RW)</td></tr>
-              <tr><td class="label">KYLE'S LAMBDA (λ) TEST:</td><td class="val">λ = 0.3091% (t = 4.12, p &lt; 0.001 // ACTIVE ACCUM)</td></tr>
+              <tr><td class="label">CONFLUENCE SCORE:</td><td class="val" id="ast-score" style="color:var(--amber-cmd); font-weight:900;">--</td></tr>
+              <tr><td class="label">1. MACRO TREND (25 pts):</td><td class="val" id="ast-p1">--</td></tr>
+              <tr><td class="label">2. STRUCTURAL SWEEP (25 pts):</td><td class="val" id="ast-p2">--</td></tr>
+              <tr><td class="label">3. VOLATILITY EXTENSION (25 pts):</td><td class="val" id="ast-p3">--</td></tr>
+              <tr><td class="label">4. CROSS-ASSET MATRIX (25 pts):</td><td class="val" id="ast-p4">--</td></tr>
+              <tr><td class="label">LO-MACKINLAY VR(5m) TEST:</td><td class="val" id="ast-vr5">--</td></tr>
+              <tr><td class="label">KYLE'S LAMBDA (λ):</td><td class="val" id="ast-lambda">--</td></tr>
             </table>
           </div>
         </section>
 
-        <!-- PANE 04: READY-TO-EXECUTE LOCKED TICKET & PROGRESS GAUGE -->
         <section class="bbg-pane" id="astar-ticket-pane" style="border: 1px solid var(--amber-cmd);">
           <div class="bbg-pane-header" style="background:#141000; border-bottom:1px solid var(--amber-dim);">
             <div class="bbg-pane-title">
               <span class="tag" style="background:var(--amber-cmd); color:#000;">TICKET &lt;GO&gt;</span>
-              <span id="astar-ticket-label" style="color:var(--amber-cmd); font-weight:900;">★ A* GRADE EXECUTION TICKET (M30/M15 CONFIRMATION)</span>
+              <span id="astar-ticket-label" style="color:var(--amber-cmd); font-weight:900;">EXECUTION TICKET (M30/M15 GATE)</span>
             </div>
-            <div id="astar-grade-badge" style="font-size:9.5px; font-weight:900; color:var(--amber-cmd);">97/100</div>
+            <div id="astar-grade-badge" style="font-size:9.5px; font-weight:900; color:var(--amber-cmd);">--</div>
           </div>
           <div class="bbg-pane-body">
             <div id="astar-action" style="font-size:13px; font-weight:900; color:#ffffff; margin-bottom:8px;">
-              ACTION: MOMENTUM BUY CATCH / LONG EXPANSION ON M30 IMPULSE
+              ACTION: EVALUATING LIVE STREAM...
             </div>
             <table class="bbg-mini-table">
-              <tr><td class="label">ENTRY ZONE:</td><td class="val" id="astar-entry" style="color:var(--fg-bright); font-weight:700;">$4,031.26 - $4,046.30</td></tr>
-              <tr><td class="label">STOP LOSS:</td><td class="val" id="astar-sl" style="color:#ff4444; font-weight:700;">$3,958.24</td></tr>
-              <tr><td class="label">TAKE PROFIT 1:</td><td class="val" id="astar-tp1" style="color:#ffffff; font-weight:700;">$4,059.60 (1:1.5 RR)</td></tr>
-              <tr><td class="label">TAKE PROFIT 2:</td><td class="val" id="astar-tp2" style="color:#ffffff; font-weight:700;">$4,078.60 (1:2.8 RR)</td></tr>
-              <tr><td class="label">POSITION SIZE:</td><td class="val" id="astar-lot" style="color:var(--amber-cmd); font-weight:800;">0.03 LOT ($30.00 / 3.0% Max Risk)</td></tr>
+              <tr><td class="label">ENTRY ZONE:</td><td class="val" id="astar-entry" style="color:var(--fg-bright); font-weight:700;">--</td></tr>
+              <tr><td class="label">STOP LOSS:</td><td class="val" id="astar-sl" style="color:#ff4444; font-weight:700;">--</td></tr>
+              <tr><td class="label">TAKE PROFIT 1:</td><td class="val" id="astar-tp1" style="color:#ffffff; font-weight:700;">--</td></tr>
+              <tr><td class="label">TAKE PROFIT 2:</td><td class="val" id="astar-tp2" style="color:#ffffff; font-weight:700;">--</td></tr>
+              <tr><td class="label">POSITION SIZE:</td><td class="val" id="astar-lot" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
             </table>
 
-            <!-- Visual Position Risk/Reward Progress Bar Gauge -->
             <div id="astar-progress-wrap" style="margin-top:10px; padding:8px; background:#080808; border:1px solid #222;">
               <div style="display:flex; justify-content:space-between; font-size:9px; color:#888; font-family:var(--font-mono); margin-bottom:4px;">
-                <span>SL: <strong id="gauge-sl" style="color:#ff4444;">$3,958.24</strong></span>
-                <span>ENTRY: <strong id="gauge-entry" style="color:#aaa;">$4,035.00</strong></span>
-                <span>LIVE: <strong id="gauge-live" style="color:var(--amber-cmd);">$4,030.80</strong></span>
-                <span>TP1: <strong id="gauge-tp1" style="color:#ffffff;">$4,059.60</strong></span>
+                <span>SL: <strong id="gauge-sl" style="color:#ff4444;">--</strong></span>
+                <span>ENTRY: <strong id="gauge-entry" style="color:#aaa;">--</strong></span>
+                <span>LIVE: <strong id="gauge-live" style="color:var(--amber-cmd);">--</strong></span>
+                <span>TP1: <strong id="gauge-tp1" style="color:#ffffff;">--</strong></span>
               </div>
               <div style="width:100%; height:10px; background:#1c1c20; position:relative; overflow:hidden;">
                 <div id="gauge-loss-bar" style="position:absolute; left:0; top:0; height:100%; width:25%; background:rgba(255,42,42,0.4);"></div>
@@ -914,16 +972,15 @@
                 <div id="gauge-cursor-pin" style="position:absolute; left:30%; top:0; height:100%; width:3px; background:var(--amber-cmd); box-shadow:0 0 6px var(--amber-cmd); z-index:3;"></div>
               </div>
               <div style="display:flex; justify-content:space-between; font-size:9.5px; color:#aaa; font-family:var(--font-mono); margin-top:5px;">
-                <span>P&amp;L: <strong id="gauge-pnl-usd" style="color:#fff;">+$0.00 USD</strong></span>
-                <span>R: <strong id="gauge-pnl-r" style="color:#fff;">+0.00 R</strong></span>
-                <span>STATUS: <strong id="gauge-status-badge" style="color:var(--amber-cmd);">TRIGGERED_RUNNING</strong></span>
+                <span>P&amp;L: <strong id="gauge-pnl-usd" style="color:#fff;">$0.00 USD</strong></span>
+                <span>R: <strong id="gauge-pnl-r" style="color:#fff;">0.00 R</strong></span>
+                <span>STATUS: <strong id="gauge-status-badge" style="color:var(--amber-cmd);">STANDBY</strong></span>
               </div>
             </div>
           </div>
         </section>
 
-        <!-- PANE 05: GLOBAL MACRO SOVEREIGN MATRIX (G7 & BRICS) -->
-        <section class="bbg-pane" id="pane-ast-macro" style="grid-column: 1 / -1;">
+        <section class="bbg-pane" id="pane-ast-macro" style="grid-column: span 2;">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">05 // G7 &lt;GO&gt;</span><span>GLOBAL MACRO SOVEREIGN SPILLOVER MATRIX (G7 &amp; BRICS)</span></div>
             <div style="font-size:9px; color:var(--amber-cmd);">GSI: +0.82σ | GLOBAL FIAT DEBASEMENT: 84.5/100</div>
@@ -931,7 +988,7 @@
           <div class="bbg-pane-body" style="padding:0; overflow-x:auto;">
             <table class="bbg-audit-table">
               <thead>
-                <tr><th>COUNTRY / BLOC</th><th>POLICY RATE</th><th>INFLATION (CPI)</th><th>10Y YIELD</th><th>REAL YIELD</th><th>GOLD TRANSMISSION BETA</th><th>DEBASEMENT INDEX</th></tr>
+                <tr><th>COUNTRY / CCY</th><th>POLICY RATE</th><th>HEADLINE CPI</th><th>REAL RATE</th><th>GOLD BETA</th><th>REGIME</th></tr>
               </thead>
               <tbody id="global-macro-tbody"></tbody>
             </table>
@@ -940,13 +997,12 @@
 
       </div>
 
-      <!-- Section: Historical Setup Performance Audit Ledger -->
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="astar-audit-toggle-header">
           <div>[ 06 // AUDIT.ASTR &lt;GO&gt; : HISTORICAL SETUP PERFORMANCE RECORD (VERIFIED TICKS) ]</div>
-          <div id="astar-audit-toggle-icon">[ + CLICK TO EXPAND FULL DATABASE ]</div>
+          <div id="astar-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
         </div>
-        <div class="audit-table-scroll" id="astar-audit-table-scroll" style="display:none;">
+        <div class="audit-table-scroll" id="astar-audit-table-scroll" style="display:block;">
           <table class="bbg-audit-table">
             <thead>
               <tr><th>DATE / TIME</th><th>SETUP ID</th><th>EVENT / ASSET</th><th>DIRECTION</th><th>LOCKED ENTRY</th><th>STOP LOSS</th><th>TAKE PROFIT 1</th><th>STATUS</th><th>REALIZED R</th><th>TRADE RESOLUTION</th></tr>

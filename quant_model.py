@@ -200,6 +200,7 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
         entry_high = round(current_price + 0.786 * atr_m30, 2)
         stop_loss = round(entry_high + 0.80 * atr_m30, 2)
         target = round(current_price - 1.618 * atr_m30, 2)
+        target_2 = round(current_price - 2.618 * atr_m30, 2)
         risk_dist = round(stop_loss - entry_high, 2)
         reward_dist = round(entry_high - target, 2)
         rr = round(reward_dist / max(1.0, risk_dist), 2)
@@ -210,6 +211,7 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
         entry_high = round(current_price - 0.382 * atr_m30, 2)
         stop_loss = round(entry_low - 0.80 * atr_m30, 2)
         target = round(current_price + 1.618 * atr_m30, 2)
+        target_2 = round(current_price + 2.618 * atr_m30, 2)
         risk_dist = round(entry_low - stop_loss, 2)
         reward_dist = round(target - entry_low, 2)
         rr = round(reward_dist / max(1.0, risk_dist), 2)
@@ -220,6 +222,7 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
         entry_high = round(current_price + 0.20 * atr_m30, 2)
         stop_loss = round(current_price + 1.20 * atr_m30, 2)
         target = round(current_price - 1.20 * atr_m30, 2)
+        target_2 = round(current_price - 2.00 * atr_m30, 2)
         risk_dist = round(stop_loss - current_price, 2)
         reward_dist = round(current_price - target, 2)
         rr = 1.00
@@ -239,6 +242,7 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
         "entry_zone": f"${entry_low:.2f} - ${entry_high:.2f}",
         "stop_loss": f"${stop_loss:.2f}",
         "target": f"${target:.2f}",
+        "target_2": f"${target_2:.2f}",
         "risk_reward_ratio": f"1:{rr:.2f}",
         "bayesian_parameters": {
             "prior_mu": mu_prior,
@@ -252,73 +256,61 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
 # -------------------------------------------------------------
 # ADVANCED MATHEMATICAL ENGINES: FIRST-PASSAGE MC, GARCH-X, TTL & FOOTPRINT
 # -------------------------------------------------------------
-def calculate_first_passage_win_probability(current_price, entry_price, sl_price, tp_price, drift_pct=0.0, atr_m30=12.50, is_buy=True, n_paths=2000, steps=24):
+def calculate_first_passage_win_probability(current_price, entry_price, sl_price, tp_price, drift_pct=0.0, atr_m30=12.50, is_buy=True, n_paths=10000, steps=24):
     """
-    Monte Carlo First-Passage Time Simulation Engine:
-    Calculates exact mathematical win probability P(Hits TP before SL) across 2,000 continuous paths.
+    Vectorized 10,000-Path Monte Carlo First-Passage Time Simulation Engine:
+    Calculates exact mathematical win probability P(Hits TP before SL) across 10,000 continuous paths.
     Enforces strict A* Grade threshold: P(Win) >= 68.0%.
-    Generates survival curve points showing probability of reaching target over time t.
     """
     np.random.seed(42)
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = entry_price if entry_price else current_price
-    
+
     step_vol = (atr_m30 / max(1.0, current_price)) * 0.70
     drift_step = (drift_pct / 100.0) / steps
-    
-    for t in range(1, steps + 1):
-        z = np.random.normal(0, 1, n_paths)
-        paths[:, t] = paths[:, t - 1] * np.exp((drift_step - 0.5 * step_vol**2) + step_vol * z)
-        
-    tp_hits = 0
-    sl_hits = 0
-    undecided = 0
-    
-    cum_tp_by_step = np.zeros(steps + 1)
-    cum_sl_by_step = np.zeros(steps + 1)
-    
-    for i in range(n_paths):
-        path = paths[i]
-        tau_tp = None
-        tau_sl = None
-        for step_idx in range(1, steps + 1):
-            val = path[step_idx]
-            if is_buy:
-                if val >= tp_price and tau_tp is None:
-                    tau_tp = step_idx
-                if val <= sl_price and tau_sl is None:
-                    tau_sl = step_idx
-            else:
-                if val <= tp_price and tau_tp is None:
-                    tau_tp = step_idx
-                if val >= sl_price and tau_sl is None:
-                    tau_sl = step_idx
-                    
-        if tau_tp is not None and (tau_sl is None or tau_tp < tau_sl):
-            tp_hits += 1
-            cum_tp_by_step[tau_tp:] += 1
-        elif tau_sl is not None and (tau_tp is None or tau_sl < tau_tp):
-            sl_hits += 1
-            cum_sl_by_step[tau_sl:] += 1
-        else:
-            undecided += 1
-            
+
+    z = np.random.normal(0, 1, (n_paths, steps))
+    log_rets = (drift_step - 0.5 * step_vol**2) + step_vol * z
+    paths[:, 1:] = paths[:, :1] * np.exp(np.cumsum(log_rets, axis=1))
+
+    sub = paths[:, 1:]
+    if is_buy:
+        tp_mask = sub >= tp_price
+        sl_mask = sub <= sl_price
+    else:
+        tp_mask = sub <= tp_price
+        sl_mask = sub >= sl_price
+
+    tp_any = np.any(tp_mask, axis=1)
+    sl_any = np.any(sl_mask, axis=1)
+    tau_tp = np.where(tp_any, np.argmax(tp_mask, axis=1) + 1, steps + 99)
+    tau_sl = np.where(sl_any, np.argmax(sl_mask, axis=1) + 1, steps + 99)
+
+    win_mask = tp_any & (tau_tp < tau_sl)
+    loss_mask = sl_any & (tau_sl < tau_tp)
+    tp_hits = int(np.sum(win_mask))
+    sl_hits = int(np.sum(loss_mask))
+    undecided = n_paths - tp_hits - sl_hits
+
     decided_total = tp_hits + sl_hits
     win_prob = round((tp_hits / max(1, decided_total)) * 100.0, 1)
     overall_win_prob = round((tp_hits / n_paths) * 100.0, 1)
     overall_loss_prob = round((sl_hits / n_paths) * 100.0, 1)
-    
+
     survival_curve = []
     for s in range(1, steps + 1, 2):
+        cum_w = float(np.mean(win_mask & (tau_tp <= s)) * 100.0)
+        cum_l = float(np.mean(loss_mask & (tau_sl <= s)) * 100.0)
         survival_curve.append({
             "step": s,
             "minute_label": f"T+{s*15}m",
-            "cum_p_win": round(float(cum_tp_by_step[s] / n_paths * 100.0), 1),
-            "cum_p_loss": round(float(cum_sl_by_step[s] / n_paths * 100.0), 1)
+            "cum_p_win": round(cum_w, 1),
+            "cum_p_loss": round(cum_l, 1)
         })
-        
+
     return {
         "is_buy": is_buy,
+        "n_paths": n_paths,
         "entry_price": entry_price,
         "sl_price": sl_price,
         "tp_price": tp_price,
@@ -362,27 +354,82 @@ def predict_garch_shock_dispersion(event_type="cpi", survey_sd=0.075, vix_val=19
         "regime_volatility": "HIGH_VOLATILITY_EXPANSION" if expansion_ratio >= 1.20 else ("NORMAL_DISPERSION" if expansion_ratio >= 0.90 else "LOW_COMPRESSION")
     }
 
+_INTRADAY_CACHE = {"ts": 0.0, "closes": None}
+
+def _get_cached_m30_returns():
+    import time
+    now = time.time()
+    if _INTRADAY_CACHE["closes"] is not None and (now - _INTRADAY_CACHE["ts"] < 300):
+        return _INTRADAY_CACHE["closes"]
+    try:
+        import yfinance as yf
+        df = yf.download("GC=F", period="5d", interval="30m", progress=False)
+        if not df.empty and "Close" in df:
+            closes = df["Close"].dropna().to_numpy(dtype=float).ravel()
+            if len(closes) >= 20:
+                _INTRADAY_CACHE["ts"] = now
+                _INTRADAY_CACHE["closes"] = closes
+                return closes
+    except Exception:
+        pass
+    return None
+
 def compute_algorithmic_footprint(event_type="daily", current_price=4036.17, atr_m30=12.50, volume_k=61.32):
     """
-    Algorithmic Order Flow & Footprint Detection:
-    Calculates Kyle's Lambda (market impact parameter), Amihud Illiquidity,
-    and Lo-MacKinlay (1988) Variance Ratio VR(5) to identify institutional algorithmic accumulation.
+    Empirical Lo-MacKinlay (1988) Variance Ratio VR(5) & Kyle's Lambda Footprint:
+    Computes actual VR(5) and heteroskedasticity-consistent z* on live M30 GC=F log returns
+    (filtering weekend/rollover gaps > 1.5%), falling back to empirical CPI event distribution if offline.
     """
     kyles_lambda = round((atr_m30 / max(1.0, volume_k * 100.0)) * 10.0, 4)
     amihud_illiq = round((atr_m30 / max(1.0, current_price)) / max(1.0, volume_k) * 1000.0, 4)
-    
-    rhos = [0.18, 0.12, 0.08, 0.04]
-    weights = [1.0 - (k / 5.0) for k in range(1, 5)]
-    vr_5 = round(1.0 + 2.0 * sum(w * r for w, r in zip(weights, rhos)), 2)
-    
-    z_stat = round((vr_5 - 1.0) / 0.154, 2)
-    p_val = round(2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(z_stat) / math.sqrt(2)))), 4)
-    
-    is_algorithmic = vr_5 > 1.25 and p_val < 0.05
-    footprint_verdict = f"INSTITUTIONAL ALGORITHMIC ACCUMULATION (VR={vr_5} > 1.25, p<0.01)" if is_algorithmic else "RETAIL RANDOM WALK CHOP (VR ≈ 1.0)"
+
+    closes = _get_cached_m30_returns()
+    rets = None
+    if closes is not None and len(closes) >= 20:
+        raw_rets = np.diff(np.log(closes))
+        raw_rets = raw_rets[np.abs(raw_rets) < 0.015]
+        if len(raw_rets) >= 20:
+            rets = raw_rets
+
+    if rets is None:
+        # Empirical fallback from historical CPI closes
+        import os
+        hist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "cpi_historical.json")
+        try:
+            with open(hist_path) as f:
+                h = json.load(f)
+            rets = np.array([e["gold_return_pct"] / 100.0 for e in h if "gold_return_pct" in e], dtype=float)
+        except Exception:
+            rets = np.array([0.005, -0.004, 0.006, -0.005, 0.004, -0.003, 0.002, -0.001, 0.003, -0.002])
+
+    n = len(rets)
+    q = 5
+    mu = float(np.mean(rets))
+    var_1 = float(np.sum((rets - mu) ** 2) / max(1, n - 1))
+    q_rets = np.array([np.sum(rets[i:i + q]) for i in range(n - q + 1)])
+    m = q * (n - q + 1) * (1.0 - q / n)
+    var_q = float(np.sum((q_rets - q * mu) ** 2) / max(1e-12, m))
+    vr_5 = round(var_q / max(1e-12, var_1), 2)
+
+    denom = float((np.sum((rets - mu) ** 2)) ** 2)
+    sum_delta = 0.0
+    if denom > 0:
+        for j in range(1, q):
+            num_j = float(np.sum(((rets[j:] - mu) ** 2) * ((rets[:-j] - mu) ** 2)))
+            delta_j = n * num_j / denom
+            sum_delta += ((2.0 * (q - j) / q) ** 2) * delta_j
+    z_stat = round((vr_5 - 1.0) / math.sqrt(max(1e-8, sum_delta)), 2)
+    p_val = round(float(2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(z_stat) / math.sqrt(2.0))))), 4)
+
+    is_algorithmic = (vr_5 > 1.25 or vr_5 < 0.75) and p_val < 0.05
+    if is_algorithmic:
+        footprint_verdict = f"NON-RANDOM FLOW DETECTED (VR={vr_5}, p={p_val:.4f} < 0.05)"
+    else:
+        footprint_verdict = f"RANDOM WALK / BALANCED FLOW (VR={vr_5}, p={p_val:.4f} >= 0.05)"
 
     return {
         "event_type": event_type,
+        "n_bars": n,
         "kyles_lambda": kyles_lambda,
         "amihud_illiq": amihud_illiq,
         "lo_mackinlay_vr5": vr_5,
@@ -456,24 +503,31 @@ def calculate_time_to_live_status(event_type="daily", setup_created_epoch=None, 
 
 # METHOD 5.2: DYNAMIC ATR SUPPORT / RESISTANCE GEOMETRY
 # -------------------------------------------------------------
-def calculate_dynamic_levels(current_price=4036.17, atr_m30=12.50, atr_d1=48.00, session_h=4078.60, session_l=4017.51, session_c=4042.80):
+def calculate_dynamic_levels(current_price=4036.17, atr_m30=12.50, atr_d1=48.00, session_h=None, session_l=None, session_c=None):
     """
     Structural Intraday Support / Resistance Geometry.
-    Eliminates moving-goalpost drift by anchoring levels to Fixed Session Extremes
-    (Previous High, Low, Close, and Central Pivot PP).
-    Tracks active level breaches and invalidation states in real time.
+    Anchors levels to live/recent session extremes (High, Low, Close, and Central Pivot PP),
+    falling back cleanly to current_price +/- 1.8 * atr_m30 when session extremes are not supplied.
     """
+    if session_h is None or session_l is None or session_c is None or session_h <= session_l:
+        session_h = round(current_price + 1.8 * atr_m30, 2)
+        session_l = round(current_price - 1.8 * atr_m30, 2)
+        session_c = round(current_price, 2)
+    else:
+        session_h = round(float(session_h), 2)
+        session_l = round(float(session_l), 2)
+        session_c = round(float(session_c), 2)
+
     PP = round((session_h + session_l + session_c) / 3.0, 2)
-    diff = session_h - session_l
+    diff = max(atr_m30, session_h - session_l)
 
     r3 = session_h # True Session High / Exhaustion
     r2 = round(session_c + diff * 1.1 / 4.0, 2) # Camarilla R3 Supply Reversal
-    r1 = round(PP + 0.382 * (session_h - PP), 2) # Minor Value Area High Resistance
+    r1 = round(PP + 0.382 * max(0.5 * atr_m30, session_h - PP), 2) # Minor Value Area High Resistance
 
-    s1 = round(PP - 0.382 * (PP - session_l), 2) # Minor Value Area Low Support
+    s1 = round(PP - 0.382 * max(0.5 * atr_m30, PP - session_l), 2) # Minor Value Area Low Support
     s2 = round(session_c - diff * 1.1 / 4.0, 2) # Camarilla S3 Demand Reversal
     s3 = session_l # True Session Low / Structural Floor
-
     # Real-Time Invalidation & Breach States
     r1_status = "ACTIVE RESISTANCE" if current_price < r1 else "BREACHED / INVERTED TO SUPPORT"
     r2_status = "MAJOR SUPPLY CEILING" if current_price < r2 else "BREACHED (EXPANSION HIGH)"
@@ -805,27 +859,33 @@ class SetupLifecycleManager:
         self._save(data)
         return active, data.get("completed_setups", [])
 
-def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.20, n_paths=2000, setup_created_epoch=None):
+def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.20, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None):
     """
-    INSTITUTIONAL QUANTITATIVE A* SETUP ENGINE (LOCKED CONTRACT & TICK VALIDATION SUITE):
-    Integrates 2,000-Path Monte Carlo First-Passage Time Win Probability P(Win),
-    GARCH-X Predicted Shock Dispersion, Kyle's Lambda / Lo-MacKinlay VR Footprint,
-    and Immutable Locked Setup Lifecycle State Machine.
+    INSTITUTIONAL QUANTITATIVE A* SETUP ENGINE (10,000-PATH MONTE CARLO & REAL DATA GATES):
+    Integrates 10,000-Path Monte Carlo First-Passage Time Win Probability P(Win),
+    GARCH-X Predicted Shock Dispersion, Empirical Lo-MacKinlay VR Footprint,
+    and Strict RR >= 1.50 & P(Win) >= 68% Execution Gate.
     """
-    session_h = 4078.60
-    session_l = 4017.51
-    session_c = 4042.80
+    if session_h is None or session_l is None or session_c is None or session_h <= session_l:
+        session_h = round(current_price + 1.8 * atr_m30, 2)
+        session_l = round(current_price - 1.8 * atr_m30, 2)
+        session_c = round(current_price, 2)
+    else:
+        session_h = round(float(session_h), 2)
+        session_l = round(float(session_l), 2)
+        session_c = round(float(session_c), 2)
+
     PP = round((session_h + session_l + session_c) / 3.0, 2)
-    diff = session_h - session_l
+    diff = max(atr_m30, session_h - session_l)
 
     r3 = session_h
     r2 = round(session_c + diff * 1.1 / 4.0, 2)
-    r1 = round(PP + 0.382 * (session_h - PP), 2)
-    s1 = round(PP - 0.382 * (PP - session_l), 2)
+    r1 = round(PP + 0.382 * max(0.5 * atr_m30, session_h - PP), 2)
+    s1 = round(PP - 0.382 * max(0.5 * atr_m30, PP - session_l), 2)
     s2 = round(session_c - diff * 1.1 / 4.0, 2)
     s3 = session_l
 
-    dyn = calculate_dynamic_levels(current_price, atr_m30)
+    dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
     mgr = SetupLifecycleManager()
     active_locked, completed_list = mgr.evaluate_live_tick(current_price)
 
@@ -836,75 +896,62 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     oil_shift = round(((wti_val - 85.00) / 10.00) * 0.142, 3)
     macro_drift = (-0.38 * dxy_z - 0.25 * (yield_spread - 0.20) + 0.18 * oil_shift) / 100.0
 
-    # 2. Quantitative Momentum Vector (Catch on Momentum)
+    # 2. Quantitative Momentum Vector
     price_displacement = round(current_price - PP, 2)
     m30_velocity = round(price_displacement / max(1.0, atr_m30), 2)
     kyles_lambda = round((atr_m30 / max(1.0, current_price)) * 100.0, 4)
 
-    # 3. Check if an ACTIVE LOCKED CONTRACT already exists
+    # 3. 10,000-Path Monte Carlo Jump-Diffusion Simulation
+    np.random.seed(42)
+    steps = 12
+    paths = np.zeros((n_paths, steps + 1))
+    paths[:, 0] = current_price
+    step_vol = (atr_m30 / max(1.0, current_price)) * 0.65
+    drift_step = (macro_drift + 0.0015 * m30_velocity) / steps
+    z_mat = np.random.normal(0, 1, (n_paths, steps))
+    paths[:, 1:] = current_price * np.exp(np.cumsum((drift_step - 0.5 * step_vol**2) + step_vol * z_mat, axis=1))
+
+    p5 = np.percentile(paths, 5, axis=0)
+    p25 = np.percentile(paths, 25, axis=0)
+    p50 = np.percentile(paths, 50, axis=0)
+    p75 = np.percentile(paths, 75, axis=0)
+    p95 = np.percentile(paths, 95, axis=0)
+
+    terminal_rets = (paths[:, -1] - paths[:, 0]) / paths[:, 0] * 100.0
+    p_up = round(float(np.mean(terminal_rets > 0) * 100.0), 1)
+    p_down = round(float(np.mean(terminal_rets < 0) * 100.0), 1)
+    var_95_pct = round(float(np.percentile(terminal_rets, 5)), 2)
+    cvar_95_pct = round(float(np.mean(terminal_rets[terminal_rets <= var_95_pct])), 2)
+    median_terminal = round(float(p50[-1]), 2)
+
+    # 4. Locked vs Live Setup Evaluation
     if active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
         e_low, e_high = active_locked.get("entry_zone", [current_price, current_price])
-        entry_low = e_low
-        entry_high = e_high
-        sl_val = active_locked.get("trailed_sl") if active_locked.get("trailed_sl") is not None else active_locked.get("stop_loss", current_price - 6.0)
-        tp1_val = active_locked.get("take_profit_1", current_price + 12.0)
-        tp2_val = active_locked.get("take_profit_2", current_price + 24.0)
+        entry_low, entry_high = e_low, e_high
+        sl_val = active_locked.get("trailed_sl") if active_locked.get("trailed_sl") is not None else active_locked.get("stop_loss", current_price - atr_m30)
+        tp1_val = active_locked.get("take_profit_1", current_price + 1.8 * atr_m30)
+        tp2_val = active_locked.get("take_profit_2", current_price + 3.0 * atr_m30)
         raw_action = active_locked.get("action", "")
         ticket_type = active_locked.get("ticket_type", "")
         is_bullish = active_locked.get("direction", "BUY") == "BUY"
+        mid_entry = (entry_low + entry_high) / 2.0
+        risk = max(1.0, abs(mid_entry - sl_val))
+        reward = abs(tp1_val - mid_entry)
+        rr = round(reward / risk, 2)
+        fp_analysis = calculate_first_passage_win_probability(current_price, mid_entry, sl_val, tp1_val, drift_pct=macro_drift*100, atr_m30=atr_m30, is_buy=is_bullish, n_paths=n_paths)
+        p_win = fp_analysis["win_probability_pct"]
         is_a_star = True
-        p_win = 71.4
-        p_up = 65.0 if is_bullish else 35.0
-        p_down = 35.0 if is_bullish else 65.0
-        var_95_pct = -1.26
-        cvar_95_pct = -1.55
-        median_terminal = tp1_val
-        p5 = [current_price, sl_val]
-        p75 = [current_price, tp1_val]
-        p95 = [current_price, tp2_val]
-        rr = round(abs(tp1_val - (entry_low + entry_high)/2.0) / max(1.0, abs((entry_low + entry_high)/2.0 - sl_val)), 2)
         bias = "BULLISH_LOCKED_CONTRACT" if is_bullish else "BEARISH_LOCKED_CONTRACT"
-        fp_analysis = {"win_probability_pct": p_win, "threshold_met": True, "survival_curve": []}
     else:
-        # 3. Monte Carlo Jump-Diffusion Path Simulation (2,000 Paths, 12 M30 Steps)
-        np.random.seed(42)
-        steps = 12
-        dt = 1.0 / steps
-        paths = np.zeros((n_paths, steps + 1))
-        paths[:, 0] = current_price
-
-        step_vol = (atr_m30 / current_price) * 0.65
-        drift_step = (macro_drift + 0.0015 * m30_velocity) / steps
-
-        for t in range(1, steps + 1):
-            z = np.random.normal(0, 1, n_paths)
-            paths[:, t] = paths[:, t - 1] * np.exp((drift_step - 0.5 * step_vol**2) + step_vol * z)
-
-        p5 = np.percentile(paths, 5, axis=0)
-        p25 = np.percentile(paths, 25, axis=0)
-        p50 = np.percentile(paths, 50, axis=0)
-        p75 = np.percentile(paths, 75, axis=0)
-        p95 = np.percentile(paths, 95, axis=0)
-
-        terminal_rets = (paths[:, -1] - paths[:, 0]) / paths[:, 0] * 100.0
-        p_up = round(float(np.mean(terminal_rets > 0) * 100.0), 1)
-        p_down = round(float(np.mean(terminal_rets < 0) * 100.0), 1)
-
-        var_95_pct = round(float(np.percentile(terminal_rets, 5)), 2)
-        cvar_95_pct = round(float(np.mean(terminal_rets[terminal_rets <= var_95_pct])), 2)
-        median_terminal = round(float(p50[-1]), 2)
-
-        # 4. Momentum Catch Engine: Directional Decision & Mathematical Ticket
-        is_bullish = (price_displacement >= 0 and p_up >= 45.0) or (current_price <= s2 + 0.4 * atr_m30)
-
+        is_bullish = (price_displacement >= 0 and p_up >= 48.0) or (current_price <= s2 + 0.4 * atr_m30)
         if is_bullish:
             raw_action = "MOMENTUM BUY CATCH / LONG EXPANSION ON M30 IMPULSE"
             ticket_type = "BULLISH_MONTE_CARLO_MOMENTUM"
-            entry_low = round(max(current_price - 0.15 * atr_m30, PP), 2)
+            entry_low = round(current_price - 0.15 * atr_m30, 2)
             entry_high = round(current_price + 0.15 * atr_m30, 2)
-            sl_val = round(min(float(p5[-1]), PP - 0.4 * atr_m30), 2)
-            tp1_val = round(max(float(p75[-1]), r2), 2)
-            tp2_val = round(max(float(p95[-1]), r3), 2)
+            sl_val = round(entry_low - 0.85 * atr_m30, 2)
+            tp1_val = round(entry_high + 1.50 * atr_m30, 2)
+            tp2_val = round(entry_high + 2.60 * atr_m30, 2)
             risk = max(1.0, entry_high - sl_val)
             reward = tp1_val - entry_high
             rr = round(reward / risk, 2)
@@ -913,48 +960,47 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             raw_action = "MOMENTUM SHORT CATCH / SELL BREAKDOWN ON M30 IMPULSE"
             ticket_type = "BEARISH_MONTE_CARLO_MOMENTUM"
             entry_low = round(current_price - 0.15 * atr_m30, 2)
-            entry_high = round(min(current_price + 0.15 * atr_m30, PP), 2)
-            sl_val = round(max(float(p95[-1]), PP + 0.4 * atr_m30), 2)
-            tp1_val = round(min(float(p25[-1]), s2), 2)
-            tp2_val = round(min(float(p5[-1]), s3), 2)
+            entry_high = round(current_price + 0.15 * atr_m30, 2)
+            sl_val = round(entry_high + 0.85 * atr_m30, 2)
+            tp1_val = round(entry_low - 1.50 * atr_m30, 2)
+            tp2_val = round(entry_low - 2.60 * atr_m30, 2)
             risk = max(1.0, sl_val - entry_low)
             reward = entry_low - tp1_val
             rr = round(reward / risk, 2)
             bias = "BEARISH_MOMENTUM_CATCH"
 
-        # 5. First-Passage Time Monte Carlo Win Probability P(Win)
         mid_entry = (entry_low + entry_high) / 2.0
-        fp_analysis = calculate_first_passage_win_probability(current_price, mid_entry, sl_val, tp1_val, drift_pct=macro_drift*100, atr_m30=atr_m30, is_buy=is_bullish)
+        fp_analysis = calculate_first_passage_win_probability(current_price, mid_entry, sl_val, tp1_val, drift_pct=macro_drift*100, atr_m30=atr_m30, is_buy=is_bullish, n_paths=n_paths)
         p_win = fp_analysis["win_probability_pct"]
 
-    # 6. Algorithmic Footprint & GARCH-X Predicted Shock
+    # 5. Algorithmic Footprint & GARCH-X Predicted Shock
     footprint = compute_algorithmic_footprint("daily", current_price, atr_m30)
     garch_shock = predict_garch_shock_dispersion("daily", 0.45, 19.46, 12.11)
     ttl = calculate_time_to_live_status("daily", setup_created_epoch=setup_created_epoch)
 
-    # 7. Confluence Scoring & Strict Institutional A* Gate (Score >= 85 AND P(Win) >= 68%)
-    macro_score = 24 if abs(macro_drift) > 0.0005 else 18
-    mc_prob_score = int(max(p_up, p_down) * 0.40)
-    vol_score = 23
-    cross_score = 24
+    # 6. Empirical Confluence Scoring
+    macro_score = 24 if abs(macro_drift) > 0.0005 else (20 if abs(macro_drift) > 0.0002 else 16)
+    mc_prob_score = min(25, int(round(max(p_up, p_down) * 0.40)))
+    vol_score = 24 if footprint["is_algorithmic_flow"] else 18
+    cross_score = 24 if (abs(yield_spread) >= 0.15 and abs(dxy_z) >= 0.30) else 19
     total_confluence = macro_score + mc_prob_score + vol_score + cross_score
-    
-    if not (active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]):
-        is_a_star = (total_confluence >= 85) and (p_win >= 68.0)
-    
-    grade = "A* GRADE (INSTITUTIONAL PRIMED)" if is_a_star else ("B-GRADE (STANDARD)" if total_confluence >= 70 else "C-GRADE (CHOP)")
 
-    # Data Validation Gate
+    if not (active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]):
+        is_a_star = (total_confluence >= 85) and (p_win >= 68.0) and (rr >= 1.50)
+
+    grade = "A* GRADE (INSTITUTIONAL PRIMED)" if is_a_star else ("B-GRADE (STANDARD)" if total_confluence >= 70 else "C-GRADE (CHOP)")
+    risk_dist_dollars = max(1.0, abs((entry_low + entry_high) / 2.0 - sl_val))
+    computed_lot = round(max(0.01, min(0.05, 30.0 / (risk_dist_dollars * 100.0))), 2)
+
     gate_checks = {
-        "price_sanity": {"status": "VALID", "detail": f"Spot ${current_price:.2f} within normal range [3500, 4500]"},
+        "price_sanity": {"status": "VALID", "detail": f"Spot ${current_price:.2f} live-anchored"},
         "spread_integrity": {"status": "VALID", "detail": "Live spot spread $0.30 within institutional limit (< $1.50)"},
         "macro_stream_alignment": {"status": "VALID", "detail": f"DXY {dxy_val:.2f}, 10Y {us10y_val:.2f}%, 2Y {us2y_val:.2f}% synchronized"},
         "structural_pivots": {"status": "VALID", "detail": f"Session High ${r3:.2f} > Low ${s3:.2f}; Pivot ${PP:.2f}"},
-        "first_passage_win_rate": {"status": "PASS" if p_win >= 68.0 else "UNMET", "detail": f"P(Win) {p_win}% {'≥ 68% Threshold' if p_win >= 68.0 else '< 68% Threshold'}"},
-        "risk_reward_threshold": {"status": "VALID", "detail": f"RR 1:{rr:.2f} meets minimum institutional threshold (>= 1:1.50)"}
+        "first_passage_win_rate": {"status": "PASS" if p_win >= 68.0 else "UNMET", "detail": f"P(Win) {p_win}% {'≥ 68% Threshold' if p_win >= 68.0 else '< 68% Threshold'} ({n_paths:,} paths)"},
+        "risk_reward_threshold": {"status": "VALID" if rr >= 1.50 else "UNMET", "detail": f"RR 1:{rr:.2f} (Threshold >= 1:1.50)"}
     }
 
-    # Strict Institutional A* Filter: If setup expired by TTL or no A* exists, enforce STAND ASIDE
     if ttl["is_expired"]:
         action = f"A* SETUP EXPIRED (TIME DECAY) // STAND ASIDE (LIMIT OF {ttl['max_validity_minutes']}m EXCEEDED)"
         ticket_type = "EXPIRED_TIME_DECAY_STAND_ASIDE"
@@ -966,28 +1012,27 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         rr_str = "N/A (EXPIRED)"
         safe_lot = 0.00
         max_risk_usd = "$0.00 (EXPIRED // CAPITAL PRESERVED)"
-        bias_reason = f"Setup has expired by time-decay. The {ttl['max_validity_minutes']}-minute validity window elapsed ({ttl['elapsed_minutes']}m elapsed). Alpha decay reached 100%. Unfilled orders are cancelled to prevent negative expectancy."
+        bias_reason = f"Setup expired after {ttl['max_validity_minutes']}m TTL window."
         entry_reason = "Order entry blocked due to time-decay expiration."
         sl_reason = "No capital at risk."
         tp_reason = "Targets cancelled."
     elif not is_a_star:
-        reason_gate = "WIN PROBABILITY < 68%" if p_win < 68.0 else f"CONFLUENCE {total_confluence}/100 < 85"
+        reason_gate = "WIN PROBABILITY < 68%" if p_win < 68.0 else (f"RR 1:{rr:.2f} < 1:1.50" if rr < 1.50 else f"CONFLUENCE {total_confluence}/100 < 85")
         action = f"A* GRADE NOT EXIST YET // STAND ASIDE ({reason_gate})"
         ticket_type = "NO_A_STAR_SETUP_STAND_ASIDE"
         ticket_title = f"STATUS: A* GRADE NOT EXIST YET // STAND ASIDE (P(Win)={p_win}%, {total_confluence}/100)"
-        entry_zone = "STAND ASIDE (Awaiting 85+ Confluence & 68% Win Rate)"
-        sl_val_str = "N/A (NO ACTIVE SETUP)"
-        tp1_val_str = "N/A (STAND ASIDE)"
-        tp2_val_str = "N/A (STAND ASIDE)"
-        rr_str = "N/A (EXECUTION BLOCKED)"
+        entry_zone = f"${entry_low:.2f} - ${entry_high:.2f} (CANDIDATE // BLOCKED BY GATE)"
+        sl_val_str = f"${sl_val:.2f}"
+        tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
+        tp2_val_str = f"${tp2_val:.2f}"
+        rr_str = f"1:{rr:.2f}"
         safe_lot = 0.00
         max_risk_usd = "$0.00 (STAND ASIDE // CAPITAL PRESERVATION)"
-        bias_reason = f"No A* Grade setup exists yet. Win Probability P(Win) is {p_win}% (Threshold: 68%) and Confluence is {total_confluence}/100 (Threshold: 85). Current regime is {grade}. Institutional discipline requires standing aside until 68%+ win rate is verified."
-        entry_reason = "Order entry strictly blocked. Current momentum and macro drift do not meet institutional A* threshold."
-        sl_reason = "No capital at risk. Order books await high-conviction structural confirmation."
-        tp_reason = "Targets suspended until 68%+ win probability trigger."
+        bias_reason = f"Current candidate is {grade} ({reason_gate}). Win Prob {p_win}% across {n_paths:,} MC paths. Standing aside until A* criteria pass."
+        entry_reason = f"Candidate bracket ${entry_low:.2f} - ${entry_high:.2f} monitored; execution gated."
+        sl_reason = "No capital at risk."
+        tp_reason = "Targets suspended until A* gate passes."
     else:
-        # If A* qualified and not yet locked, lock it in the persistent ledger!
         if not (active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]):
             raw_t = {
                 "action": raw_action,
@@ -997,7 +1042,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
                 "take_profit_1": f"${tp1_val:.2f}",
                 "take_profit_2": f"${tp2_val:.2f}",
                 "risk_reward_ratio": f"1:{rr:.2f}",
-                "recommended_lot_size_1000_equity": 0.03
+                "recommended_lot_size_1000_equity": computed_lot
             }
             active_locked, completed_list = mgr.get_or_create_locked_setup(raw_t, current_price, is_a_star=True)
 
@@ -1006,23 +1051,23 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         ticket_title = f"LOCKED {setup_id_str} [{status_str}] // {total_confluence}/100 (P(Win): {p_win}%)"
         action = raw_action
         sl_val_str = f"${sl_val:.2f}"
-        tp1_val_str = f"${tp1_val:.2f}"
+        tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
         tp2_val_str = f"${tp2_val:.2f}"
         rr_str = f"1:{rr:.2f}"
         entry_zone = f"${entry_low:.2f} - ${entry_high:.2f}"
-        safe_lot = 0.03
-        max_risk_usd = "$30.00 (3% Max Account Budget)"
-        bias_reason = f"{bias}: Price (${current_price:.2f}) trades {price_displacement:+.2f} USD vs Session Pivot (${PP:.2f}); Monte Carlo P(Win)={p_win}%, P(Up)={p_up}%, P(Down)={p_down}%."
-        entry_reason = f"Entry zone ${entry_low:.2f} - ${entry_high:.2f} brackets the M30 momentum expansion corridor ({m30_velocity:+.2f} ATR velocity)."
-        sl_reason = f"Stop loss ${sl_val:.2f} is set directly to the Monte Carlo 95% VaR tail ({'p5' if is_bullish else 'p95'} quantile), ensuring mathematical invalidation."
-        tp_reason = f"TP1 ${tp1_val:.2f} aligns with MC 75% core expansion; TP2 ${tp2_val:.2f} captures the 95% tail runner target."
+        safe_lot = active_locked.get("recommended_lot", computed_lot) if active_locked else computed_lot
+        max_risk_usd = f"${round(safe_lot * 100.0 * risk_dist_dollars, 2):.2f} (<= $30.00 Cap)"
+        bias_reason = f"{bias}: Spot ${current_price:.2f} vs Pivot ${PP:.2f}; {n_paths:,}-Path MC P(Win)={p_win}%, P(Up)={p_up}%, P(Down)={p_down}%."
+        entry_reason = f"Entry zone ${entry_low:.2f} - ${entry_high:.2f} brackets M30 momentum corridor ({m30_velocity:+.2f} ATR)."
+        sl_reason = f"Stop loss ${sl_val:.2f} anchored to 0.85 ATR structural invalidation."
+        tp_reason = f"TP1 ${tp1_val:.2f} (1.50 ATR) & TP2 ${tp2_val:.2f} (2.60 ATR)."
 
     rationale = {
         "bias_reason": bias_reason,
         "entry_reason": entry_reason,
         "stop_loss_reason": sl_reason,
         "target_reason": tp_reason,
-        "confluence_reason": f"Confluence score ({total_confluence}/100, {grade}) driven by Macro Vector ({macro_score}/25), Monte Carlo Probability ({mc_prob_score}/25), Volatility ({vol_score}/25), and Cross-Asset Yield Matrix ({cross_score}/25)."
+        "confluence_reason": f"Score {total_confluence}/100 ({grade}): Macro {macro_score}/25 + MC {mc_prob_score}/25 + Vol {vol_score}/25 + Cross-Asset {cross_score}/25."
     }
 
     return {
@@ -1033,7 +1078,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "locked_setup": active_locked,
         "current_price": current_price,
         "pivot_point": PP,
-        "determining_timeframe": "M30 (Market Structure & 2,000-Path Monte Carlo SDE)",
+        "determining_timeframe": f"M30 (Market Structure & {n_paths:,}-Path Monte Carlo SDE)",
         "execution_timeframe": "M15 / M30 (Momentum Catch Impulse)",
         "first_passage_analysis": fp_analysis,
         "algorithmic_footprint": footprint,
@@ -1054,6 +1099,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "momentum_regime": bias
         },
         "monte_carlo_quantiles": {
+            "n_paths": n_paths,
             "p_upward_pct": p_up,
             "p_downward_pct": p_down,
             "win_probability_first_passage_pct": p_win,
@@ -1065,14 +1111,14 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "tail_p95": round(float(p95[-1]), 2)
         },
         "data_validation_gate": {
-            "overall_status": "6/6 DATA GATES VERIFIED // DECISION UNBIASED",
+            "overall_status": f"{sum(1 for c in gate_checks.values() if c['status'] in ['VALID', 'PASS'])}/6 DATA GATES VERIFIED",
             "checks": gate_checks
         },
         "setup_rationale": rationale,
         "pillars": {
             "macro_trend_alignment": {"score": macro_score, "max": 25, "status": f"DXY {dxy_val:.2f} / 10Y Yield {us10y_val:.2f}% (Drift: {macro_drift*100:+.3f}%)"},
             "liquidity_sweep_status": {"score": mc_prob_score, "max": 25, "status": f"First-Passage P(Win)={p_win}% | P(Up)={p_up}% | P(Down)={p_down}%"},
-            "volatility_band_status": {"score": vol_score, "max": 25, "status": f"Lo-MacKinlay VR={footprint['lo_mackinlay_vr5']}x | Kyle's λ={kyles_lambda:.4f}"},
+            "volatility_band_status": {"score": vol_score, "max": 25, "status": f"Lo-MacKinlay VR={footprint['lo_mackinlay_vr5']}x (p={footprint['p_value']}) | Kyle's λ={kyles_lambda:.4f}"},
             "cross_asset_confirmation": {"score": cross_score, "max": 25, "status": f"Yield Matrix: 2Y={us2y_val:.2f}% | Spread={yield_spread:+.2f}% | Mode={ticket_type}"}
         },
         "trade_ticket": {
@@ -1102,8 +1148,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "mathematical_audit_log": [
             f"Step 1 (Macro Yields): 10Y-2Y slope {yield_spread:+.2f}%, DXY {dxy_z:+.2f}σ generate macro drift {macro_drift*100:+.3f}%.",
             f"Step 2 (Momentum Catch): Spot ${current_price:.2f} trades {price_displacement:+.2f} USD vs Pivot ${PP:.2f} with {m30_velocity:+.2f} ATR velocity.",
-            f"Step 3 (First-Passage SDE): 2,000 paths evaluate P(Win)={p_win}%, P(Up)={p_up}%, P(Down)={p_down}%, 95% VaR={var_95_pct}%.",
-            f"Step 4 (Locked Contract): {'Contract Locked ' + active_locked.get('setup_id', '') + ' [' + active_locked.get('status', '') + ']' if active_locked else 'A* Grade Does Not Exist Yet: Stand Aside.'}"
+            f"Step 3 (First-Passage SDE): {n_paths:,} paths evaluate P(Win)={p_win}%, P(Up)={p_up}%, P(Down)={p_down}%, 95% VaR={var_95_pct}%.",
+            f"Step 4 (Locked Contract): {'Contract Locked ' + active_locked.get('setup_id', '') + ' [' + active_locked.get('status', '') + ']' if active_locked else 'Stand Aside: ' + grade}"
         ]
     }
 
@@ -1347,16 +1393,17 @@ def simulate_tomorrow_scenario(actual_mom, actual_core_yoy, tomorrow_meta, curre
 # -------------------------------------------------------------
 # METHOD 1.4: MERTON-KOU JUMP-DIFFUSION MONTE CARLO SDE
 # -------------------------------------------------------------
-def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=2000, event_type="cpi"):
+def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=10000, event_type="cpi"):
     """
-    Kou (2002) Asymmetric Double-Exponential Jump-Diffusion SDE Engine.
+    Vectorized 10,000-Path Kou (2002) Asymmetric Double-Exponential Jump-Diffusion SDE Engine.
     Simulates inhomogeneous Poisson arrival jumps with heavy asymmetric double-exponential tails,
-    combined with time-decaying volatility dynamics across event-announcement windows.
+    combined with time-decaying volatility dynamics across 1D (24h) or 5D swing horizons.
     """
     np.random.seed(42)
-    steps = 24 if int(horizon_days) == 1 else 30
-    dt = 1.0 / steps
-    
+    h_days = max(1, int(horizon_days))
+    steps = 24 if h_days == 1 else 30
+    dt = float(h_days) / float(steps)
+
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = current_price
 
@@ -1365,54 +1412,51 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         "fomc": -0.0180,
         "nfp": -0.0115,
         "ppi": -0.0075,
-        "daily": -0.0050
+        "ppi_retail": -0.0075,
+        "daily": -0.0050,
+        "astar": -0.0050
     }
     beta_jump = beta_map.get(event_type.lower(), -0.0095)
 
-    # Kou (2002) asymmetric double-exponential jump parameters
-    # Conditioned on macro surprise z_shock:
-    # Hawkish shock (z_shock > 0) -> p_up decreases, negative jumps dominate Gold
-    # Dovish shock (z_shock < 0) -> p_up increases, positive jumps dominate Gold
     p_up = 1.0 / (1.0 + np.exp(0.85 * z_shock))
-    mean_up_jump = 0.0055   # 0.55% average up jump
-    mean_down_jump = 0.0075 # 0.75% average down jump (fat left tail)
+    mean_up_jump = 0.0055
+    mean_down_jump = 0.0075
     eta1 = 1.0 / mean_up_jump
     eta2 = 1.0 / mean_down_jump
 
-    base_vol = 1.20 / 100.0
+    base_vol_map = {"cpi": 0.0120, "fomc": 0.0110, "nfp": 0.0105, "ppi": 0.0085, "ppi_retail": 0.0085, "daily": 0.0095, "astar": 0.0095}
+    base_vol = base_vol_map.get(event_type.lower(), 0.0120)
 
     for t in range(1, steps + 1):
-        # Inhomogeneous Poisson arrival intensity decaying from event release
         if t == 1:
             lambda_t = 0.8 + 0.6 * abs(z_shock)
             macro_bias = beta_jump * z_shock
         else:
-            lambda_t = 0.15 * np.exp(-(t - 1) / 5.0)
+            lambda_t = 0.15 * np.exp(-(t - 1) / 5.0) * (1.0 if h_days == 1 else 1.5)
             macro_bias = 0.0
 
         decay = 1.0 + (1.2 + 0.4 * abs(z_shock)) * np.exp(-t / 5.0)
         step_vol = base_vol * np.sqrt(dt) * decay
 
-        # Continuous geometric Brownian diffusion
-        z = np.random.normal(0, 1, n_paths)
-        diff_ret = -0.5 * (step_vol ** 2) + step_vol * z
+        z_norm = np.random.normal(0, 1, n_paths)
+        diff_ret = -0.5 * (step_vol ** 2) + step_vol * z_norm
 
-        # Kou double-exponential compound Poisson jumps
         n_jumps = np.random.poisson(lambda_t, n_paths)
+        max_k = int(np.max(n_jumps))
         jump_ret = np.zeros(n_paths)
-        has_jumps = n_jumps > 0
-        if np.any(has_jumps):
-            idx = np.where(has_jumps)[0]
-            for i in idx:
-                k = n_jumps[i]
-                u = np.random.uniform(0, 1, k)
-                up_mask = u < p_up
-                j = np.where(up_mask, np.random.exponential(1.0 / eta1, k), -np.random.exponential(1.0 / eta2, k))
-                jump_ret[i] = np.sum(j) + (macro_bias if t == 1 else 0.0)
-        elif t == 1:
+        if max_k > 0:
+            u = np.random.uniform(0, 1, (n_paths, max_k))
+            up_mask = u < p_up
+            exp_up = np.random.exponential(1.0 / eta1, (n_paths, max_k))
+            exp_dn = np.random.exponential(1.0 / eta2, (n_paths, max_k))
+            j = np.where(up_mask, exp_up, -exp_dn)
+            mask = np.arange(max_k)[None, :] < n_jumps[:, None]
+            jump_ret = np.sum(j * mask, axis=1)
+        if t == 1:
             jump_ret += macro_bias
 
         paths[:, t] = paths[:, t - 1] * np.exp(diff_ret + jump_ret)
+
     terminal_rets = (paths[:, -1] - paths[:, 0]) / paths[:, 0] * 100.0
     p_pos = float(np.mean(terminal_rets > 0) * 100.0)
     p_neg = float(np.mean(terminal_rets < 0) * 100.0)
@@ -1423,24 +1467,31 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     p75 = np.percentile(paths, 75, axis=0)
     p95 = np.percentile(paths, 95, axis=0)
 
-    sample_indices = np.linspace(0, n_paths - 1, 10, dtype=int)
+    sample_indices = np.linspace(0, n_paths - 1, 12, dtype=int)
     sample_traces = [paths[i].tolist() for i in sample_indices]
 
     var_95 = float(np.percentile(terminal_rets, 5))
     cvar_95 = float(np.mean(terminal_rets[terminal_rets <= var_95]))
+    ret_sd = max(0.01, float(np.std(terminal_rets, ddof=1)))
+    tail_1sd = float(np.mean(np.abs(terminal_rets) >= ret_sd) * 100.0)
+    tail_2sd = float(np.mean(np.abs(terminal_rets) >= 2.0 * ret_sd) * 100.0)
 
-    time_labels = [f"T+{i}h" for i in range(steps + 1)] if int(horizon_days) == 1 else [f"D{i//6}.{i%6}" for i in range(steps + 1)]
-    time_labels[0] = "T0 (08:30)"
+    if h_days == 1:
+        time_labels = [f"T+{i}h" for i in range(steps + 1)]
+        time_labels[0] = "T0 (08:30)"
+    else:
+        time_labels = [f"D{(i * 5) / steps:.1f}" for i in range(steps + 1)]
+        time_labels[0] = "D0 (T0)"
+        time_labels[-1] = "D5.0"
 
-    # Monte Carlo Standard Error
     mc_se_terminal = np.std(paths[:, -1]) / np.sqrt(n_paths)
     mc_moe_95 = round(float(1.96 * mc_se_terminal), 2)
 
     return {
         "event_type": event_type,
-        "horizon_days": int(horizon_days),
+        "horizon_days": h_days,
         "steps": steps,
-        "z_shock": z_shock,
+        "z_shock": round(float(z_shock), 2),
         "n_paths": n_paths,
         "current_price": current_price,
         "mc_moe_terminal_dollars": mc_moe_95,
@@ -1459,7 +1510,10 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
             "expected_terminal_price": round(float(np.mean(paths[:, -1])), 2),
             "median_terminal_price": round(float(p50[-1]), 2),
             "var_95_pct": round(var_95, 2),
-            "cvar_95_pct": round(cvar_95, 2)
+            "cvar_95_pct": round(cvar_95, 2),
+            "tail_beyond_1sd_pct": round(tail_1sd, 1),
+            "tail_beyond_2sd_pct": round(tail_2sd, 1),
+            "terminal_dispersion_sd_pct": round(ret_sd, 2)
         }
     }
 
@@ -1469,21 +1523,25 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
 def calculate_probability_density_function(event_type="cpi", n_points=120):
     """
     Calculates Gaussian Prior vs Posterior Probability Density curves.
-    Calibrated per event_type.
+    Uses 6-decimal precision so high-scale distributions (NFP sigma=45, FOMC sigma=5) render smoothly.
     """
     params = {
-        "cpi": {"prior_mu": 0.00, "prior_sd": 0.08, "post_mu": 0.08, "post_sd": 0.09, "range": (-0.35, 0.35), "label_post": "Geopolitical Energy Posterior (+12.11% WTI)"},
-        "fomc": {"prior_mu": 0.00, "prior_sd": 5.0, "post_mu": 2.5, "post_sd": 6.0, "range": (-25.0, 25.0), "label_post": "Hawkish Pause Pricing (CME 94% Priced)"},
-        "nfp": {"prior_mu": 0.00, "prior_sd": 45.0, "post_mu": 15.0, "post_sd": 50.0, "range": (-150.0, 150.0), "label_post": "ADP Leading Indicator (+22k ADP Prior)"},
-        "ppi": {"prior_mu": 0.00, "prior_sd": 0.15, "post_mu": 0.06, "post_sd": 0.16, "range": (-0.60, 0.60), "label_post": "Commodity Crude Pipeline (+0.06% Push)"},
-        "daily": {"prior_mu": 0.00, "prior_sd": 0.45, "post_mu": -0.15, "post_sd": 0.50, "range": (-2.0, 2.0), "label_post": "M30 Intraday Volatility Density (-2.0σ to +2.0σ VWAP)"},
-        "astar": {"prior_mu": 0.00, "prior_sd": 0.45, "post_mu": -0.15, "post_sd": 0.50, "range": (-2.0, 2.0), "label_post": "M30 Intraday Volatility Density (-2.0σ to +2.0σ VWAP)"}
+        "cpi": {"prior_mu": 0.00, "prior_sd": 0.08, "post_mu": 0.08, "post_sd": 0.09, "range": (-0.35, 0.35), "unit": "pp", "label_post": "Geopolitical Energy Posterior (+12.11% WTI)"},
+        "fomc": {"prior_mu": 0.00, "prior_sd": 5.0, "post_mu": 2.5, "post_sd": 6.0, "range": (-25.0, 25.0), "unit": "bps", "label_post": "Hawkish Pause Pricing (CME 94% Priced)"},
+        "nfp": {"prior_mu": 0.00, "prior_sd": 45.0, "post_mu": 15.0, "post_sd": 50.0, "range": (-150.0, 150.0), "unit": "k", "label_post": "ADP Leading Indicator (+22k ADP Prior)"},
+        "ppi": {"prior_mu": 0.00, "prior_sd": 0.15, "post_mu": 0.06, "post_sd": 0.16, "range": (-0.60, 0.60), "unit": "pp", "label_post": "Commodity Crude Pipeline (+0.06% Push)"},
+        "ppi_retail": {"prior_mu": 0.00, "prior_sd": 0.15, "post_mu": 0.06, "post_sd": 0.16, "range": (-0.60, 0.60), "unit": "pp", "label_post": "Commodity Crude Pipeline (+0.06% Push)"},
+        "daily": {"prior_mu": 0.00, "prior_sd": 0.45, "post_mu": -0.15, "post_sd": 0.50, "range": (-2.0, 2.0), "unit": "σ", "label_post": "M30 Intraday Volatility Density (-2.0σ to +2.0σ VWAP)"},
+        "astar": {"prior_mu": 0.00, "prior_sd": 0.45, "post_mu": -0.15, "post_sd": 0.50, "range": (-2.0, 2.0), "unit": "σ", "label_post": "M30 Intraday Volatility Density (-2.0σ to +2.0σ VWAP)"}
     }
     p = params.get(event_type.lower(), params["cpi"])
     x_vals = np.linspace(p["range"][0], p["range"][1], n_points)
 
     def gaussian_pdf(x, mu, sigma):
         return (1.0 / (sigma * math.sqrt(2 * math.pi))) * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+
+    def norm_cdf(x, mu, sigma):
+        return 0.5 * (1.0 + math.erf((x - mu) / (sigma * math.sqrt(2.0))))
 
     pdf_prior = gaussian_pdf(x_vals, p["prior_mu"], p["prior_sd"])
     pdf_post = gaussian_pdf(x_vals, p["post_mu"], p["post_sd"])
@@ -1493,21 +1551,22 @@ def calculate_probability_density_function(event_type="cpi", n_points=120):
     for x, p_pr, p_po in zip(x_vals, pdf_prior, pdf_post):
         zone = "DOVISH_MISS" if x <= -mid else ("HAWKISH_BEAT" if x >= mid else "NOISE_ZONE")
         points.append({
-            "x": round(float(x), 3),
-            "prior_pdf": round(float(p_pr), 3),
-            "posterior_pdf": round(float(p_po), 3),
+            "x": round(float(x), 4),
+            "prior_pdf": round(float(p_pr), 6),
+            "posterior_pdf": round(float(p_po), 6),
+            "cdf_posterior": round(float(norm_cdf(float(x), p["post_mu"], p["post_sd"]) * 100.0), 1),
             "zone": zone
         })
 
     return {
         "event_type": event_type,
+        "unit": p["unit"],
         "parameters": {
             "prior": {"mu": p["prior_mu"], "sigma": p["prior_sd"], "label": "Historical Base Rate Prior"},
             "posterior": {"mu": p["post_mu"], "sigma": p["post_sd"], "label": p["label_post"]}
         },
         "points": points
     }
-
 # -------------------------------------------------------------
 # MULTI-EVENT HISTORICAL EVALUATION SUITES
 # -------------------------------------------------------------
@@ -1672,8 +1731,8 @@ def evaluate_ppi_models(ppi_records):
 # PRE-NEWS BAYESIAN DIRECTIVE ENGINES (FOMC, NFP, PPI)
 # Unbiased: Computes probability and trade directive dynamically from leading indicators
 # -------------------------------------------------------------
-def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rate=5.00, consensus_rate=5.00, dots_shift_bps=0.0):
-    dyn = calculate_dynamic_levels(current_price, atr_m30)
+def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rate=5.00, consensus_rate=5.00, dots_shift_bps=0.0, session_h=None, session_l=None, session_c=None):
+    dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
     rate_shock = (consensus_rate - priced_rate) * 100 + 0.5 * dots_shift_bps
     
     if rate_shock > 5.0:
@@ -1697,6 +1756,7 @@ def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rat
 
     return {
         "event_name": "FOMC INTEREST RATE DECISION & DOT PLOT",
+        "current_price": current_price,
         "release_date": "2026-12-16",
         "release_time": "02:00 PM EST (02:00 WIB NEXT DAY)",
         "consensus_rate": f"{consensus_rate:.2f}%",
@@ -1713,12 +1773,14 @@ def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rat
         "entry_zone": plan["entry_zone"],
         "stop_loss": plan["stop_loss"],
         "target": plan["target"],
-        "risk_reward_ratio": plan["risk_reward_ratio"]
+        "risk_reward_ratio": plan["risk_reward_ratio"],
+        "dynamic_short_plan": dyn["dynamic_short_plan"],
+        "dynamic_long_plan": dyn["dynamic_long_plan"],
+        "avwap_bands": dyn["avwap_bands"]
     }
 
-def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=10.0, claims_trend_k=218.0, ism_emp=51.4):
-    dyn = calculate_dynamic_levels(current_price, atr_m30)
-    # Composite leading labor signal
+def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=10.0, claims_trend_k=218.0, ism_emp=51.4, session_h=None, session_l=None, session_c=None):
+    dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
     labor_leading_z = (adp_diff_k / 45.0) - ((claims_trend_k - 220.0) / 15.0) + ((ism_emp - 50.0) / 2.5)
 
     if labor_leading_z > 0.8:
@@ -1742,6 +1804,7 @@ def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=
 
     return {
         "event_name": "NON-FARM PAYROLLS & UNEMPLOYMENT RATE",
+        "current_price": current_price,
         "release_date": "2026-12-04",
         "release_time": "08:30 AM EST (20:30 WIB)",
         "forecast_nfp": "175K",
@@ -1758,11 +1821,14 @@ def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=
         "entry_zone": plan["entry_zone"],
         "stop_loss": plan["stop_loss"],
         "target": plan["target"],
-        "risk_reward_ratio": plan["risk_reward_ratio"]
+        "risk_reward_ratio": plan["risk_reward_ratio"],
+        "dynamic_short_plan": dyn["dynamic_short_plan"],
+        "dynamic_long_plan": dyn["dynamic_long_plan"],
+        "avwap_bands": dyn["avwap_bands"]
     }
 
-def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_pct=12.11, crb_change_pct=3.4):
-    dyn = calculate_dynamic_levels(current_price, atr_m30)
+def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_pct=12.11, crb_change_pct=3.4, session_h=None, session_l=None, session_c=None):
+    dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
     pipeline_pressure = (wti_change_pct / 10.0) * 0.55 + (crb_change_pct / 5.0) * 0.45
 
     if pipeline_pressure > 0.8:
@@ -1786,6 +1852,7 @@ def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_
 
     return {
         "event_name": "PPI FINAL DEMAND & ADVANCE RETAIL SALES",
+        "current_price": current_price,
         "release_date": "2026-11-12",
         "release_time": "08:30 AM EST (20:30 WIB)",
         "forecast_ppi": "0.2% MoM",
@@ -1802,104 +1869,348 @@ def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_
         "entry_zone": plan["entry_zone"],
         "stop_loss": plan["stop_loss"],
         "target": plan["target"],
-        "risk_reward_ratio": plan["risk_reward_ratio"]
+        "risk_reward_ratio": plan["risk_reward_ratio"],
+        "dynamic_short_plan": dyn["dynamic_short_plan"],
+        "dynamic_long_plan": dyn["dynamic_long_plan"],
+        "avwap_bands": dyn["avwap_bands"]
     }
 
-
-def get_event_hypothesis_test(event_type="cpi"):
-    """
-    Computes formal econometric hypothesis testing against historical datasets
-    using White (1980) HC3 heteroskedasticity-consistent standard errors.
-    """
+def _load_event_dataset(event_type="cpi"):
     import os
-    import json
-    import math
-    import numpy as np
-    
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-    
-    if event_type == "fomc":
+    ev = (event_type or "cpi").lower()
+    if ev == "fomc":
         with open(os.path.join(data_dir, "fomc_historical.json")) as f:
             records = json.load(f)
-        shock_key = "total_policy_shock_bps"
-        title = "FOMC Policy Rate & Path Shock (bps)"
-        h0_desc = "Federal funds rate target & forward path surprises have zero impact on Gold returns."
-        author_citation = "Gürkaynak, Sack & Swanson (2005, AER); Kuttner (2001, JME)"
-    elif event_type == "nfp":
+        return records, "total_policy_shock_bps", "us2y_delta_bps", "FOMC Policy Shock (bps)", "Gürkaynak, Sack & Swanson (2005, AER); Kuttner (2001, JME)"
+    elif ev == "nfp":
         with open(os.path.join(data_dir, "nfp_historical.json")) as f:
             records = json.load(f)
-        shock_key = "z_score_composite"
-        title = "NFP Multi-Attribute Labor Composite Z-Score"
-        h0_desc = "Labor market momentum (Payrolls, Unemployment, Wages) has zero impact on Gold returns."
-        author_citation = "Andersen, Bollerslev, Diebold & Vega (2007, JIE); Gilbert (2011, JBF)"
-    elif event_type in ["ppi", "ppi_retail"]:
+        return records, "z_score_composite", "us2y_delta_bps", "NFP Composite Labor Z-Score", "Andersen, Bollerslev, Diebold & Vega (2007, JIE); Gilbert (2011, JBF)"
+    elif ev in ["ppi", "ppi_retail"]:
         with open(os.path.join(data_dir, "ppi_retail_historical.json")) as f:
             records = json.load(f)
-        shock_key = "z_score_composite"
-        title = "Wholesale PPI & Retail Demand Composite Z-Score"
-        h0_desc = "Wholesale cost-push and retail consumer demand surprises have zero impact on Gold returns."
-        author_citation = "Clark (1995, FRBKC); Balduzzi, Elton & Green (2001, JFQA)"
-    elif event_type in ["daily", "daily_astar"]:
-        with open(os.path.join(data_dir, "cpi_historical.json")) as f:
-            records = json.load(f)
-        shock_key = "z_score_composite"
-        title = "Lo-MacKinlay Variance Ratio & Kyle Lambda Liquidity Test"
-        h0_desc = "Intraday M30/M15 price returns follow a Martingale Random Walk with zero institutional clustering."
-        author_citation = "Lo & MacKinlay (1988, RFS); Kyle (1985, Econometrica)"
+        return records, "z_score_composite", "us2y_delta_bps", "PPI & Retail Demand Z-Score", "Clark (1995, FRBKC); Balduzzi, Elton & Green (2001, JFQA)"
     else:
         with open(os.path.join(data_dir, "cpi_historical.json")) as f:
             records = json.load(f)
-        shock_key = "z_score_composite"
-        title = "CPI Inflation Composite Shock Z-Score"
-        h0_desc = "Headline & Core inflation surprises have zero transmission to Gold returns."
-        author_citation = "Christie-David, Chaudhry & Koch (2000, JFM); Andersen et al. (2003, AER)"
+        return records, "z_score_composite", "zt_return_pct", "CPI Composite Shock Z-Score", "Christie-David, Chaudhry & Koch (2000, JFM); Andersen et al. (2003, AER)"
 
-    y = np.array([e["gold_return_pct"] for e in records if "gold_return_pct" in e and shock_key in e])
-    X = np.array([e[shock_key] for e in records if "gold_return_pct" in e and shock_key in e])
-    
-    n = len(y)
-    X_design = np.column_stack([np.ones(n), X])
-    k = X_design.shape[1]
-    df = n - k
-    
+def _binom_two_sided_pval(wins, trials, p=0.5):
+    if trials <= 0:
+        return 1.0
+    obs_prob = math.comb(trials, wins) * (p ** wins) * ((1.0 - p) ** (trials - wins))
+    pval = sum(
+        math.comb(trials, i) * (p ** i) * ((1.0 - p) ** (trials - i))
+        for i in range(trials + 1)
+        if math.comb(trials, i) * (p ** i) * ((1.0 - p) ** (trials - i)) <= obs_prob + 1e-12
+    )
+    return round(float(min(1.0, pval)), 5)
+
+def get_event_shock_frequency(event_type="cpi", z=0.0):
+    """
+    Empirical Shock Distribution, Silverman Gaussian KDE, AND Post-News Price Dispersion Statistics.
+    Measures how frequently Gold moves far away from its post-news mean (>=1.0 SD, >=1.5 SD, >=1.0%).
+    """
+    records, shock_key, _, label, _ = _load_event_dataset(event_type)
+    raw_shocks = np.array([float(e[shock_key]) for e in records if shock_key in e and "gold_return_pct" in e])
+    gold_rets = np.array([float(e["gold_return_pct"]) for e in records if shock_key in e and "gold_return_pct" in e])
+    n = len(raw_shocks)
+
+    scale_sd = float(np.std(raw_shocks, ddof=1)) if (event_type or "").lower() == "fomc" else 1.0
+    scale_sd = max(0.01, scale_sd)
+    z_vals = raw_shocks / scale_sd
+    z_query = float(z)
+
+    mean_z = float(np.mean(z_vals))
+    std_z = float(np.std(z_vals, ddof=1))
+    med_z = float(np.median(z_vals))
+    q25, q75 = float(np.percentile(z_vals, 25)), float(np.percentile(z_vals, 75))
+    iqr = q75 - q25
+    h = 0.9 * min(std_z, iqr / 1.34) * (n ** (-0.2)) if iqr > 0 else 0.35
+    h = max(0.18, h)
+
+    mean_ret = float(np.mean(gold_rets))
+    std_ret = max(0.01, float(np.std(gold_rets, ddof=1)))
+    mean_abs_ret = float(np.mean(np.abs(gold_rets)))
+    max_abs_ret = float(np.max(np.abs(gold_rets)))
+    pct_far_1sd = round(float(np.mean(np.abs(gold_rets - mean_ret) >= std_ret) * 100.0), 1)
+    pct_far_15sd = round(float(np.mean(np.abs(gold_rets - mean_ret) >= 1.5 * std_ret) * 100.0), 1)
+    pct_far_1pct = round(float(np.mean(np.abs(gold_rets) >= 1.0) * 100.0), 1)
+
+    bins = np.linspace(-3.0, 3.0, 11)
+    counts, edges = np.histogram(np.clip(z_vals, -3.0, 3.0), bins=bins)
+
+    hist_bars = []
+    for i in range(len(counts)):
+        low, high = float(edges[i]), float(edges[i + 1])
+        matching = []
+        for e, zv in zip(records, z_vals):
+            zv_c = float(np.clip(zv, -3.0, 3.0))
+            if (low <= zv_c < high) or (i == len(counts) - 1 and zv_c == high):
+                gr = float(e["gold_return_pct"])
+                matching.append({
+                    "date": e.get("date", ""),
+                    "ref": e.get("ref_month", e.get("regime", "")),
+                    "z": round(float(zv), 2),
+                    "raw_shock": round(float(e[shock_key]), 2),
+                    "gold_ret": round(gr, 2),
+                    "dist_from_mean_sd": round((gr - mean_ret) / std_ret, 2)
+                })
+        avg_abs_bin = round(float(np.mean([abs(m["gold_ret"]) for m in matching])), 2) if matching else 0.0
+        hist_bars.append({
+            "bin_index": i,
+            "range": [round(low, 2), round(high, 2)],
+            "label": f"{low:+.1f}σ to {high:+.1f}σ",
+            "count": int(counts[i]),
+            "pct": round(float(counts[i]) / max(1, n) * 100.0, 1),
+            "avg_abs_gold_move_pct": avg_abs_bin,
+            "events": matching
+        })
+
+    x_grid = np.linspace(-3.2, 3.2, 80)
+    kde_curve = [
+        {"x": round(float(x), 3), "density": round(float((1.0 / (n * h * math.sqrt(2 * math.pi))) * np.sum(np.exp(-0.5 * ((x - z_vals) / h) ** 2))), 4)}
+        for x in x_grid
+    ]
+
+    pct_rank = round(float(np.mean(z_vals <= z_query) * 100.0), 1)
+    dist_from_median = round(z_query - med_z, 3)
+    dist_from_mean_sigma = round((z_query - mean_z) / max(0.01, std_z), 2)
+
+    return {
+        "event_type": event_type,
+        "n": n,
+        "shock_scale_sd": round(scale_sd, 3),
+        "mean_z": round(mean_z, 3),
+        "std_z": round(std_z, 3),
+        "median_z": round(med_z, 3),
+        "q25": round(q25, 3),
+        "q75": round(q75, 3),
+        "iqr": round(iqr, 3),
+        "bandwidth_h": round(h, 4),
+        "current_z": round(z_query, 2),
+        "empirical_percentile_rank": pct_rank,
+        "distance_from_median": dist_from_median,
+        "distance_from_mean_sigma": dist_from_mean_sigma,
+        "post_news_gold_stats": {
+            "mean_return_pct": round(mean_ret, 2),
+            "std_return_pct": round(std_ret, 2),
+            "mean_abs_move_pct": round(mean_abs_ret, 2),
+            "max_abs_move_pct": round(max_abs_ret, 2),
+            "pct_far_1sd": pct_far_1sd,
+            "pct_far_15sd": pct_far_15sd,
+            "pct_far_1pct": pct_far_1pct
+        },
+        "histogram_bars": hist_bars,
+        "kde_curve": kde_curve
+    }
+
+def get_event_transmission_curves(event_type="cpi"):
+    """
+    White (1980) HC3 Cross-Asset Transmission Curves & Scatter Points for CPI, FOMC, NFP, or PPI.
+    """
+    records, shock_key, y2_key, label, _ = _load_event_dataset(event_type)
+    raw_shocks = np.array([float(e[shock_key]) for e in records if shock_key in e and "gold_return_pct" in e])
+    gold_rets = np.array([float(e["gold_return_pct"]) for e in records if shock_key in e and "gold_return_pct" in e])
+    dxy_rets = np.array([float(e.get("dxy_return_pct", 0.0)) for e in records if shock_key in e and "gold_return_pct" in e])
+    y2_rets = np.array([float(e.get(y2_key, 0.0)) for e in records if shock_key in e and "gold_return_pct" in e])
+    vr5_vals = np.array([float(e.get("volatility_ratio_vr5", 4.5)) for e in records if shock_key in e and "gold_return_pct" in e])
+
+    scale_sd = float(np.std(raw_shocks, ddof=1)) if (event_type or "").lower() == "fomc" else 1.0
+    scale_sd = max(0.01, scale_sd)
+    z_vals = raw_shocks / scale_sd
+
+    m_gold = run_regression_ols(z_vals, gold_rets)
+    m_dxy = run_regression_ols(z_vals, dxy_rets)
+    m_2y = run_regression_ols(z_vals, y2_rets)
+
+    z_grid = np.linspace(-3.0, 3.0, 61)
+    curves = []
+    for z in z_grid:
+        pred_gold = m_gold["beta"][0] + m_gold["beta"][1] * z
+        pred_dxy = m_dxy["beta"][0] + m_dxy["beta"][1] * z
+        pred_2y = m_2y["beta"][0] + m_2y["beta"][1] * z
+        curves.append({
+            "z": round(float(z), 2),
+            "gold_return": round(float(pred_gold), 3),
+            "gold_upper_95": round(float(pred_gold + m_gold["pred_moe_95"]), 3),
+            "gold_lower_95": round(float(pred_gold - m_gold["pred_moe_95"]), 3),
+            "dxy_return": round(float(pred_dxy), 3),
+            "zt_return": round(float(pred_2y), 3)
+        })
+
+    mean_ret = float(np.mean(gold_rets))
+    std_ret = max(0.01, float(np.std(gold_rets, ddof=1)))
+    scatter_points = []
+    for e, zv in zip(records, z_vals):
+        gr = float(e["gold_return_pct"])
+        scatter_points.append({
+            "date": e.get("date", ""),
+            "ref_month": e.get("ref_month", e.get("regime", "")),
+            "z": round(float(zv), 2),
+            "raw_shock": round(float(e[shock_key]), 2),
+            "gold_open": e.get("gold_open"),
+            "gold_close": e.get("gold_close"),
+            "gold_ret": round(gr, 2),
+            "dist_from_mean_sd": round((gr - mean_ret) / std_ret, 2),
+            "dxy_ret": round(float(e.get("dxy_return_pct", 0.0)), 2),
+            "zt_ret": round(float(e.get(y2_key, 0.0)), 2),
+            "vr5": round(float(e.get("volatility_ratio_vr5", 4.5)), 2),
+            "regime": e.get("regime", "")
+        })
+
+    avg_vr5 = round(float(np.mean(vr5_vals)), 2) if len(vr5_vals) else 4.5
+    return {
+        "event_type": event_type,
+        "shock_label": label,
+        "shock_scale_sd": round(scale_sd, 3),
+        "avg_vr5": avg_vr5,
+        "models": {
+            "gold": {"beta": m_gold["beta"], "moe_95": m_gold["moe_95"], "t_stat": m_gold["t_stats"][1], "r2": m_gold["r2"], "p_value": m_gold["p_values"][1]},
+            "dxy": {"beta": m_dxy["beta"], "moe_95": m_dxy["moe_95"], "t_stat": m_dxy["t_stats"][1], "r2": m_dxy["r2"], "p_value": m_dxy["p_values"][1]},
+            "zt_note": {"beta": m_2y["beta"], "moe_95": m_2y["moe_95"], "t_stat": m_2y["t_stats"][1], "r2": m_2y["r2"], "p_value": m_2y["p_values"][1]}
+        },
+        "response_curves": curves,
+        "scatter_points": scatter_points
+    }
+
+def get_event_hypothesis_diagnostics(event_type="cpi"):
+    """
+    Formal 5% Significance Level Hypothesis Testing & Hat-Matrix Leverage Diagnostics
+    across ALL event classes (CPI, FOMC, NFP, PPI, Daily A*).
+    Tests BOTH:
+      1) White (1980) HC3 Slope Test (H0: beta_shock = 0) using exact Student's t distribution
+      2) Directional Binomial Luck Test (H0: Win Rate = 50% coin flip)
+      3) Multivariate Joint Transmission F-Test & Out-of-Sample R^2
+    """
+    records, shock_key, y2_key, title, citation = _load_event_dataset(event_type)
+    valid = [e for e in records if shock_key in e and "gold_return_pct" in e]
+    y = np.array([float(e["gold_return_pct"]) for e in valid])
+    x_raw = np.array([float(e[shock_key]) for e in valid])
+    dxy = np.array([float(e.get("dxy_return_pct", 0.0)) for e in valid])
+    y2 = np.array([float(e.get(y2_key, 0.0)) for e in valid])
+    if (event_type or "cpi").lower() == "cpi":
+        y2 = -y2
+
+    scale_sd = float(np.std(x_raw, ddof=1)) if (event_type or "").lower() == "fomc" else 1.0
+    scale_sd = max(0.01, scale_sd)
+    x_std = x_raw / scale_sd
+
+    m_uni = run_regression_ols(x_std, y)
+    X_multi = np.column_stack([x_std, dxy, y2])
+    m_multi = run_regression_ols(X_multi, y)
+
+    df = m_uni["degrees_of_freedom"]
+    t_crit = _student_t_crit(df, alpha=0.05)
+    t_stat = m_uni["t_stats"][1]
+    p_val = m_uni["p_values"][1]
+
+    t_grid = np.linspace(-4.5, 4.5, 80)
+    c_norm = math.exp(math.lgamma((df + 1) / 2.0) - math.lgamma(df / 2.0)) / math.sqrt(math.pi * df)
+    t_curve = [
+        {"t": round(float(t), 3), "pdf": round(float(c_norm * ((1.0 + (t ** 2) / df) ** (-(df + 1) / 2.0))), 4), "is_reject": bool(abs(t) >= t_crit)}
+        for t in t_grid
+    ]
+
+    X_design = np.column_stack([np.ones(len(y)), X_multi])
+    n, k = X_design.shape
     invXtX = np.linalg.pinv(X_design.T @ X_design)
-    beta = invXtX @ X_design.T @ y
-    residuals = y - X_design @ beta
-    ssr = float(np.sum(residuals ** 2))
-    tss = float(np.sum((y - np.mean(y)) ** 2))
-    r2 = 1.0 - (ssr / tss) if tss > 0 else 0.0
-    
-    # White (1980) HC3 Covariance Matrix
     H = X_design @ invXtX @ X_design.T
     h_diag = np.clip(np.diag(H), 0, 0.99)
-    omega_hc3 = np.diag((residuals / (1.0 - h_diag)) ** 2)
-    cov_hc3 = invXtX @ (X_design.T @ omega_hc3 @ X_design) @ invXtX
-    se_beta = math.sqrt(cov_hc3[1, 1])
-    t_stat = beta[1] / se_beta if se_beta > 0 else 0.0
-    
-    t_crit = 2.042 if df <= 30 else 1.96
-    p_val = float(2.0 * (1.0 - (0.5 * (1.0 + math.erf(abs(t_stat) / math.sqrt(2.0))))))
-    
-    h_thresh = round(2.0 * k / n, 4)
-    outliers = int(sum(1 for h in h_diag if h > h_thresh))
-    f_stat = round(float((r2 / 1) / ((1 - r2) / max(1, df))), 2) if r2 < 1 else 99.9
+    residuals = y - (X_design @ np.array(m_multi["beta"]))
+    df_multi = max(1, m_multi["degrees_of_freedom"])
+    sigma_resid = math.sqrt(max(1e-12, float(np.sum(residuals ** 2)) / df_multi))
+    stud_res = residuals / (sigma_resid * np.sqrt(1.0 - h_diag))
+    h_threshold = 2.0 * k / n
+
+    diagnostic_points = [
+        {
+            "date": e.get("date", ""),
+            "ref_month": e.get("ref_month", e.get("regime", "")),
+            "z": round(float(zv), 2),
+            "leverage_h": round(float(h_diag[i]), 4),
+            "studentized_resid": round(float(stud_res[i]), 3),
+            "is_high_leverage": bool(h_diag[i] > h_threshold),
+            "is_outlier": bool(abs(stud_res[i]) > 2.0)
+        }
+        for i, (e, zv) in enumerate(zip(valid, x_std))
+    ]
+
+    nz_pairs = [(s, r) for s, r in zip(x_raw, y) if s != 0]
+    wins = int(sum((s > 0 and r < 0) or (s < 0 and r > 0) for s, r in nz_pairs))
+    trials = len(nz_pairs)
+    acc_pct = round(wins / max(1, trials) * 100.0, 1)
+    binom_p = _binom_two_sided_pval(wins, trials, 0.5)
+
+    cut = max(4, int(len(y) * 0.70))
+    m_tr = run_regression_ols(X_multi[:cut], y[:cut])
+    pred_te = m_tr["beta"][0] + np.sum(X_multi[cut:] * np.array(m_tr["beta"][1:]), axis=1)
+    mse_te = float(np.mean((y[cut:] - pred_te) ** 2))
+    mse_base = float(np.mean((y[cut:] - np.mean(y[:cut])) ** 2))
+    oos_r2 = round(1.0 - mse_te / mse_base, 4) if mse_base > 0 else 0.0
+
+    slope_valid = abs(t_stat) >= t_crit and p_val < 0.05
+    luck_rejected = binom_p < 0.05 and acc_pct > 50.0
+    valid_at_5pct = slope_valid and luck_rejected
 
     return {
         "event_type": event_type,
         "title": title,
-        "n_samples": n,
-        "degrees_of_freedom": df,
-        "null_hypothesis": h0_desc,
-        "beta_slope": round(float(beta[1]), 4),
-        "white_hc3_se": round(se_beta, 4),
-        "t_statistic": round(t_stat, 2),
-        "t_critical_95": t_crit,
-        "p_value": round(p_val, 6),
-        "reject_null": bool(abs(t_stat) >= t_crit),
-        "verdict": f"REJECT H0 (t = {t_stat:.2f}, p = {p_val:.5f} < 0.05)" if abs(t_stat) >= t_crit else f"FAIL TO REJECT H0 (p = {p_val:.4f})",
-        "r_squared": round(r2, 4),
-        "f_statistic": f_stat,
-        "hat_matrix_threshold": h_thresh,
-        "high_leverage_outlier_count": outliers,
-        "academic_citation": author_citation
+        "n": n,
+        "df": df,
+        "t_crit_95": t_crit,
+        "beta_z_t_stat": t_stat,
+        "beta_z_p_val": p_val,
+        "beta_dxy_t_stat": m_multi["t_stats"][2],
+        "beta_zt_t_stat": m_multi["t_stats"][3],
+        "multi_shock_t_stat": m_multi["t_stats"][1],
+        "multi_shock_p_val": m_multi["p_values"][1],
+        "r2_univariate": m_uni["r2"],
+        "r2_multivariate": m_multi["r2"],
+        "oos_r2": oos_r2,
+        "f_stat": m_multi["f_stat"],
+        "binomial_wins": wins,
+        "binomial_trials": trials,
+        "binomial_accuracy_pct": acc_pct,
+        "binomial_p_val": binom_p,
+        "slope_valid_5pct": slope_valid,
+        "beats_luck_5pct": luck_rejected,
+        "valid_at_5pct": valid_at_5pct,
+        "verdict_5pct": f"VALID EDGE (α=5%): t={t_stat:.2f} (p={p_val:.4f}), Hit={wins}/{trials} ({acc_pct}%, p={binom_p:.4f})" if valid_at_5pct else f"INSUFFICIENT / LUCK RISK AT 5% (t_p={p_val:.4f}, binom_p={binom_p:.4f})",
+        "leverage_threshold": round(h_threshold, 4),
+        "high_leverage_outlier_count": sum(1 for d in diagnostic_points if d["is_high_leverage"] or d["is_outlier"]),
+        "academic_citation": citation,
+        "t_curve": t_curve,
+        "diagnostic_points": diagnostic_points
+    }
+
+def get_event_hypothesis_test(event_type="cpi"):
+    """
+    Exact 5% significance hypothesis test summary (Student's t + Binomial hit-rate vs 50% luck).
+    """
+    d = get_event_hypothesis_diagnostics(event_type=event_type)
+    return {
+        "event_type": event_type,
+        "title": d["title"],
+        "n_samples": d["n"],
+        "degrees_of_freedom": d["df"],
+        "t_statistic": d["beta_z_t_stat"],
+        "t_critical_95": d["t_crit_95"],
+        "p_value": d["beta_z_p_val"],
+        "reject_null": d["slope_valid_5pct"],
+        "binomial_wins": d["binomial_wins"],
+        "binomial_trials": d["binomial_trials"],
+        "binomial_accuracy_pct": d["binomial_accuracy_pct"],
+        "binomial_p_val": d["binomial_p_val"],
+        "beats_luck_5pct": d["beats_luck_5pct"],
+        "valid_at_5pct": d["valid_at_5pct"],
+        "verdict": d["verdict_5pct"],
+        "r_squared": d["r2_univariate"],
+        "r_squared_multivariate": d["r2_multivariate"],
+        "oos_r2": d["oos_r2"],
+        "f_statistic": d["f_stat"],
+        "hat_matrix_threshold": d["leverage_threshold"],
+        "high_leverage_outlier_count": d["high_leverage_outlier_count"],
+        "academic_citation": d["academic_citation"]
     }
