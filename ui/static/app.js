@@ -381,6 +381,12 @@ function initAllControls() {
     else if (mod === "mod-yoy") renderYoyTimeline();
     setTimeout(() => { btn.innerText = "SYNC LIVE <GO>"; }, 500);
   });
+  // Zero-Luck Confidence Level Selector (80% -> 99%)
+  document.getElementById("conf-level-select")?.addEventListener("change", (e) => {
+    window.SELECTED_CONFIDENCE = parseInt(e.target.value || "95", 10);
+    ["cpi", "fomc", "nfp", "ppi"].forEach(ev => renderEventMcPane(ev));
+  });
+
 
   // CPI PDF event toggle buttons (CPI / FOMC / NFP)
   document.querySelectorAll("[data-toggle]").forEach(btn => {
@@ -882,8 +888,9 @@ async function renderEventMcPane(ev) {
 
   const st = EVENT_STATE[ev] || { z: 0.0, horizon: 1 };
   let mc = null;
+  const confLvl = window.SELECTED_CONFIDENCE || 95;
   try {
-    const res = await fetch(`/api/monte-carlo?horizon=${st.horizon}&z=${st.z}&event_type=${ev}&n_paths=10000`);
+    const res = await fetch(`/api/monte-carlo?horizon=${st.horizon}&z=${st.z}&event_type=${ev}&n_paths=10000&min_confidence=${confLvl}`);
     mc = await res.json();
   } catch (e) {
     return;
@@ -893,7 +900,10 @@ async function renderEventMcPane(ev) {
   const medId = ev === "cpi" ? "val-mc-median" : `val-${ev}-mc-median`;
   const varId = ev === "cpi" ? "val-mc-var" : `val-${ev}-mc-var`;
   const tailId = ev === "cpi" ? "val-mc-tail" : `val-${ev}-mc-tail`;
+  const stochId = ev === "cpi" ? "val-mc-stoch" : `val-${ev}-mc-stoch`;
   const m = mc.metrics || {};
+  const ea = mc.entry_analysis || {};
+  const sv = mc.bs_stoch_vol || {};
 
   if (document.getElementById(medId)) {
     document.getElementById(medId).innerText = `$${m.median_terminal_price.toFixed(2)} (${mc.n_paths.toLocaleString()} paths, ±$${mc.mc_moe_terminal_dollars} SE)`;
@@ -903,6 +913,15 @@ async function renderEventMcPane(ev) {
   }
   if (document.getElementById(tailId)) {
     document.getElementById(tailId).innerText = `|Move| >= 1σ: ${m.tail_beyond_1sd_pct}% | >= 2σ: ${m.tail_beyond_2sd_pct}% (σ=${m.terminal_dispersion_sd_pct}%)`;
+  }
+  if (document.getElementById(stochId) && ea.decision) {
+    const evSign = ea.expected_payoff_bps >= 0 ? "+" : "";
+    const vrSign = (sv.vol_roc_pct || 0) >= 0 ? "+" : "";
+    document.getElementById(stochId).innerText = `[${ea.decision} @ ${confLvl}%] ${ea.best_side}: P(Prof)=${ea.p_profit_pct}% / P(Loss)=${ea.p_loss_pct}% | EV=${evSign}${ea.expected_payoff_bps}bps | Vol dσ/dt=${vrSign}${sv.vol_roc_pct || 0}%`;
+    document.getElementById(stochId).style.color = ea.decision === "BUY" ? "#00e5ff" : (ea.decision === "SELL" ? "#ff4444" : "var(--amber-cmd)");
+  }
+  if (ea.recommended_ticket && ["cpi", "fomc", "nfp", "ppi"].includes(ev)) {
+    updateExecTicket(ev, `PRE-RELEASE DIRECTIVE: ${ea.decision_headline}`, ea.recommended_ticket, null, null);
   }
 
   const w = container.clientWidth || 380;
@@ -1618,6 +1637,16 @@ async function fetchQuant8AuditTable() {
         </tr>
       `;
     }).join("");
+    const strip = document.getElementById("quant8-conf-strip");
+    if (strip && data.confidence_80_99_news) {
+      const items = Object.entries(data.confidence_80_99_news).map(([k, v]) => {
+        const d80 = v.direct_max_conf || 0;
+        const w80 = v.wave2_max_conf || 0;
+        const vr = v.vr_max_conf || 0;
+        return `<span style="margin-right:16px;"><strong style="color:var(--amber-cmd);">${k.toUpperCase()}</strong>: Direct=<strong style="color:${d80 >= 95 ? '#00e5ff' : (d80 >= 80 ? '#ffb000' : '#ff4444')}">${d80}%</strong> | 2SLS=<strong style="color:${w80 >= 95 ? '#00e5ff' : (w80 >= 80 ? '#ffb000' : '#ff4444')}">${w80}%</strong> | VR5=<strong style="color:#ffffff;">${vr}%</strong></span>`;
+      }).join("");
+      strip.innerHTML = `<strong style="color:#ffffff; margin-right:10px;">[ 80%–99% ZERO-LUCK PASS CEILING ]</strong>${items}`;
+    }
   } catch (e) { console.warn("fetchQuant8AuditTable error:", e); }
 }
 

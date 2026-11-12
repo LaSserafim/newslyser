@@ -21,6 +21,13 @@
       <span>ESTIMATOR: WHITE (1980) HC3</span>
       <span>SDE: KOU (2002)</span>
       <div id="live-clock" style="color:var(--fg-bright); font-weight:700;">--:--:-- UTC</div>
+      <select id="conf-level-select" title="Zero-Luck Hypothesis Confidence Gate" style="background:#000; color:var(--amber-cmd); border:1px solid #444; font-family:var(--font-mono); font-size:9.5px; padding:2px 6px; font-weight:800;">
+        <option value="80">CONF: 80%</option>
+        <option value="85">CONF: 85%</option>
+        <option value="90">CONF: 90%</option>
+        <option value="95" selected>CONF: 95%</option>
+        <option value="99">CONF: 99%</option>
+      </select>
       <button class="bbg-btn" id="btn-sync-live">SYNC LIVE &lt;GO&gt;</button>
     </div>
   </header>
@@ -165,6 +172,10 @@
             <tr>
               <td class="label">TAIL MOVE PROBABILITY:</td>
               <td class="val" id="val-mc-tail">--</td>
+            </tr>
+            <tr>
+              <td class="label">BS STOCH-VOL P(PROFIT/LOSS):</td>
+              <td class="val" id="val-mc-stoch" style="color:var(--amber-cmd); font-weight:800;">--</td>
             </tr>
           </table>
         </div>
@@ -428,6 +439,7 @@
               <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-fomc-mc-median">--</td></tr>
               <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-fomc-mc-var">--</td></tr>
               <tr><td class="label">TAIL MOVE PROBABILITY:</td><td class="val" id="val-fomc-mc-tail">--</td></tr>
+              <tr><td class="label">BS STOCH-VOL P(PROFIT/LOSS):</td><td class="val" id="val-fomc-mc-stoch" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
             </table>
           </div>
         </section>
@@ -607,6 +619,7 @@
               <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-nfp-mc-median">--</td></tr>
               <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-nfp-mc-var">--</td></tr>
               <tr><td class="label">TAIL MOVE PROBABILITY:</td><td class="val" id="val-nfp-mc-tail">--</td></tr>
+              <tr><td class="label">BS STOCH-VOL P(PROFIT/LOSS):</td><td class="val" id="val-nfp-mc-stoch" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
             </table>
           </div>
         </section>
@@ -781,6 +794,7 @@
               <tr><td class="label">MEDIAN TERMINAL PRICE:</td><td class="val" id="val-ppi-mc-median">--</td></tr>
               <tr><td class="label">95% VALUE-AT-RISK (VaR):</td><td class="val" id="val-ppi-mc-var">--</td></tr>
               <tr><td class="label">TAIL MOVE PROBABILITY:</td><td class="val" id="val-ppi-mc-tail">--</td></tr>
+              <tr><td class="label">BS STOCH-VOL P(PROFIT/LOSS):</td><td class="val" id="val-ppi-mc-stoch" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
             </table>
           </div>
         </section>
@@ -1029,6 +1043,7 @@
               </thead>
               <tbody id="quant8-audit-tbody"></tbody>
             </table>
+            <div id="quant8-conf-strip" style="padding:8px 10px; border-top:1px solid #222; background:#070707; font-size:9.5px; color:#ccc; font-family:var(--font-mono);"></div>
           </div>
         </section>
 

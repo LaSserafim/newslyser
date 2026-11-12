@@ -470,11 +470,13 @@ def get_academic_literature():
     return data
 
 @app.get("/api/monte-carlo")
-def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None, event_type: str = "cpi", n_paths: int = 10000):
+def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None, event_type: str = "cpi", n_paths: int = 10000, min_confidence: int = 95):
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {})
     if price is None:
-        live = fetch_live_macro_data()
-        price = live.get("prices", {}).get("GC=F", 3975.0)
-    return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, n_paths=n_paths, event_type=event_type)
+        price = prices.get("GC=F", 3975.0)
+    atr_val = prices.get("ATR_M30", 10.80)
+    return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, n_paths=n_paths, event_type=event_type, atr_m30=atr_val, min_confidence=min_confidence)
 
 @app.get("/api/pdf-distribution")
 def get_pdf_distribution(event_type: str = "cpi"):
@@ -721,6 +723,7 @@ AUTHENTIC EMPIRICAL CONTEXT:
 - Bayesian Probability Decomposition: Hawkish Beat {bayesian['p_hawkish_beat']}%, In-Line {bayesian['p_inline']}%, Dovish Miss {bayesian['p_dovish_miss']}%.
 - Pre-Release Bayesian Expected Value on Gold: {bayesian['expected_return_pct']}% ({bayesian['asymmetry_label']}).
 - Options & Binomial Divergence: Stage-B P(Gold Up)={bayesian['p_gold_up']}% vs CRR Binomial GLD p^Q={bayesian.get('stage_b', {}).get('crr_p_q_pct', 50.0)}% (Mispricing={bayesian.get('stage_b', {}).get('prob_mispricing_pp', 0.0):+.1f}pp), GLD Straddle Move +/-${bayesian.get('stage_b', {}).get('straddle_implied_move_usd', 46.2)}, Net GEX=${bayesian.get('stage_b', {}).get('net_gex_usd_m', 0.0)}M.
+- BS Stochastic-Vol First-Passage Entry (from Current Price): Decision={bayesian.get('entry_analysis', {}).get('decision', 'STAND ASIDE')} ({bayesian.get('entry_analysis', {}).get('best_side', 'SELL')}), P(Profit)={bayesian.get('entry_analysis', {}).get('p_profit_pct', 50.0)}% vs P(Loss)={bayesian.get('entry_analysis', {}).get('p_loss_pct', 50.0)}%, EV={bayesian.get('entry_analysis', {}).get('expected_payoff_bps', 0.0):+.1f}bps, Vol RoC={bayesian.get('bs_stoch_vol', {}).get('vol_roc_pct', 0.0):+.2f}% ({bayesian.get('bs_stoch_vol', {}).get('iv_start_pct', 24.9)}% -> {bayesian.get('bs_stoch_vol', {}).get('iv_terminal_median_pct', 24.9)}%).
 - Dynamic Trade Directive: {bayesian['directive_title']} ({bayesian['directive_desc']}).
 - Live Baseline: Spot Gold ${prices.get('GC=F', 4000.0):.2f}, DXY {prices.get('DX-Y.NYB', 102.5):.2f}, US 2Y {prices.get('ZT=F', 4.75):.2f}%, US 10Y {prices.get('^TNX', 4.99):.2f}%.
 STRICT INSTRUCTIONS:
@@ -886,6 +889,9 @@ def get_hypothesis_audit_all():
 @app.get("/api/quant-models-audit")
 def get_quant_models_audit():
     return quant_model.get_eight_model_quant_audit()
+@app.get("/api/confidence-ladder")
+def get_confidence_ladder():
+    return quant_model.get_eight_model_quant_audit().get("confidence_80_99_news", {})
 
 
 class SimReq(BaseModel):

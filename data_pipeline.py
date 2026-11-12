@@ -355,6 +355,34 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy):
                     "current_gvz_daily_pct": round(float(vrp_df["iv"].iloc[-1]), 3),
                     "current_vrp_daily_pct": round(float(vrp_df["vrp"].iloc[-1]), 3)
                 }
+                gvz_ann = (gvz_s * math.sqrt(252.0)).reindex(rg.index).dropna()
+                d_gvz = gvz_ann.diff().dropna()
+                if len(d_gvz) >= 60:
+                    gvz_lag = gvz_ann.shift(1).reindex(d_gvz.index)
+                    r_al = rg.reindex(d_gvz.index)
+                    reg_kap = qm.run_regression_ols(gvz_lag.values, d_gvz.values)
+                    kap = max(0.005, float(-reg_kap["beta"][1]))
+                    theta_iv = round(float(np.clip(reg_kap["beta"][0] / kap, 10.0, 45.0)), 2)
+                    res_v = d_gvz.values - (reg_kap["beta"][0] + reg_kap["beta"][1] * gvz_lag.values)
+                    xi_vov = round(float(np.std(res_v, ddof=1)), 3)
+                    reg_rho = qm.run_regression_ols(r_al.values, d_gvz.values)
+                    rho_pv = round(float(np.corrcoef(r_al.values, d_gvz.values)[0, 1]), 3)
+                    abs_dv = d_gvz.abs()
+                    reg_vov = qm.run_regression_ols(abs_dv.shift(1).dropna().values, abs_dv.iloc[1:].values)
+                    out["stochastic_vol_roc"] = {
+                        "n": len(d_gvz),
+                        "current_iv_pct": round(float(gvz_ann.iloc[-1]), 2),
+                        "kappa_daily": round(kap, 4),
+                        "kappa_t": reg_kap["t_stats"][1],
+                        "kappa_p": reg_kap["p_values"][1],
+                        "theta_iv_pct": theta_iv,
+                        "xi_vol_of_vol_pct": xi_vov,
+                        "vov_cluster_t": reg_vov["t_stats"][1],
+                        "vov_cluster_p": reg_vov["p_values"][1],
+                        "rho_price_vol": rho_pv,
+                        "rho_t": reg_rho["t_stats"][1],
+                        "rho_p": reg_rho["p_values"][1]
+                    }
 
         # --- Pillar 6: Avellaneda-Lee O-U Macro Gold-DXY Cointegration Spread ---
         pair = mkt["Close"][["GC=F", "DX-Y.NYB"]].dropna()
@@ -483,7 +511,7 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy):
 
     # --- Pillar 8(Flow): 60D M5 GC=F Order Flow (VPIN, Kyle's Lambda, Signed OFI) ---
     try:
-        m5 = yf.download("GC=F", period="60d", interval="5m", progress=False, auto_adjust=False)
+        m5 = yf.download("GC=F", period="60d", interval="5m", progress=False, auto_adjust=False, threads=False)
         if isinstance(m5.columns, pd.MultiIndex):
             m5 = m5.xs("GC=F", axis=1, level=1)
         m5 = m5[m5["Volume"] > 0].dropna()

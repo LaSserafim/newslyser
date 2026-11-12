@@ -145,11 +145,12 @@ def get_pdf_distribution(event_type: str = "cpi"):
     return quant_model.calculate_probability_density_function(event_type=event_type)
 
 @app.get("/api/monte-carlo")
-def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None, event_type: str = "cpi", n_paths: int = 10000):
+def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None, event_type: str = "cpi", n_paths: int = 10000, min_confidence: int = 95):
+    prices = fetch_live_quotes()
     if price is None:
-        prices = fetch_live_quotes()
         price = prices.get("GC=F", 3975.0)
-    return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, n_paths=n_paths, event_type=event_type)
+    atr_val = prices.get("ATR_M30", 10.80)
+    return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, n_paths=n_paths, event_type=event_type, atr_m30=atr_val, min_confidence=min_confidence)
 
 @app.get("/api/shock-frequency")
 def get_shock_frequency(z: float = 0.0, event_type: str = "cpi"):
@@ -169,6 +170,9 @@ def get_hypothesis_audit_all():
 @app.get("/api/quant-models-audit")
 def get_quant_models_audit():
     return quant_model.get_eight_model_quant_audit()
+@app.get("/api/confidence-ladder")
+def get_confidence_ladder():
+    return quant_model.get_eight_model_quant_audit().get("confidence_80_99_news", {})
 
 
 class SimReq(BaseModel):
