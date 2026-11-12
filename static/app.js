@@ -1586,49 +1586,144 @@ async function renderYoyTimeline() {
   const hudEl = document.getElementById("hud-yoy");
   if (!container) return;
   let data = null;
-  try { const res = await fetch("/api/yoy-timeline"); data = await res.json(); } catch (e) { return; }
+  try {
+    const res = await fetch("/api/yoy-timeline");
+    data = await res.json();
+  } catch (e) {
+    console.warn("renderYoyTimeline error:", e);
+    return;
+  }
 
-  const series = data.timeline.series, dates = data.timeline.dates, n = dates.length;
-  const w = container.clientWidth || 800, h = container.clientHeight || 360;
-  const padL = 40, padR = 40, padT = 20, padB = 30;
+  let dates = [];
+  let series = { headline_yoy: [], core_yoy: [], supercore_yoy: [], shelter_yoy: [] };
+  if (Array.isArray(data)) {
+    dates = data.map(r => r.date);
+    series.headline_yoy = data.map(r => Number(r.headline_yoy));
+    series.core_yoy = data.map(r => Number(r.core_yoy));
+    series.supercore_yoy = data.map(r => Number(r.supercore_yoy));
+    series.shelter_yoy = data.map(r => Number(r.shelter_yoy));
+  } else if (data && data.timeline && data.timeline.series) {
+    dates = data.timeline.dates || [];
+    series = data.timeline.series;
+  }
+
+  const n = dates.length;
+  if (n < 2) {
+    container.innerHTML = `<div style="padding:20px; color:#888;">NO YOY TIMELINE DATA AVAILABLE</div>`;
+    return;
+  }
+
+  const w = Math.max(container.clientWidth || 0, 920);
+  const h = Math.max(container.clientHeight || 0, 380);
+  const padL = 48, padR = 72, padT = 22, padB = 34;
   const allVals = [];
   if (yoySeries.headline) allVals.push(...series.headline_yoy);
   if (yoySeries.core) allVals.push(...series.core_yoy);
   if (yoySeries.supercore) allVals.push(...series.supercore_yoy);
   if (yoySeries.shelter) allVals.push(...series.shelter_yoy);
-  const minY = Math.min(...allVals, 1.5) - 0.5, maxY = Math.max(...allVals, 7.0) + 0.5;
+  if (!allVals.length) allVals.push(2.0, 6.0);
+
+  const minY = Math.max(0, Math.floor(Math.min(...allVals, 1.5) * 2) / 2 - 0.5);
+  const maxY = Math.ceil(Math.max(...allVals, 7.0) * 2) / 2 + 0.5;
   function getX(i) { return padL + (i / (n - 1)) * (w - padL - padR); }
-  function getY(v) { return padT + (1 - (v - minY) / (maxY - minY)) * (h - padT - padB); }
+  function getY(v) { return padT + (1 - (v - minY) / Math.max(0.1, maxY - minY)) * (h - padT - padB); }
   function buildPath(arr) { return arr.map((v, i) => `${i === 0 ? "M" : "L"} ${getX(i).toFixed(1)} ${getY(v).toFixed(1)}`).join(" "); }
 
+  let gridSvg = "";
+  for (let yVal = Math.ceil(minY); yVal <= Math.floor(maxY); yVal += 1) {
+    const yy = getY(yVal);
+    gridSvg += `<line x1="${padL}" y1="${yy}" x2="${w - padR}" y2="${yy}" class="grid-dot"/>`;
+    gridSvg += `<text x="${padL - 6}" y="${yy + 3}" text-anchor="end">${yVal.toFixed(1)}%</text>`;
+  }
+
   let pathsSvg = "";
-  if (yoySeries.headline) pathsSvg += `<path d="${buildPath(series.headline_yoy)}" fill="none" stroke="#ffffff" stroke-width="2.2"/>`;
-  if (yoySeries.core) pathsSvg += `<path d="${buildPath(series.core_yoy)}" fill="none" stroke="var(--amber-cmd)" stroke-width="1.8"/>`;
-  if (yoySeries.supercore) pathsSvg += `<path d="${buildPath(series.supercore_yoy)}" fill="none" stroke="#00e5ff" stroke-width="1.5" stroke-dasharray="3,3"/>`;
-  if (yoySeries.shelter) pathsSvg += `<path d="${buildPath(series.shelter_yoy)}" fill="none" stroke="#ff4444" stroke-width="1.5"/>`;
+  const rawEndLabels = [];
+  const last = n - 1;
+  if (yoySeries.headline) {
+    pathsSvg += `<path d="${buildPath(series.headline_yoy)}" fill="none" stroke="#ffffff" stroke-width="2.2"/>`;
+    rawEndLabels.push({ y: getY(series.headline_yoy[last]), text: `HL ${series.headline_yoy[last].toFixed(2)}%`, color: "#ffffff", weight: 800 });
+  }
+  if (yoySeries.core) {
+    pathsSvg += `<path d="${buildPath(series.core_yoy)}" fill="none" stroke="#ffb000" stroke-width="1.9"/>`;
+    rawEndLabels.push({ y: getY(series.core_yoy[last]), text: `CORE ${series.core_yoy[last].toFixed(2)}%`, color: "#ffb000", weight: 800 });
+  }
+  if (yoySeries.supercore) {
+    pathsSvg += `<path d="${buildPath(series.supercore_yoy)}" fill="none" stroke="#00e5ff" stroke-width="1.6" stroke-dasharray="4,3"/>`;
+    rawEndLabels.push({ y: getY(series.supercore_yoy[last]), text: `SUP ${series.supercore_yoy[last].toFixed(2)}%`, color: "#00e5ff", weight: 700 });
+  }
+  if (yoySeries.shelter) {
+    pathsSvg += `<path d="${buildPath(series.shelter_yoy)}" fill="none" stroke="#ff4444" stroke-width="1.6"/>`;
+    rawEndLabels.push({ y: getY(series.shelter_yoy[last]), text: `SHL ${series.shelter_yoy[last].toFixed(2)}%`, color: "#ff4444", weight: 700 });
+  }
+  rawEndLabels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < rawEndLabels.length; i++) {
+    if (rawEndLabels[i].y - rawEndLabels[i - 1].y < 13) rawEndLabels[i].y = rawEndLabels[i - 1].y + 13;
+  }
+  const endLabels = rawEndLabels.map(l => `<text x="${w - padR + 6}" y="${l.y + 3}" fill="${l.color}" font-weight="${l.weight}">${l.text}</text>`).join("");
 
   let ticksSvg = "";
-  for (let i = 0; i < n; i += 6) ticksSvg += `<text x="${getX(i)}" y="${h - 8}" text-anchor="middle">${dates[i]}</text>`;
+  for (let i = 0; i < n; i += 6) {
+    if (last - i >= 3) ticksSvg += `<text x="${getX(i)}" y="${h - 10}" text-anchor="middle">${dates[i]}</text>`;
+  }
+  ticksSvg += `<text x="${getX(last)}" y="${h - 10}" text-anchor="end">${dates[last]}</text>`;
+
   const yTarget = getY(2.0);
   container.innerHTML = `
-    <svg id="svg-yoy" viewBox="0 0 ${w} ${h}" class="bbg-svg" style="cursor:crosshair;">
-      <line x1="${padL}" y1="${yTarget}" x2="${w - padR}" y2="${yTarget}" stroke="#444" stroke-width="1" stroke-dasharray="2,2"/>
-      <text x="${padL + 4}" y="${yTarget - 4}" fill="#666">FED 2.0% TARGET</text>
+    <svg id="svg-yoy" viewBox="0 0 ${w} ${h}" class="bbg-svg" style="cursor:crosshair; min-height:380px;">
+      ${gridSvg}
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" class="axis-line"/>
       <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="axis-line"/>
-      ${pathsSvg}${ticksSvg}
+      <line x1="${padL}" y1="${yTarget}" x2="${w - padR}" y2="${yTarget}" stroke="#666" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="${padL + 6}" y="${yTarget - 5}" fill="#888">FED 2.0% TARGET</text>
+      ${pathsSvg}
+      ${endLabels}
+      ${ticksSvg}
       <line id="yoy-scrubber" x1="0" y1="0" x2="0" y2="0" class="crosshair" style="display:none; pointer-events:none;"/>
+      <circle id="yoy-dot-hl" r="3.5" fill="#ffffff" style="display:none; pointer-events:none;"/>
+      <circle id="yoy-dot-core" r="3.5" fill="#ffb000" style="display:none; pointer-events:none;"/>
+      <circle id="yoy-dot-sup" r="3.5" fill="#00e5ff" style="display:none; pointer-events:none;"/>
+      <circle id="yoy-dot-shl" r="3.5" fill="#ff4444" style="display:none; pointer-events:none;"/>
     </svg>
   `;
-  const svgEl = document.getElementById("svg-yoy"), scrub = document.getElementById("yoy-scrubber");
+
+  const svgEl = document.getElementById("svg-yoy");
+  const scrub = document.getElementById("yoy-scrubber");
+  const tt = getOrCreateTooltip(container);
+  const dots = {
+    hl: document.getElementById("yoy-dot-hl"),
+    core: document.getElementById("yoy-dot-core"),
+    sup: document.getElementById("yoy-dot-sup"),
+    shl: document.getElementById("yoy-dot-shl")
+  };
+
   if (svgEl && hudEl) {
     svgEl.addEventListener("mousemove", (ev) => {
       const rect = svgEl.getBoundingClientRect();
       const mouseX = Math.max(padL, Math.min(w - padR, ((ev.clientX - rect.left) / rect.width) * w));
       const idx = Math.max(0, Math.min(n - 1, Math.round(((mouseX - padL) / (w - padL - padR)) * (n - 1))));
-      hudEl.innerHTML = `${dates[idx]} | Headline: <span class="highlight">${series.headline_yoy[idx].toFixed(2)}%</span> | Core: <span class="highlight">${series.core_yoy[idx].toFixed(2)}%</span> | Supercore: ${series.supercore_yoy[idx].toFixed(2)}% | Shelter: ${series.shelter_yoy[idx].toFixed(2)}%`;
-      if (scrub) { scrub.style.display = "block"; scrub.setAttribute("x1", getX(idx)); scrub.setAttribute("x2", getX(idx)); scrub.setAttribute("y1", padT); scrub.setAttribute("y2", h - padB); }
+      const xPos = getX(idx);
+      const hl = series.headline_yoy[idx], co = series.core_yoy[idx], su = series.supercore_yoy[idx], sh = series.shelter_yoy[idx];
+
+      hudEl.innerHTML = `${dates[idx]} | Headline: <span class="highlight">${hl.toFixed(2)}%</span> | Core: <span style="color:#ffb000; font-weight:700;">${co.toFixed(2)}%</span> | Supercore: <span style="color:#00e5ff;">${su.toFixed(2)}%</span> | Shelter: <span style="color:#ff4444;">${sh.toFixed(2)}%</span>`;
+      if (scrub) { scrub.style.display = "block"; scrub.setAttribute("x1", xPos); scrub.setAttribute("x2", xPos); scrub.setAttribute("y1", padT); scrub.setAttribute("y2", h - padB); }
+      if (dots.hl) { dots.hl.style.display = yoySeries.headline ? "block" : "none"; dots.hl.setAttribute("cx", xPos); dots.hl.setAttribute("cy", getY(hl)); }
+      if (dots.core) { dots.core.style.display = yoySeries.core ? "block" : "none"; dots.core.setAttribute("cx", xPos); dots.core.setAttribute("cy", getY(co)); }
+      if (dots.sup) { dots.sup.style.display = yoySeries.supercore ? "block" : "none"; dots.sup.setAttribute("cx", xPos); dots.sup.setAttribute("cy", getY(su)); }
+      if (dots.shl) { dots.shl.style.display = yoySeries.shelter ? "block" : "none"; dots.shl.setAttribute("cx", xPos); dots.shl.setAttribute("cy", getY(sh)); }
+
+      positionTooltip(tt, container, ev.clientX, ev.clientY,
+        `<strong>${dates[idx]} // BLS CPI YoY</strong><br/>` +
+        `Headline: <strong style="color:#fff;">${hl.toFixed(2)}%</strong> | Core: <strong style="color:#ffb000;">${co.toFixed(2)}%</strong><br/>` +
+        `Supercore: <span style="color:#00e5ff;">${su.toFixed(2)}%</span> | Shelter: <span style="color:#ff4444;">${sh.toFixed(2)}%</span><br/>` +
+        `<span style="color:#888;">Fed Target Gap (Core): ${(co - 2.0 >= 0 ? "+" : "")}${(co - 2.0).toFixed(2)} pp</span>`
+      );
     });
-    svgEl.addEventListener("mouseleave", () => { if (scrub) scrub.style.display = "none"; hudEl.innerText = "HOVER DATE TICK // HEADLINE, CORE, SUPERCORE, SHELTER (2023-2026)"; });
+    svgEl.addEventListener("mouseleave", () => {
+      if (scrub) scrub.style.display = "none";
+      Object.values(dots).forEach(d => { if (d) d.style.display = "none"; });
+      tt.style.display = "none";
+      hudEl.innerText = "HOVER DATE TICK // HEADLINE, CORE, SUPERCORE, SHELTER (2023-2026)";
+    });
   }
 }
 
@@ -1780,11 +1875,11 @@ async function fetchAcademicLit() {
     if (!tbody || !Array.isArray(data)) return;
     tbody.innerHTML = data.map(p => `
       <tr>
-        <td><strong>${p.author || p.citation}</strong> (${p.year || 2003})</td>
-        <td style="color:var(--amber-cmd);">${p.title}</td>
-        <td>${p.methodology || p.journal}</td>
-        <td>${p.findings || p.empirical_finding}</td>
-        <td style="color:#fff;">${p.terminal_application || 'Econometric Foundation'}</td>
+        <td><strong>${p.citation || p.author || "-"}</strong></td>
+        <td style="color:var(--amber-cmd);">${p.title}<br/><span style="color:#777; font-size:8.5px;">${p.journal || ""}</span></td>
+        <td style="font-family:var(--font-mono); color:#ccc;">${p.equation || p.methodology || p.journal || "-"}</td>
+        <td>${p.empirical_finding || p.findings || "-"}</td>
+        <td style="color:#fff;">${p.method_role || p.terminal_application || "-"}</td>
       </tr>
     `).join("");
   } catch (e) {}
