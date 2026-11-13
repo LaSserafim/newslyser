@@ -33,6 +33,7 @@ async function init() {
   initKeyboardShortcuts();
   initDeepSeekControls();
   initYoyControls();
+  initLotCalculator();
 
   // Load frozen Pre-Market Snapshot FIRST so Pane 01, 02, 03, 06 match identically on first paint
   await Promise.all([fetchPremarketSnapshot(false), fetchState()]);
@@ -2561,5 +2562,381 @@ document.getElementById("btn-refresh-us-atlas")?.addEventListener("click", (e) =
   b.innerText = "REFRESHING US DATA...";
   fetch("/api/update-all-data", { method: "POST" }).then(() => fetchUsEconomyAtlas()).finally(() => { setTimeout(() => { b.innerText = "REFRESH US MACRO <GO>"; }, 600); });
 });
+
+// ==============================================================
+// 8. INSTITUTIONAL LOT CALCULATOR & MARGIN RISK SIZER
+// ==============================================================
+function initLotCalculator() {
+  let currentRiskMode = "pct";
+  let currentDirection = "BUY";
+
+  const eqInput = document.getElementById("calc-equity");
+  const rRange = document.getElementById("calc-risk-range");
+  const rInput = document.getElementById("calc-risk-pct");
+  const cashInput = document.getElementById("calc-max-risk-cash");
+  const wrapPct = document.getElementById("wrap-risk-pct");
+  const wrapCash = document.getElementById("wrap-risk-cash");
+  const btnModePct = document.getElementById("btn-mode-pct");
+  const btnModeCash = document.getElementById("btn-mode-cash");
+  const btnDirBuy = document.getElementById("btn-calc-dir-buy");
+  const btnDirSell = document.getElementById("btn-calc-dir-sell");
+
+  const levSel = document.getElementById("calc-leverage");
+  const instSel = document.getElementById("calc-instrument");
+  const entInput = document.getElementById("calc-entry");
+  const slPipsInput = document.getElementById("calc-sl-pips");
+  const slInput = document.getElementById("calc-sl");
+  const tp1PipsInput = document.getElementById("calc-tp1-pips");
+  const tp1Input = document.getElementById("calc-tp1");
+  const tp2PipsInput = document.getElementById("calc-tp2-pips");
+  const tp2Input = document.getElementById("calc-tp2");
+
+  const specs = {
+    "XAUUSD": { contract: 100.0, pip: 0.10, unit: "oz" },
+    "EURUSD": { contract: 100000.0, pip: 0.0001, unit: "EUR" },
+    "GBPUSD": { contract: 100000.0, pip: 0.0001, unit: "GBP" },
+    "US30": { contract: 10.0, pip: 1.0, unit: "pts" },
+    "CL": { contract: 1000.0, pip: 0.01, unit: "bbl" }
+  };
+
+  function getSpec() {
+    const inst = (instSel?.value || "XAUUSD").toUpperCase();
+    return specs[inst] || specs["XAUUSD"];
+  }
+
+  function recalculate() {
+    const eq = Math.max(10, parseFloat(eqInput?.value || 1000));
+    const lev = Math.max(1, parseInt(levSel?.value || 100, 10));
+    const spec = getSpec();
+    const cSize = spec.contract;
+    const pipVal = spec.pip;
+    const pipValuePerLot = cSize * pipVal;
+    const entry = parseFloat(entInput?.value || 3925.0);
+
+    // 1. Deduce Target Risk Cash ($): Option 1 (% of Equity) vs Option 2 (Fixed Max Cash Risk $)
+    let targetRiskDollars = 20.0;
+    let effectiveRiskPct = 2.0;
+
+    if (currentRiskMode === "cash") {
+      targetRiskDollars = Math.max(1.0, parseFloat(cashInput?.value || 50.0));
+      effectiveRiskPct = (targetRiskDollars / eq) * 100.0;
+      if (document.getElementById("lbl-cash-equiv-pct")) {
+        document.getElementById("lbl-cash-equiv-pct").innerText = `$${targetRiskDollars.toFixed(2)} (${effectiveRiskPct.toFixed(2)}% eq)`;
+      }
+    } else {
+      effectiveRiskPct = Math.max(0.05, parseFloat(rInput?.value || 2.0));
+      targetRiskDollars = eq * (effectiveRiskPct / 100.0);
+      if (document.getElementById("lbl-risk-cash")) {
+        document.getElementById("lbl-risk-cash").innerText = `${effectiveRiskPct.toFixed(1)}% ($${targetRiskDollars.toFixed(2)} USD)`;
+      }
+    }
+
+    // 2. Stop Loss & Take Profit in PIPS
+    let slPips = Math.max(1.0, parseFloat(slPipsInput?.value || 100.0));
+    let tp1Pips = Math.max(1.0, parseFloat(tp1PipsInput?.value || 250.0));
+    let tp2Pips = Math.max(1.0, parseFloat(tp2PipsInput?.value || 500.0));
+
+    const slDist = slPips * pipVal;
+    const tp1Dist = tp1Pips * pipVal;
+    const tp2Dist = tp2Pips * pipVal;
+
+    // 3. EXACT PIP-BASED LOT SIZE DEDUCTION
+    // Lot Size = Target Risk ($) / (SL Pips * Pip Value per Lot)
+    const rawLot = targetRiskDollars / Math.max(0.01, (slPips * pipValuePerLot));
+    const lot = Math.max(0.01, Math.round(rawLot * 100.0) / 100.0);
+
+    const actualRiskUsd = lot * slPips * pipValuePerLot;
+    const actualRiskPct = (actualRiskUsd / eq) * 100.0;
+    const notional = lot * cSize * entry;
+    const margin = notional / lev;
+    const freeMargin = eq - margin;
+    const marginLvl = (eq / Math.max(0.01, margin)) * 100.0;
+    const effLev = notional / eq;
+
+    const pnlTp1 = lot * tp1Pips * pipValuePerLot;
+    const pnlTp2 = lot * tp2Pips * pipValuePerLot;
+    const rr1 = pnlTp1 / Math.max(1, actualRiskUsd);
+    const rr2 = pnlTp2 / Math.max(1, actualRiskUsd);
+
+    // Update Output Elements
+    if (document.getElementById("lbl-equity-val")) {
+      document.getElementById("lbl-equity-val").innerText = `$${eq.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    if (document.getElementById("out-calc-lot")) {
+      document.getElementById("out-calc-lot").innerText = `${lot.toFixed(2)} LOT`;
+    }
+    if (document.getElementById("out-calc-notional")) {
+      document.getElementById("out-calc-notional").innerText = `$${notional.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD Notional (${(lot * cSize / 100.0 * 2.0).toFixed(1)} ${spec.unit})`;
+    }
+    if (document.getElementById("out-calc-risk-usd")) {
+      document.getElementById("out-calc-risk-usd").innerText = `-$${actualRiskUsd.toFixed(2)} USD`;
+    }
+    if (document.getElementById("out-calc-risk-pct")) {
+      document.getElementById("out-calc-risk-pct").innerText = `${actualRiskPct.toFixed(2)}% of Equity (${currentRiskMode === "cash" ? "Fixed Cash Mode" : "% Mode"})`;
+    }
+    if (document.getElementById("out-calc-sl-dist")) {
+      document.getElementById("out-calc-sl-dist").innerText = `$${slDist.toFixed(2)} (${slPips.toFixed(1)} pips @ $${(lot * pipValuePerLot).toFixed(2)}/pip)`;
+    }
+    if (document.getElementById("out-calc-margin")) {
+      document.getElementById("out-calc-margin").innerText = `$${margin.toFixed(2)} USD (1:${lev})`;
+    }
+    if (document.getElementById("out-calc-free-margin")) {
+      const fmEl = document.getElementById("out-calc-free-margin");
+      fmEl.innerText = `$${freeMargin.toFixed(2)} USD`;
+      fmEl.style.color = freeMargin > 0 ? "#00e5ff" : "#ff4444";
+    }
+    if (document.getElementById("out-calc-margin-lvl")) {
+      const mlEl = document.getElementById("out-calc-margin-lvl");
+      const mlStatus = marginLvl >= 500 ? "HEALTHY" : (marginLvl >= 150 ? "MODERATE" : "CRITICAL DANGER");
+      mlEl.innerText = `${marginLvl.toLocaleString("en-US", { maximumFractionDigits: 1 })}% (${mlStatus})`;
+      mlEl.style.color = marginLvl >= 500 ? "#ffffff" : (marginLvl >= 150 ? "var(--amber-cmd)" : "#ff4444");
+    }
+    if (document.getElementById("out-calc-eff-lev")) {
+      document.getElementById("out-calc-eff-lev").innerText = `${effLev.toFixed(1)}x Account Notional`;
+    }
+    if (document.getElementById("out-calc-tp1-pnl")) {
+      document.getElementById("out-calc-tp1-pnl").innerText = `+$${pnlTp1.toFixed(2)} USD (1:${rr1.toFixed(2)} RR / +${tp1Pips.toFixed(0)}p)`;
+    }
+    if (document.getElementById("out-calc-tp2-pnl")) {
+      document.getElementById("out-calc-tp2-pnl").innerText = `+$${pnlTp2.toFixed(2)} USD (1:${rr2.toFixed(2)} RR / +${tp2Pips.toFixed(0)}p)`;
+    }
+
+    // Guardrail Badge & Warning Alert Box
+    const badge = document.getElementById("lot-guardrail-badge");
+    const warnBox = document.getElementById("calc-warning-box");
+    const warnTxt = document.getElementById("calc-warning-text");
+
+    let isDanger = margin >= eq;
+    let isWarning = margin >= eq * 0.65 || effectiveRiskPct > 3.0 || effLev > 20.0;
+
+    if (isDanger) {
+      if (badge) { badge.innerText = "DANGER: MARGIN CALL"; badge.style.borderColor = "#ff4444"; badge.style.color = "#ff4444"; }
+      if (warnTxt) warnTxt.innerHTML = `<span style="color:#ff4444;">⚠️ MARGIN CALL RISK: Required margin ($${margin.toFixed(2)}) exceeds equity ($${eq.toFixed(2)}). Broker will reject order. Lower lot, widen SL pips, or increase leverage.</span>`;
+      if (warnBox) warnBox.style.borderColor = "#ff4444";
+    } else if (isWarning) {
+      if (badge) { badge.innerText = "WARNING: HIGH RISK"; badge.style.borderColor = "var(--amber-cmd)"; badge.style.color = "var(--amber-cmd)"; }
+      let msgs = [];
+      if (effectiveRiskPct > 3.0) msgs.push(`Risk of ${effectiveRiskPct.toFixed(1)}% exceeds institutional prop desk 3.0% threshold.`);
+      if (margin >= eq * 0.65) msgs.push(`High margin utilization (${(margin/eq*100).toFixed(0)}%).`);
+      if (effLev > 20.0) msgs.push(`Effective leverage ${effLev.toFixed(1)}x is aggressive.`);
+      if (warnTxt) warnTxt.innerHTML = `<span style="color:var(--amber-cmd);">⚠️ ELEVATED RISK: ${msgs.join(" ")}</span>`;
+      if (warnBox) warnBox.style.borderColor = "var(--amber-cmd)";
+    } else {
+      if (badge) { badge.innerText = "GUARDRAIL: OPTIMAL MARGIN"; badge.style.borderColor = "#00e5ff"; badge.style.color = "#00e5ff"; }
+      if (warnTxt) warnTxt.innerHTML = `<span style="color:#00e5ff;">✓ OPTIMAL INSTITUTIONAL SIZING: 1.0R risk ($${actualRiskUsd.toFixed(2)}) on ${slPips.toFixed(0)} pips SL safely within margin buffer.</span>`;
+      if (warnBox) warnBox.style.borderColor = "#222";
+    }
+  }
+
+  // 1. Risk Mode Switcher: Option 1 (% of Equity) vs Option 2 (Fixed Max Cash Risk $)
+  btnModePct?.addEventListener("click", () => {
+    currentRiskMode = "pct";
+    btnModePct.classList.add("active");
+    btnModeCash?.classList.remove("active");
+    if (wrapPct) wrapPct.style.display = "block";
+    if (wrapCash) wrapCash.style.display = "none";
+    recalculate();
+  });
+
+  btnModeCash?.addEventListener("click", () => {
+    currentRiskMode = "cash";
+    btnModeCash.classList.add("active");
+    btnModePct?.classList.remove("active");
+    if (wrapCash) wrapCash.style.display = "block";
+    if (wrapPct) wrapPct.style.display = "none";
+    recalculate();
+  });
+
+  // 2. Order Direction Switcher (BUY vs SELL)
+  btnDirBuy?.addEventListener("click", () => {
+    currentDirection = "BUY";
+    btnDirBuy.classList.add("active");
+    btnDirSell?.classList.remove("active");
+    syncPricesFromPips();
+    recalculate();
+  });
+
+  btnDirSell?.addEventListener("click", () => {
+    currentDirection = "SELL";
+    btnDirSell.classList.add("active");
+    btnDirBuy?.classList.remove("active");
+    syncPricesFromPips();
+    recalculate();
+  });
+
+  // 3. Bi-Directional Pips <-> Price Sync
+  function syncPricesFromPips() {
+    const entry = parseFloat(entInput?.value || 3925.0);
+    const spec = getSpec();
+    const pipVal = spec.pip;
+    const slPips = parseFloat(slPipsInput?.value || 100.0);
+    const tp1Pips = parseFloat(tp1PipsInput?.value || 250.0);
+    const tp2Pips = parseFloat(tp2PipsInput?.value || 500.0);
+
+    if (slInput) slInput.value = (currentDirection === "BUY" ? entry - slPips * pipVal : entry + slPips * pipVal).toFixed(2);
+    if (tp1Input) tp1Input.value = (currentDirection === "BUY" ? entry + tp1Pips * pipVal : entry - tp1Pips * pipVal).toFixed(2);
+    if (tp2Input) tp2Input.value = (currentDirection === "BUY" ? entry + tp2Pips * pipVal : entry - tp2Pips * pipVal).toFixed(2);
+  }
+
+  function syncPipsFromPrices() {
+    const entry = parseFloat(entInput?.value || 3925.0);
+    const spec = getSpec();
+    const pipVal = spec.pip;
+    const slPrice = parseFloat(slInput?.value || 3915.0);
+    const tp1Price = parseFloat(tp1Input?.value || 3950.0);
+    const tp2Price = parseFloat(tp2Input?.value || 3975.0);
+
+    if (slPipsInput) slPipsInput.value = (Math.abs(entry - slPrice) / pipVal).toFixed(1);
+    if (tp1PipsInput) tp1PipsInput.value = (Math.abs(entry - tp1Price) / pipVal).toFixed(1);
+    if (tp2PipsInput) tp2PipsInput.value = (Math.abs(entry - tp2Price) / pipVal).toFixed(1);
+  }
+
+  [slPipsInput, tp1PipsInput, tp2PipsInput].forEach(inp => inp?.addEventListener("input", () => {
+    syncPricesFromPips();
+    recalculate();
+  }));
+
+  [slInput, tp1Input, tp2Input].forEach(inp => inp?.addEventListener("input", () => {
+    syncPipsFromPrices();
+    recalculate();
+  }));
+
+  entInput?.addEventListener("input", () => {
+    syncPricesFromPips();
+    recalculate();
+  });
+
+  [eqInput, cashInput].forEach(inp => inp?.addEventListener("input", recalculate));
+  [levSel, instSel].forEach(sel => sel?.addEventListener("change", () => {
+    syncPricesFromPips();
+    recalculate();
+  }));
+
+  rRange?.addEventListener("input", (e) => {
+    if (rInput) rInput.value = parseFloat(e.target.value).toFixed(2);
+    document.querySelectorAll(".btn-risk-preset").forEach(b => b.classList.remove("active"));
+    recalculate();
+  });
+
+  rInput?.addEventListener("input", (e) => {
+    if (rRange) rRange.value = parseFloat(e.target.value);
+    document.querySelectorAll(".btn-risk-preset").forEach(b => b.classList.remove("active"));
+    recalculate();
+  });
+
+  // Presets
+  document.querySelectorAll(".btn-eq-preset").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".btn-eq-preset").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      if (eqInput) eqInput.value = btn.getAttribute("data-eq");
+      recalculate();
+    });
+  });
+
+  document.querySelectorAll(".btn-risk-preset").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".btn-risk-preset").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const rVal = parseFloat(btn.getAttribute("data-risk"));
+      if (rInput) rInput.value = rVal.toFixed(1);
+      if (rRange) rRange.value = rVal;
+      if (btnModePct) btnModePct.click();
+      recalculate();
+    });
+  });
+
+  document.querySelectorAll(".btn-cash-preset").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".btn-cash-preset").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const cVal = parseFloat(btn.getAttribute("data-cash"));
+      if (cashInput) cashInput.value = cVal;
+      if (btnModeCash) btnModeCash.click();
+      recalculate();
+    });
+  });
+
+  // Sync from Active Ticket
+  function syncFromActiveTicket(ev = null) {
+    const activeMod = ev ? `mod-${ev}` : getActiveModuleId();
+    let entryVal = 3925.0, slVal = 3915.0, tp1Val = 3950.0, tp2Val = 3975.0;
+    let dir = "BUY";
+
+    if (activeMod === "mod-astar") {
+      const entTxt = document.getElementById("astar-entry")?.innerText || "";
+      const slTxt = document.getElementById("astar-sl")?.innerText || "";
+      const tp1Txt = document.getElementById("astar-tp1")?.innerText || "";
+      const tp2Txt = document.getElementById("astar-tp2")?.innerText || "";
+      const actTxt = document.getElementById("astar-action")?.innerText || "";
+      if (actTxt.includes("SHORT") || actTxt.includes("SELL")) dir = "SELL";
+      const mEnt = entTxt.match(/(\d+\.?\d*)/);
+      const mSl = slTxt.match(/(\d+\.?\d*)/);
+      const mTp1 = tp1Txt.match(/(\d+\.?\d*)/);
+      const mTp2 = tp2Txt.match(/(\d+\.?\d*)/);
+      if (mEnt) entryVal = parseFloat(mEnt[1]);
+      if (mSl) slVal = parseFloat(mSl[1]);
+      if (mTp1) tp1Val = parseFloat(mTp1[1]);
+      if (mTp2) tp2Val = parseFloat(mTp2[1]);
+    } else {
+      const eName = activeMod.replace("mod-", "");
+      const entId = eName === "cpi" ? "val-ticket-entry" : `val-${eName}-ticket-entry`;
+      const slId = eName === "cpi" ? "val-ticket-sl" : `val-${eName}-ticket-sl`;
+      const tpId = eName === "cpi" ? "val-ticket-tp" : `val-${eName}-ticket-tp`;
+      const actId = eName === "cpi" ? "val-ticket-action" : `val-${eName}-ticket-action`;
+      const entTxt = document.getElementById(entId)?.innerText || "";
+      const slTxt = document.getElementById(slId)?.innerText || "";
+      const tpTxt = document.getElementById(tpId)?.innerText || "";
+      const actTxt = document.getElementById(actId)?.innerText || "";
+      if (actTxt.includes("SHORT") || actTxt.includes("SELL")) dir = "SELL";
+      const mEnt = entTxt.match(/(\d+\.?\d*)/);
+      const mSl = slTxt.match(/(\d+\.?\d*)/);
+      const mTp = tpTxt.match(/(\d+\.?\d*)/);
+      if (mEnt) entryVal = parseFloat(mEnt[1]);
+      if (mSl) slVal = parseFloat(mSl[1]);
+      if (mTp) {
+        tp1Val = parseFloat(mTp[1]);
+        tp2Val = tp1Val + (tp1Val >= entryVal ? 1 : -1) * Math.abs(tp1Val - entryVal) * 0.6;
+      }
+    }
+
+    currentDirection = dir;
+    if (dir === "BUY") {
+      btnDirBuy?.classList.add("active");
+      btnDirSell?.classList.remove("active");
+    } else {
+      btnDirSell?.classList.add("active");
+      btnDirBuy?.classList.remove("active");
+    }
+
+    if (entInput) entInput.value = entryVal.toFixed(2);
+    if (slInput) slInput.value = slVal.toFixed(2);
+    if (tp1Input) tp1Input.value = tp1Val.toFixed(2);
+    if (tp2Input) tp2Input.value = tp2Val.toFixed(2);
+    syncPipsFromPrices();
+    recalculate();
+  }
+
+  document.getElementById("btn-sync-active-ticket")?.addEventListener("click", () => syncFromActiveTicket());
+
+  document.querySelectorAll(".btn-ticket-sizer").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const ev = btn.getAttribute("data-ev");
+      document.querySelector('[data-mod="mod-astar"]')?.click();
+      syncFromActiveTicket(ev);
+      document.getElementById("section-lot-sizer")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+
+  document.getElementById("btn-top-lot-sizer")?.addEventListener("click", () => {
+    document.querySelector('[data-mod="mod-astar"]')?.click();
+    syncFromActiveTicket();
+    document.getElementById("section-lot-sizer")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+
+  syncPricesFromPips();
+  recalculate();
+}
 
 document.addEventListener("DOMContentLoaded", init);

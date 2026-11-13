@@ -1232,6 +1232,168 @@ class SetupLifecycleManager:
         self._save(data)
         return active, data.get("completed_setups", [])
 
+def calculate_lot_and_risk(
+    equity=1000.0,
+    risk_mode="pct",
+    risk_pct=2.0,
+    max_risk_usd=None,
+    leverage=100,
+    entry_price=3925.0,
+    sl_price=None,
+    sl_pips=100.0,
+    tp1_price=None,
+    tp1_pips=250.0,
+    tp2_price=None,
+    tp2_pips=500.0,
+    contract_size=100.0,
+    instrument="XAUUSD",
+    direction="BUY"
+):
+    """
+    Institutional Pip-Based Lot Calculator & Multi-Tier Margin Risk Sizer:
+    Supports 2 distinct Risk Deductions:
+      - Option 1: Risk % of Equity (Target Risk $ = Equity * Risk%)
+      - Option 2: Fixed Max Cash Risk $ (Max dollar budget, deduces % of Equity)
+    Calculates exact lot size directly from Stop Loss in PIPS:
+      Lot Size = Target_Risk_$ / (SL_Pips * Pip_Value_Per_Lot)
+    Auto-synchronizes Price levels and Pip distances.
+    """
+    inst = (instrument or "XAUUSD").upper()
+    inst_specs = {
+        "XAUUSD": {"contract": 100.0, "pip": 0.10, "unit": "oz"},
+        "GOLD": {"contract": 100.0, "pip": 0.10, "unit": "oz"},
+        "EURUSD": {"contract": 100000.0, "pip": 0.0001, "unit": "EUR"},
+        "GBPUSD": {"contract": 100000.0, "pip": 0.0001, "unit": "GBP"},
+        "US30": {"contract": 10.0, "pip": 1.0, "unit": "pts"},
+        "CL": {"contract": 1000.0, "pip": 0.01, "unit": "bbl"}
+    }
+    spec = inst_specs.get(inst, inst_specs["XAUUSD"])
+    c_size = contract_size if (contract_size and contract_size != 100.0) else spec["contract"]
+    pip_val = spec["pip"]
+    pip_value_per_lot = c_size * pip_val
+
+    eq = max(10.0, float(equity))
+    lev = max(1, int(leverage))
+    entry = float(entry_price)
+    is_buy = str(direction).upper() == "BUY"
+
+    # 2 Risk Modes: % of Equity vs Fixed Max Cash Risk $
+    rmode = "cash" if str(risk_mode).lower() == "cash" else "pct"
+    if rmode == "cash" and max_risk_usd is not None and float(max_risk_usd) > 0:
+        target_risk_dollars = round(float(max_risk_usd), 2)
+        effective_risk_pct = round((target_risk_dollars / eq) * 100.0, 2)
+    else:
+        effective_risk_pct = max(0.05, float(risk_pct))
+        target_risk_dollars = round(eq * (effective_risk_pct / 100.0), 2)
+
+    # Stop Loss & Take Profit in PIPS & Price
+    if sl_pips is not None and float(sl_pips) > 0:
+        pips_sl = round(float(sl_pips), 1)
+        sl_dist = pips_sl * pip_val
+        sl = round(entry - sl_dist if is_buy else entry + sl_dist, 2) if sl_price is None else float(sl_price)
+    elif sl_price is not None:
+        sl = float(sl_price)
+        sl_dist = abs(entry - sl)
+        pips_sl = round(sl_dist / pip_val, 1)
+    else:
+        pips_sl = 100.0
+        sl_dist = pips_sl * pip_val
+        sl = round(entry - sl_dist if is_buy else entry + sl_dist, 2)
+
+    if tp1_pips is not None and float(tp1_pips) > 0:
+        pips_tp1 = round(float(tp1_pips), 1)
+        tp1_dist = pips_tp1 * pip_val
+        tp1 = round(entry + tp1_dist if is_buy else entry - tp1_dist, 2) if tp1_price is None else float(tp1_price)
+    elif tp1_price is not None:
+        tp1 = float(tp1_price)
+        tp1_dist = abs(tp1 - entry)
+        pips_tp1 = round(tp1_dist / pip_val, 1)
+    else:
+        pips_tp1 = pips_sl * 2.5
+        tp1_dist = pips_tp1 * pip_val
+        tp1 = round(entry + tp1_dist if is_buy else entry - tp1_dist, 2)
+
+    if tp2_pips is not None and float(tp2_pips) > 0:
+        pips_tp2 = round(float(tp2_pips), 1)
+        tp2_dist = pips_tp2 * pip_val
+        tp2 = round(entry + tp2_dist if is_buy else entry - tp2_dist, 2) if tp2_price is None else float(tp2_price)
+    elif tp2_price is not None:
+        tp2 = float(tp2_price)
+        tp2_dist = abs(tp2 - entry)
+        pips_tp2 = round(tp2_dist / pip_val, 1)
+    else:
+        pips_tp2 = pips_sl * 4.0
+        tp2_dist = pips_tp2 * pip_val
+        tp2 = round(entry + tp2_dist if is_buy else entry - tp2_dist, 2)
+
+    # Pip-based lot sizing: Lot = Risk$ / (SL_Pips * Pip_Value_Per_Lot)
+    raw_lot = target_risk_dollars / max(0.01, (pips_sl * pip_value_per_lot))
+    computed_lot = max(0.01, round(raw_lot * 100.0) / 100.0)
+    computed_lot = round(computed_lot, 2)
+
+    actual_risk_dollars = round(computed_lot * pips_sl * pip_value_per_lot, 2)
+    actual_risk_pct = round((actual_risk_dollars / eq) * 100.0, 2)
+
+    notional = round(computed_lot * c_size * entry, 2)
+    req_margin = round(notional / lev, 2)
+    free_margin = round(eq - req_margin, 2)
+    margin_level = round((eq / max(0.01, req_margin)) * 100.0, 1)
+    effective_lev = round(notional / eq, 1)
+
+    profit_tp1 = round(computed_lot * pips_tp1 * pip_value_per_lot, 2)
+    profit_tp2 = round(computed_lot * pips_tp2 * pip_value_per_lot, 2)
+    rr1 = round(profit_tp1 / max(1.0, actual_risk_dollars), 2)
+    rr2 = round(profit_tp2 / max(1.0, actual_risk_dollars), 2)
+
+    warnings = []
+    status = "OPTIMAL_MARGIN"
+    if req_margin >= eq:
+        status = "MARGIN_CALL_DANGER"
+        warnings.append(f"Required margin (${req_margin:,.2f}) exceeds equity (${eq:,.2f}). Reduce lot or raise leverage.")
+    elif req_margin >= eq * 0.65:
+        status = "HIGH_MARGIN_UTILIZATION"
+        warnings.append(f"Margin utilization is {round((req_margin/eq)*100, 1)}%. High stop-out risk on intraday drawdown.")
+    if effective_risk_pct > 3.0:
+        warnings.append(f"Risk of {effective_risk_pct}% exceeds institutional prop desk 3.0% risk limit.")
+    if effective_lev > 20.0:
+        warnings.append(f"Effective leverage {effective_lev}x exceeds conservative 20x threshold.")
+
+    return {
+        "instrument": inst,
+        "direction": "BUY" if is_buy else "SELL",
+        "equity": eq,
+        "risk_mode": rmode,
+        "risk_pct": effective_risk_pct,
+        "target_risk_dollars": target_risk_dollars,
+        "actual_risk_dollars": actual_risk_dollars,
+        "actual_risk_pct": actual_risk_pct,
+        "computed_lot": computed_lot,
+        "leverage": lev,
+        "contract_size": c_size,
+        "pip_size": pip_val,
+        "pip_value_per_lot": pip_value_per_lot,
+        "unit": spec["unit"],
+        "entry_price": entry,
+        "sl_price": sl,
+        "sl_pips": pips_sl,
+        "sl_distance": round(sl_dist, 2),
+        "tp1_price": tp1,
+        "tp1_pips": pips_tp1,
+        "tp2_price": tp2,
+        "tp2_pips": pips_tp2,
+        "notional_value": notional,
+        "required_margin": req_margin,
+        "free_margin": free_margin,
+        "margin_level_pct": margin_level,
+        "effective_leverage": effective_lev,
+        "profit_tp1": profit_tp1,
+        "profit_tp2": profit_tp2,
+        "rr_tp1": rr1,
+        "rr_tp2": rr2,
+        "status": status,
+        "warnings": warnings
+    }
+
 def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None):
     """
     INSTITUTIONAL QUANTITATIVE A* SETUP ENGINE (10,000-PATH MONTE CARLO & REAL DATA GATES):

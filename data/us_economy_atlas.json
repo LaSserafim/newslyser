@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-11-12 15:01:21 UTC",
+  "generated_at_utc": "2026-11-13 01:44:55 UTC",
   "total_fred_series_ingested": 40,
   "domains": {
     "labor_dol": {
@@ -30,7 +30,7 @@
       "supercore_cpi_yoy_pct": 3.51,
       "shelter_cpi_yoy_pct": 3.61,
       "ppi_3m_avg_mom_pct": 0.66,
-      "breakeven_10y_pct": 2.2
+      "breakeven_10y_pct": 2.24
     },
     "debt_fiscal": {
       "title": "SOVEREIGN DEBT & FISCAL POLICY (TREASURY + OMB)",
@@ -43,24 +43,24 @@
       "title": "U.S. TREASURY CURVE, BOND & FED LIQUIDITY",
       "fed_target_upper_pct": 4.0,
       "effr_pct": 3.88,
-      "zq_futures_implied_pct": 4.165,
-      "dgs2_pct": 4.56,
-      "dgs10_pct": 4.88,
-      "dgs30_pct": 5.26,
-      "tips_10y_real_pct": 2.66,
-      "curve_10y_2y_pct": 0.25,
-      "curve_10y_3m_pct": 0.68,
-      "term_30y_2y_pct": 0.7,
-      "fed_balance_sheet_t": 6.748,
-      "reverse_repo_b": 0.152,
-      "net_fed_liquidity_t": 6.748,
+      "zq_futures_implied_pct": 4.18,
+      "dgs2_pct": 4.73,
+      "dgs10_pct": 4.98,
+      "dgs30_pct": 5.35,
+      "tips_10y_real_pct": 2.78,
+      "curve_10y_2y_pct": 0.24,
+      "curve_10y_3m_pct": 0.78,
+      "term_30y_2y_pct": 0.62,
+      "fed_balance_sheet_t": 6.759,
+      "reverse_repo_b": 0.25,
+      "net_fed_liquidity_t": 6.759,
       "m2_money_supply_t": 23.414,
       "m2_yoy_pct": 5.71
     },
     "financial_conditions_micro": {
       "title": "FINANCIAL CONDITIONS, CREDIT & MICRO HOUSEHOLD",
       "chicago_nfci": -0.462,
-      "stl_stress_stlfsi4": -0.522,
+      "stl_stress_stlfsi4": -0.492,
       "high_yield_oas_pct": 3.3,
       "michigan_sentiment_umcsent": 48.1,
       "personal_saving_psavert_pct": 3.8,
@@ -77,20 +77,20 @@
       "brier_score": 0.1213,
       "z_stats": {
         "t10y3m": -2.97,
-        "nfci": 13.07,
-        "stlfsi4": 3.55,
-        "sahm": 9.02
+        "nfci": 13.06,
+        "stlfsi4": 3.56,
+        "sahm": 9.01
       },
-      "stress_prob_6m_pct": 41.83
+      "stress_prob_6m_pct": 41.81
     },
     "taylor_policy": {
       "n_months": 668,
       "taylor_implied_rate_pct": 4.08,
       "fed_actual_rate_pct": 4.0,
       "taylor_gap_pct": -0.08,
-      "p_tightening_pct": 50.2,
-      "p_hold_pct": 43.0,
-      "p_easing_pct": 6.8
+      "p_tightening_pct": 52.6,
+      "p_hold_pct": 41.1,
+      "p_easing_pct": 6.3
     },
     "macro_regimes_copula": {
       "n_months": 668,
@@ -107,39 +107,39 @@
     },
     "fiscal_liquidity_hc3": {
       "n_weeks": 149,
-      "full_f_stat": 2.02,
-      "full_f_p": 0.094719,
-      "full_r2": 0.0532,
-      "pruned_f_stat": 2.96,
-      "pruned_f_p": 0.054937,
-      "pruned_r2": 0.039,
+      "full_f_stat": 2.03,
+      "full_f_p": 0.093288,
+      "full_r2": 0.0533,
+      "pruned_f_stat": 2.97,
+      "pruned_f_p": 0.054412,
+      "pruned_r2": 0.0391,
       "factors": {
         "d_liq": {
-          "beta_raw": -0.2312,
+          "beta_raw": -0.2311,
           "beta_filtered": 0.0,
           "t_stat": -0.79,
-          "p_val": 0.4333,
+          "p_val": 0.433,
           "significant_5pct": false
         },
         "d_hy": {
-          "beta_raw": 3.625,
-          "beta_filtered": 3.625,
-          "t_stat": 2.09,
-          "p_val": 0.0385,
+          "beta_raw": 3.6559,
+          "beta_filtered": 3.6559,
+          "t_stat": 2.12,
+          "p_val": 0.0361,
           "significant_5pct": true
         },
         "d_nfci": {
-          "beta_raw": -49.923,
-          "beta_filtered": -49.923,
+          "beta_raw": -49.903,
+          "beta_filtered": -49.903,
           "t_stat": -2.03,
-          "p_val": 0.0445,
+          "p_val": 0.0447,
           "significant_5pct": true
         },
         "d_tips": {
-          "beta_raw": -3.0788,
+          "beta_raw": -3.082,
           "beta_filtered": 0.0,
           "t_stat": -1.18,
-          "p_val": 0.2388,
+          "p_val": 0.2383,
           "significant_5pct": false
         }
       },

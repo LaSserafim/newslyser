@@ -30,6 +30,7 @@
       </select>
       <button class="bbg-btn" id="btn-sync-live">SYNC LIVE &lt;GO&gt;</button>
       <button class="bbg-btn" id="btn-update-all-data" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE ALL DATA &lt;GO&gt;</button>
+      <button class="bbg-btn" id="btn-top-lot-sizer" style="border-color:#00e5ff; color:#00e5ff; font-weight:800;">LOT SIZER &lt;GO&gt;</button>
     </div>
   </header>
 
@@ -317,7 +318,7 @@
             </tr>
             <tr>
               <td class="label">TRADE DIRECTIVE:</td>
-              <td class="val" id="val-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td>
+              <td class="val" id="val-ticket-action" style="color:var(--fg-bright); font-weight:900;">-- <button class="bbg-btn-mini btn-ticket-sizer" data-ev="cpi" style="border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;">⚡ SIZER &lt;GO&gt;</button></td>
             </tr>
             <tr>
               <td class="label">ENTRY ZONE:</td>
@@ -531,8 +532,7 @@
               <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-fomc-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
               <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-fomc-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
               <tr><td class="label">CRR OPTIONS p^Q vs p^P:</td><td class="val" id="val-fomc-ticket-crr" style="color:var(--amber-cmd); font-weight:700;">--</td></tr>
-              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-fomc-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
-              <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-fomc-ticket-entry">--</td></tr>
+              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-fomc-ticket-action" style="color:var(--fg-bright); font-weight:900;">-- <button class="bbg-btn-mini btn-ticket-sizer" data-ev="fomc" style="border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;">⚡ SIZER &lt;GO&gt;</button></td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-fomc-ticket-sl" style="color:#ff4444;">--</td></tr>
               <tr><td class="label">TAKE PROFIT:</td><td class="val" id="val-fomc-ticket-tp">--</td></tr>
               <tr><td class="label">ANCHORED VWAP:</td><td class="val" id="val-fomc-ticket-avwap">--</td></tr>
@@ -717,8 +717,7 @@
               <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-nfp-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
               <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-nfp-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
               <tr><td class="label">CRR OPTIONS p^Q vs p^P:</td><td class="val" id="val-nfp-ticket-crr" style="color:var(--amber-cmd); font-weight:700;">--</td></tr>
-              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-nfp-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
-              <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-nfp-ticket-entry">--</td></tr>
+              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-nfp-ticket-action" style="color:var(--fg-bright); font-weight:900;">-- <button class="bbg-btn-mini btn-ticket-sizer" data-ev="nfp" style="border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;">⚡ SIZER &lt;GO&gt;</button></td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-nfp-ticket-sl" style="color:#ff4444;">--</td></tr>
               <tr><td class="label">TAKE PROFIT:</td><td class="val" id="val-nfp-ticket-tp">--</td></tr>
               <tr><td class="label">ANCHORED VWAP:</td><td class="val" id="val-nfp-ticket-avwap">--</td></tr>
@@ -898,8 +897,7 @@
               <tr><td class="label">STAGE-A MACRO PROBS:</td><td class="val" id="val-ppi-ticket-probs" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
               <tr><td class="label">STAGE-B ON NEWS PRINT:</td><td class="val" id="val-ppi-ticket-dir" style="color:#00e5ff; font-weight:800;">--</td></tr>
               <tr><td class="label">CRR OPTIONS p^Q vs p^P:</td><td class="val" id="val-ppi-ticket-crr" style="color:var(--amber-cmd); font-weight:700;">--</td></tr>
-              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-ppi-ticket-action" style="color:var(--fg-bright); font-weight:900;">--</td></tr>
-              <tr><td class="label">ENTRY ZONE:</td><td class="val" id="val-ppi-ticket-entry">--</td></tr>
+              <tr><td class="label">TRADE DIRECTIVE:</td><td class="val" id="val-ppi-ticket-action" style="color:var(--fg-bright); font-weight:900;">-- <button class="bbg-btn-mini btn-ticket-sizer" data-ev="ppi" style="border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;">⚡ SIZER &lt;GO&gt;</button></td></tr>
               <tr><td class="label">STOP LOSS:</td><td class="val" id="val-ppi-ticket-sl" style="color:#ff4444;">--</td></tr>
               <tr><td class="label">TAKE PROFIT:</td><td class="val" id="val-ppi-ticket-tp">--</td></tr>
               <tr><td class="label">ANCHORED VWAP:</td><td class="val" id="val-ppi-ticket-avwap">--</td></tr>
@@ -1025,7 +1023,7 @@
               <tr><td class="label">STOP LOSS:</td><td class="val" id="astar-sl" style="color:#ff4444; font-weight:700;">--</td></tr>
               <tr><td class="label">TAKE PROFIT 1:</td><td class="val" id="astar-tp1" style="color:#ffffff; font-weight:700;">--</td></tr>
               <tr><td class="label">TAKE PROFIT 2:</td><td class="val" id="astar-tp2" style="color:#ffffff; font-weight:700;">--</td></tr>
-              <tr><td class="label">POSITION SIZE:</td><td class="val" id="astar-lot" style="color:var(--amber-cmd); font-weight:800;">--</td></tr>
+              <tr><td class="label">POSITION SIZE:</td><td class="val" id="astar-lot" style="color:var(--amber-cmd); font-weight:800;">-- <button class="bbg-btn-mini btn-ticket-sizer" data-ev="astar" style="border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;">⚡ SIZER &lt;GO&gt;</button></td></tr>
             </table>
 
             <div id="astar-progress-wrap" style="margin-top:10px; padding:8px; background:#080808; border:1px solid #222;">
@@ -1082,6 +1080,218 @@
 
 
       </div>
+
+      <!-- ==================== LOT CALCULATOR & RISK SIZER ==================== -->
+      <section class="audit-ledger-container" id="section-lot-sizer" style="display:block; border:1px solid var(--amber-cmd); margin-top:10px;">
+        <div class="audit-ledger-header" style="background:#141000; border-bottom:1px solid var(--amber-dim); cursor:default;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="tag" style="background:var(--amber-cmd); color:#000; font-weight:900;">08 // LOT.RISK &lt;GO&gt;</span>
+            <span style="color:var(--amber-cmd); font-weight:900; letter-spacing:0.5px;">INSTITUTIONAL LOT CALCULATOR &amp; MARGIN RISK SIZER</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button class="bbg-btn-mini" id="btn-sync-active-ticket" style="border-color:#00e5ff; color:#00e5ff; font-weight:800;">⚡ SYNC ACTIVE TICKET &lt;GO&gt;</button>
+            <span id="lot-guardrail-badge" style="font-size:9px; padding:2px 8px; font-weight:800; border:1px solid #00e5ff; color:#00e5ff; font-family:var(--font-mono);">GUARDRAIL: OPTIMAL MARGIN</span>
+          </div>
+        </div>
+
+        <div style="padding:12px; background:#080808; display:grid; grid-template-columns:1fr 1.2fr; gap:16px;">
+          <!-- Left: Trading Account, Risk & Execution Inputs -->
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <div style="font-size:10px; font-weight:900; color:var(--fg-bright); border-bottom:1px solid #222; padding-bottom:4px;">
+              [ 1. ACCOUNT EQUITY, RISK TARGET &amp; BROKER LEVERAGE ]
+            </div>
+
+            <!-- Equity -->
+            <div>
+              <div style="display:flex; justify-content:space-between; font-size:9.5px; color:#aaa; margin-bottom:3px;">
+                <span>ACCOUNT EQUITY ($ USD):</span>
+                <span id="lbl-equity-val" style="color:#fff; font-weight:800;">$1,000.00</span>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <input type="number" id="calc-equity" style="background:#000; color:#fff; border:1px solid #333; padding:4px 8px; font-family:var(--font-mono); font-size:11px; width:100%;" value="1000" min="50" step="50">
+              </div>
+              <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
+                <button class="bbg-btn-mini btn-eq-preset" data-eq="500">$500</button>
+                <button class="bbg-btn-mini btn-eq-preset active" data-eq="1000">$1,000</button>
+                <button class="bbg-btn-mini btn-eq-preset" data-eq="2500">$2,500</button>
+                <button class="bbg-btn-mini btn-eq-preset" data-eq="5000">$5,000</button>
+                <button class="bbg-btn-mini btn-eq-preset" data-eq="10000">$10,000</button>
+                <button class="bbg-btn-mini btn-eq-preset" data-eq="50000">$50,000</button>
+              </div>
+            </div>
+
+            <!-- Risk Mode Switcher: Option 1 (% of Equity) vs Option 2 (Fixed Max Cash Risk $) -->
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
+                <span style="font-size:9.5px; color:#aaa;">RISK DEDUCTION MODEL:</span>
+                <div style="display:flex; gap:4px;">
+                  <button class="bbg-btn-mini active" id="btn-mode-pct" style="font-weight:800;">OPTION 1: % OF EQUITY</button>
+                  <button class="bbg-btn-mini" id="btn-mode-cash" style="font-weight:800;">OPTION 2: MAX RISK ($)</button>
+                </div>
+              </div>
+
+              <!-- Option 1: % of Equity container -->
+              <div id="wrap-risk-pct">
+                <div style="display:flex; justify-content:space-between; font-size:9.5px; color:#aaa; margin-bottom:3px;">
+                  <span>RISK OF EQUITY (%):</span>
+                  <span id="lbl-risk-cash" style="color:var(--amber-cmd); font-weight:800;">2.0% ($20.00 USD)</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="range" id="calc-risk-range" class="bbg-slider" min="0.25" max="5.0" step="0.25" value="2.0" style="flex:1;">
+                  <input type="number" id="calc-risk-pct" style="width:65px; background:#000; color:var(--amber-cmd); border:1px solid #333; padding:3px 6px; font-family:var(--font-mono); font-size:11px; text-align:right;" value="2.0" step="0.1" min="0.1" max="10.0">
+                </div>
+                <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
+                  <button class="bbg-btn-mini btn-risk-preset" data-risk="0.5">0.5% (Safe)</button>
+                  <button class="bbg-btn-mini btn-risk-preset" data-risk="1.0">1.0% (Prop Desk)</button>
+                  <button class="bbg-btn-mini btn-risk-preset" data-risk="1.5">1.5%</button>
+                  <button class="bbg-btn-mini btn-risk-preset active" data-risk="2.0">2.0% (Standard)</button>
+                  <button class="bbg-btn-mini btn-risk-preset" data-risk="3.0">3.0% (Max)</button>
+                </div>
+              </div>
+
+              <!-- Option 2: Fixed Max Cash Risk container -->
+              <div id="wrap-risk-cash" style="display:none;">
+                <div style="display:flex; justify-content:space-between; font-size:9.5px; color:#aaa; margin-bottom:3px;">
+                  <span>FIXED MAX CASH RISK ($ USD):</span>
+                  <span id="lbl-cash-equiv-pct" style="color:#00e5ff; font-weight:800;">$50.00 (5.00% eq)</span>
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="calc-max-risk-cash" style="background:#000; color:#00e5ff; border:1px solid #113333; padding:4px 8px; font-family:var(--font-mono); font-size:11px; width:100%; font-weight:800;" value="50" min="5" step="5">
+                </div>
+                <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
+                  <button class="bbg-btn-mini btn-cash-preset" data-cash="20">$20 Cash</button>
+                  <button class="bbg-btn-mini btn-cash-preset" data-cash="30">$30 (Daily A*)</button>
+                  <button class="bbg-btn-mini btn-cash-preset active" data-cash="50">$50 Cash</button>
+                  <button class="bbg-btn-mini btn-cash-preset" data-cash="100">$100 Cash</button>
+                  <button class="bbg-btn-mini btn-cash-preset" data-cash="250">$250 Cash</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Leverage & Instrument -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <div>
+                <label style="font-size:9px; color:#888; display:block; margin-bottom:2px;">BROKER LEVERAGE (1:X):</label>
+                <select id="calc-leverage" style="width:100%; background:#000; color:#fff; border:1px solid #333; padding:4px; font-family:var(--font-mono); font-size:10px;">
+                  <option value="30">1:30 (EU/Regulated)</option>
+                  <option value="50">1:50 (US Regulated)</option>
+                  <option value="100" selected>1:100 (Standard)</option>
+                  <option value="200">1:200 (Competitive)</option>
+                  <option value="500">1:500 (Offshore / Prop)</option>
+                  <option value="1000">1:1000 (High Leverage)</option>
+                  <option value="2000">1:2000 (Exness Max)</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:9px; color:#888; display:block; margin-bottom:2px;">INSTRUMENT SPEC:</label>
+                <select id="calc-instrument" style="width:100%; background:#000; color:var(--amber-cmd); border:1px solid #333; padding:4px; font-family:var(--font-mono); font-size:10px;">
+                  <option value="XAUUSD" selected>XAUUSD (Gold 100 oz)</option>
+                  <option value="EURUSD">EURUSD (100k units)</option>
+                  <option value="GBPUSD">GBPUSD (100k units)</option>
+                  <option value="US30">US30 (10x index)</option>
+                  <option value="CL">CL (Crude Oil 1000 bbl)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Direction Toggle: BUY vs SELL -->
+            <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px dashed #222; padding-top:6px;">
+              <span style="font-size:9.5px; color:#aaa;">ORDER DIRECTION:</span>
+              <div style="display:flex; gap:4px;">
+                <button class="bbg-btn-mini active" id="btn-calc-dir-buy" style="border-color:#00e5ff; color:#00e5ff; font-weight:800;">BUY / LONG</button>
+                <button class="bbg-btn-mini" id="btn-calc-dir-sell" style="border-color:#ff4444; color:#ff4444; font-weight:800;">SELL / SHORT</button>
+              </div>
+            </div>
+
+            <!-- Execution Levels: Entry Price + PIPS for SL & TP (with Auto-Synced Price) -->
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <div>
+                <label style="font-size:9px; color:#888; display:block;">ENTRY PRICE ($):</label>
+                <input type="number" id="calc-entry" style="width:100%; background:#000; color:#fff; border:1px solid #333; padding:3px 6px; font-family:var(--font-mono); font-size:10.5px;" value="3925.00" step="0.1">
+              </div>
+              <div>
+                <label style="font-size:9px; color:#ff4444; display:block;">STOP LOSS (PIPS / $):</label>
+                <div style="display:flex; gap:4px;">
+                  <input type="number" id="calc-sl-pips" style="width:50%; background:#000; color:#ff4444; border:1px solid #442222; padding:3px 6px; font-family:var(--font-mono); font-size:10.5px; font-weight:800;" value="100.0" step="5" min="5" placeholder="Pips">
+                  <input type="number" id="calc-sl" style="width:50%; background:#0a0000; color:#ff8888; border:1px solid #332222; padding:3px 4px; font-family:var(--font-mono); font-size:9.5px;" value="3915.00" step="0.1" title="SL Price ($)">
+                </div>
+              </div>
+              <div>
+                <label style="font-size:9px; color:#00e5ff; display:block;">TAKE PROFIT 1 (PIPS / $):</label>
+                <div style="display:flex; gap:4px;">
+                  <input type="number" id="calc-tp1-pips" style="width:50%; background:#000; color:#00e5ff; border:1px solid #113333; padding:3px 6px; font-family:var(--font-mono); font-size:10.5px; font-weight:800;" value="250.0" step="10" min="5" placeholder="Pips">
+                  <input type="number" id="calc-tp1" style="width:50%; background:#000a0a; color:#88ffff; border:1px solid #112222; padding:3px 4px; font-family:var(--font-mono); font-size:9.5px;" value="3950.00" step="0.1" title="TP1 Price ($)">
+                </div>
+              </div>
+              <div>
+                <label style="font-size:9px; color:#fff; display:block;">TAKE PROFIT 2 (PIPS / $):</label>
+                <div style="display:flex; gap:4px;">
+                  <input type="number" id="calc-tp2-pips" style="width:50%; background:#000; color:#fff; border:1px solid #333; padding:3px 6px; font-family:var(--font-mono); font-size:10.5px; font-weight:800;" value="500.0" step="10" min="5" placeholder="Pips">
+                  <input type="number" id="calc-tp2" style="width:50%; background:#0a0a0a; color:#ccc; border:1px solid #222; padding:3px 4px; font-family:var(--font-mono); font-size:9.5px;" value="3975.00" step="0.1" title="TP2 Price ($)">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Calculated Lot, Margin, Risk & Profit Distribution -->
+          <div style="display:flex; flex-direction:column; gap:8px; border-left:1px solid #222; padding-left:16px;">
+            <div style="font-size:10px; font-weight:900; color:var(--fg-bright); border-bottom:1px solid #222; padding-bottom:4px;">
+              [ 2. EXACT LOT CALCULATION &amp; MARGIN SIZING OUTPUT ]
+            </div>
+
+            <!-- Big Lot Readout Hero Card -->
+            <div style="background:#110e00; border:1px solid var(--amber-cmd); padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-size:9px; color:#aaa; font-family:var(--font-mono);">EXACT RECOMMENDED POSITION:</div>
+                <div id="out-calc-lot" style="font-size:26px; font-weight:900; color:var(--amber-cmd); font-family:var(--font-mono);">0.02 LOT</div>
+                <div id="out-calc-notional" style="font-size:9.5px; color:#888; font-family:var(--font-mono);">$7,850.00 USD Notional (2.0 oz)</div>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-size:9px; color:#aaa;">CASH RISK AT STOP LOSS:</div>
+                <div id="out-calc-risk-usd" style="font-size:18px; font-weight:900; color:#ff4444; font-family:var(--font-mono);">-$20.00 USD</div>
+                <div id="out-calc-risk-pct" style="font-size:9.5px; color:#aaa; font-family:var(--font-mono);">2.00% of Equity</div>
+              </div>
+            </div>
+
+            <!-- Metric Breakdown Table -->
+            <table class="bbg-mini-table">
+              <tr>
+                <td class="label">STOP LOSS DISTANCE:</td>
+                <td class="val" id="out-calc-sl-dist" style="color:#ff4444; font-weight:800;">$10.00 (100.0 pips)</td>
+              </tr>
+              <tr>
+                <td class="label">REQUIRED BROKER MARGIN:</td>
+                <td class="val" id="out-calc-margin" style="color:#fff; font-weight:800;">$78.50 USD (1:100)</td>
+              </tr>
+              <tr>
+                <td class="label">FREE MARGIN AFTER ENTRY:</td>
+                <td class="val" id="out-calc-free-margin" style="color:#00e5ff; font-weight:800;">$921.50 USD</td>
+              </tr>
+              <tr>
+                <td class="label">ACCOUNT MARGIN LEVEL:</td>
+                <td class="val" id="out-calc-margin-lvl" style="color:#fff; font-weight:800;">1,273.9% (HEALTHY)</td>
+              </tr>
+              <tr>
+                <td class="label">EFFECTIVE LEVERAGE RATIO:</td>
+                <td class="val" id="out-calc-eff-lev" style="color:#aaa;">7.8x Account Notional</td>
+              </tr>
+              <tr>
+                <td class="label">TARGET 1 PROFIT (1:2.5 RR):</td>
+                <td class="val" id="out-calc-tp1-pnl" style="color:#00e5ff; font-weight:800;">+$50.00 USD (+250.0 pips)</td>
+              </tr>
+              <tr>
+                <td class="label">TARGET 2 PROFIT (1:5.0 RR):</td>
+                <td class="val" id="out-calc-tp2-pnl" style="color:#ffffff; font-weight:800;">+$100.00 USD (+500.0 pips)</td>
+              </tr>
+            </table>
+
+            <!-- Real-Time Guardrail Warning Bar -->
+            <div id="calc-warning-box" style="padding:6px 10px; background:#0e1015; border:1px solid #222; font-size:9px; color:#aaa; font-family:var(--font-mono);">
+              <span id="calc-warning-text" style="color:#00e5ff;">✓ OPTIMAL INSTITUTIONAL SIZING: Defined 1.0R risk safely within equity &amp; margin buffers.</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section class="audit-ledger-container">
         <div class="audit-ledger-header" id="astar-audit-toggle-header">

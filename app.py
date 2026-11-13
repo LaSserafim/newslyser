@@ -839,6 +839,46 @@ def get_paper_trade_backtest(min_confidence: int = 95, starting_equity: float = 
 def get_us_economy_atlas(min_confidence: int = 95):
     return quant_model.get_us_economy_atlas_analysis(min_confidence=min_confidence)
 
+class LotCalcRequest(BaseModel):
+    equity: float = 1000.0
+    risk_mode: str = "pct"
+    risk_pct: float = 2.0
+    max_risk_usd: float = None
+    leverage: int = 100
+    entry_price: float = 3925.0
+    sl_price: float = None
+    sl_pips: float = 100.0
+    tp1_price: float = None
+    tp1_pips: float = 250.0
+    tp2_price: float = None
+    tp2_pips: float = 500.0
+    contract_size: float = 100.0
+    instrument: str = "XAUUSD"
+    direction: str = "BUY"
+
+@app.post("/api/calculate-lot-size")
+def api_calculate_lot_size(req: LotCalcRequest):
+    return quant_model.calculate_lot_and_risk(
+        equity=req.equity, risk_mode=req.risk_mode, risk_pct=req.risk_pct,
+        max_risk_usd=req.max_risk_usd, leverage=req.leverage,
+        entry_price=req.entry_price, sl_price=req.sl_price, sl_pips=req.sl_pips,
+        tp1_price=req.tp1_price, tp1_pips=req.tp1_pips,
+        tp2_price=req.tp2_price, tp2_pips=req.tp2_pips,
+        contract_size=req.contract_size, instrument=req.instrument,
+        direction=req.direction
+    )
+
+@app.get("/api/calculate-lot-size")
+def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", risk_pct: float = 2.0, max_risk_usd: float = None, leverage: int = 100, entry: float = 3925.0, sl: float = None, sl_pips: float = 100.0, tp1: float = None, tp1_pips: float = 250.0, tp2: float = None, tp2_pips: float = 500.0, contract_size: float = 100.0, instrument: str = "XAUUSD", direction: str = "BUY"):
+    return quant_model.calculate_lot_and_risk(
+        equity=equity, risk_mode=risk_mode, risk_pct=risk_pct,
+        max_risk_usd=max_risk_usd, leverage=leverage,
+        entry_price=entry, sl_price=sl, sl_pips=sl_pips,
+        tp1_price=tp1, tp1_pips=tp1_pips,
+        tp2_price=tp2, tp2_pips=tp2_pips,
+        contract_size=contract_size, instrument=instrument,
+        direction=direction
+    )
 
 class SimReq(BaseModel):
     actual_mom: float
