@@ -151,6 +151,9 @@ def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None, event
         price = prices.get("GC=F", 3975.0)
     atr_val = prices.get("ATR_M30", 10.80)
     return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, n_paths=n_paths, event_type=event_type, atr_m30=atr_val, min_confidence=min_confidence)
+@app.get("/api/garch-volatility-90d")
+def get_garch_volatility_90d(event_type: str = "cpi"):
+    return quant_model.calculate_garch_90d_volatility(event_type=event_type)
 
 @app.get("/api/shock-frequency")
 def get_shock_frequency(z: float = 0.0, event_type: str = "cpi"):
@@ -372,6 +375,7 @@ def _clear_quant_caches():
 def sync_releases(force: bool = True):
     res = data_pipeline.sync_live_releases_if_stale(force=force)
     _clear_quant_caches()
+    quant_model._GARCH_90D_CACHE.clear()
     return res
 
 @app.post("/api/update-all-data")

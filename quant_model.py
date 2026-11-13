@@ -552,6 +552,181 @@ def predict_garch_shock_dispersion(event_type="cpi", survey_sd=0.075, vix_val=19
         "regime_volatility": "HIGH_VOLATILITY_EXPANSION" if expansion_ratio >= 1.20 else ("NORMAL_DISPERSION" if expansion_ratio >= 0.90 else "LOW_COMPRESSION")
     }
 
+_GARCH_90D_CACHE = {}
+
+def calculate_garch_90d_volatility(event_type="cpi"):
+    """
+    90-Day Bollerslev (1986) GARCH(1,1) Volatility Engine:
+    Fits sigma_t^2 = omega + alpha * eps_{t-1}^2 + beta * sigma_{t-1}^2 via Variance-Targeted MLE
+    on authentic Gold (GC=F) daily returns.
+    Extracts the 90-trading-day conditional volatility trajectory, 10-day rolling realized volatility,
+    long-run unconditional volatility (sigma_LR), event-specific release shock markers,
+    forward term-structure volatility forecast (T+1d to T+10d), and Engle (1982) ARCH LM diagnostic test.
+    """
+    import time
+    ev = (event_type or "cpi").lower()
+    now_ts = time.time()
+    cache_entry = _GARCH_90D_CACHE.get(ev)
+    if cache_entry and (now_ts - cache_entry["ts"] < 300.0):
+        return cache_entry["val"]
+
+    try:
+        import yfinance as yf
+        df = yf.download("GC=F", period="1y", interval="1d", progress=False, auto_adjust=False, threads=False)["Close"].dropna()
+        gc_close = df["GC=F"] if "GC=F" in df else df
+        rets = (np.log(gc_close / gc_close.shift(1)) * 100.0).dropna()
+        if len(rets) < 60:
+            raise ValueError("Insufficient Yahoo daily return rows")
+    except Exception:
+        import os
+        hist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "cpi_historical.json")
+        with open(hist_path) as f:
+            h = json.load(f)
+        prices = [float(e.get("gold_close", 2000.0)) for e in h]
+        dates = [pd.Timestamp(e.get("date", "2024-01-01")) for e in h]
+        gc_close = pd.Series(prices, index=dates)
+        rets = (np.log(gc_close / gc_close.shift(1)) * 100.0).dropna()
+
+    y = rets.values
+    n = len(y)
+    mu = float(np.mean(y))
+    eps = y - mu
+    v_long = float(np.var(eps, ddof=1))
+
+    # Fast Variance-Targeted MLE Grid Search
+    best_ll = -1e9
+    best_params = (0.35, 0.10, 0.80)
+    for a in np.linspace(0.04, 0.18, 15):
+        for b in np.linspace(0.70, 0.94, 25):
+            if a + b >= 0.999: continue
+            om = v_long * (1.0 - a - b)
+            sig2 = np.zeros(n)
+            sig2[0] = v_long
+            for t in range(1, n):
+                sig2[t] = om + a * (eps[t-1] ** 2) + b * sig2[t-1]
+            sig2 = np.maximum(sig2, 1e-4)
+            ll = -0.5 * np.sum(np.log(sig2) + (eps ** 2) / sig2)
+            if ll > best_ll:
+                best_ll = ll
+                best_params = (om, a, b)
+
+    om, a, b = best_params
+    sig2 = np.zeros(n)
+    sig2[0] = v_long
+    for t in range(1, n):
+        sig2[t] = om + a * (eps[t-1] ** 2) + b * sig2[t-1]
+    sig_daily = np.sqrt(sig2)
+    sig_ann = sig_daily * math.sqrt(252.0)
+    rv10 = pd.Series(rets).rolling(10).std(ddof=1) * math.sqrt(252.0)
+
+    # Standardized residuals for Engle's ARCH LM test
+    e_std = eps / np.maximum(1e-4, sig_daily)
+    e2 = e_std ** 2
+    x_lm = e2[:-1]; y_lm = e2[1:]
+    x_mean = np.mean(x_lm); y_mean = np.mean(y_lm)
+    sxx = np.sum((x_lm - x_mean) ** 2)
+    sxy = np.sum((x_lm - x_mean) * (y_lm - y_mean))
+    syy = np.sum((y_lm - y_mean) ** 2)
+    r2_lm = (sxy ** 2) / (sxx * syy) if (sxx * syy) > 0 else 0.0
+    arch_stat = float((len(e2) - 1) * r2_lm)
+    arch_p = float(1.0 - math.erf(math.sqrt(max(0.0, arch_stat) / 2.0)))
+
+    n_90 = min(90, len(rets))
+    idx_90 = rets.index[-n_90:]
+    long_run_ann = math.sqrt(v_long * 252.0)
+    persistence = a + b
+    half_life = math.log(0.5) / math.log(max(1e-4, persistence))
+
+    series = []
+    for dt, p, r, ep, sd, sa, rv in zip(idx_90, gc_close.loc[idx_90], rets.loc[idx_90], eps[-n_90:], sig_daily[-n_90:], sig_ann[-n_90:], rv10.loc[idx_90]):
+        dt_str = dt.strftime("%Y-%m-%d")
+        regime = "EXPANSION" if sa >= long_run_ann else "COMPRESSION"
+        series.append({
+            "date": dt_str,
+            "price": round(float(p), 2),
+            "log_ret_pct": round(float(r), 2),
+            "shock_eps": round(float(ep), 2),
+            "garch_daily_vol_pct": round(float(sd), 3),
+            "garch_ann_vol_pct": round(float(sa), 2),
+            "realized_vol_ann_pct": round(float(rv if not np.isnan(rv) else sa), 2),
+            "regime": regime
+        })
+
+    start_date = series[0]["date"] if series else "2026-01-01"
+    markers = []
+    if ev in ["astar", "daily"]:
+        for e_name in ["cpi", "fomc", "nfp", "ppi"]:
+            try:
+                recs, sk, _, _, _ = _load_event_dataset(e_name)
+                for r in recs:
+                    d = r.get("date", "")
+                    if d >= start_date:
+                        pips = (float(r.get("gold_close", 0)) - float(r.get("gold_open", 0))) * 10.0
+                        markers.append({
+                            "date": d,
+                            "event_type": e_name.upper(),
+                            "shock": round(float(r.get(sk, 0)), 2),
+                            "pips_moved": round(pips, 1),
+                            "gold_ret_pct": round(float(r.get("gold_return_pct", 0)), 2),
+                            "label": f"{e_name.upper()} ({d[5:]}): {pips:+.0f}p ({r.get('gold_return_pct', 0)}%)"
+                        })
+            except Exception:
+                pass
+    else:
+        try:
+            recs, sk, _, _, _ = _load_event_dataset(ev)
+            for r in recs:
+                d = r.get("date", "")
+                if d >= start_date:
+                    pips = (float(r.get("gold_close", 0)) - float(r.get("gold_open", 0))) * 10.0
+                    markers.append({
+                        "date": d,
+                        "event_type": ev.upper(),
+                        "shock": round(float(r.get(sk, 0)), 2),
+                        "pips_moved": round(pips, 1),
+                        "gold_ret_pct": round(float(r.get("gold_return_pct", 0)), 2),
+                        "label": f"{ev.upper()} ({d[5:]}): {pips:+.0f}p ({r.get('gold_return_pct', 0)}%)"
+                    })
+        except Exception:
+            pass
+    markers.sort(key=lambda x: x["date"])
+
+    # Forward term structure volatility projection (T+1d to T+10d)
+    cur_var = sig2[-1]
+    fwd_forecast = []
+    for step in [1, 2, 3, 5, 10]:
+        fwd_var = v_long + (persistence ** step) * (cur_var - v_long)
+        fwd_ann = math.sqrt(max(0.01, fwd_var)) * math.sqrt(252.0)
+        fwd_forecast.append({
+            "step": step,
+            "label": f"T+{step}d",
+            "forecast_ann_vol_pct": round(fwd_ann, 2),
+            "forecast_daily_vol_pct": round(math.sqrt(max(0.01, fwd_var)), 3)
+        })
+
+    res = {
+        "event_type": ev,
+        "n_trading_days": n_90,
+        "summary": {
+            "current_garch_ann_pct": round(float(sig_ann[-1]), 2),
+            "current_garch_daily_pct": round(float(sig_daily[-1]), 3),
+            "long_run_unconditional_vol_pct": round(long_run_ann, 2),
+            "omega": round(om, 4), "alpha": round(a, 4), "beta": round(b, 4),
+            "persistence": round(persistence, 4),
+            "half_life_trading_days": round(half_life, 1),
+            "min_90d_vol_pct": round(float(np.min(sig_ann[-n_90:])), 2),
+            "max_90d_vol_pct": round(float(np.max(sig_ann[-n_90:])), 2),
+            "avg_90d_vol_pct": round(float(np.mean(sig_ann[-n_90:])), 2),
+            "engle_arch_lm_stat": round(arch_stat, 2),
+            "engle_arch_lm_p_val": round(arch_p, 4),
+            "arch_test_pass": bool(arch_p > 0.05)
+        },
+        "forward_forecast": fwd_forecast,
+        "event_markers": markers,
+        "series": series
+    }
+    _GARCH_90D_CACHE[ev] = {"ts": now_ts, "val": res}
+    return res
 _INTRADAY_CACHE = {"ts": 0.0, "closes": None}
 
 def _get_cached_m30_returns():

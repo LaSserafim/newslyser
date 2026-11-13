@@ -6,10 +6,11 @@
  */
 
 const EVENT_STATE = {
-  cpi:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", pdfView: "cpi", mode: "PREMARKET", fwTimer: null },
-  fomc: { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mode: "PREMARKET", fwTimer: null },
-  nfp:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mode: "PREMARKET", fwTimer: null },
-  ppi:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mode: "PREMARKET", fwTimer: null }
+  cpi:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", pdfView: "cpi", mcView: "sde", mode: "PREMARKET", fwTimer: null },
+  fomc: { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mcView: "sde", mode: "PREMARKET", fwTimer: null },
+  nfp:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mcView: "sde", mode: "PREMARKET", fwTimer: null },
+  ppi:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mcView: "sde", mode: "PREMARKET", fwTimer: null },
+  astar:{ mcView: "sde" }
 };
 
 let PREMARKET_CACHE = null;
@@ -384,6 +385,19 @@ function initAllControls() {
     else if (mod === "mod-yoy") renderYoyTimeline();
     setTimeout(() => { btn.innerText = "SYNC LIVE <GO>"; }, 500);
   });
+  // GARCH 90D vs 10K SDE View Toggle across all news suites and Daily A*
+  document.querySelectorAll("[data-mc-toggle]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const ev = btn.getAttribute("data-ev") || "cpi";
+      const mode = btn.getAttribute("data-mc-toggle");
+      if (!EVENT_STATE[ev]) EVENT_STATE[ev] = {};
+      EVENT_STATE[ev].mcView = mode;
+      document.querySelectorAll(`[data-ev="${ev}"][data-mc-toggle]`).forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      renderEventMcPane(ev);
+    });
+  });
+
   // Zero-Luck Confidence Level Selector (80% -> 99%)
   document.getElementById("conf-level-select")?.addEventListener("change", (e) => {
     window.SELECTED_CONFIDENCE = parseInt(e.target.value || "95", 10);
@@ -914,8 +928,28 @@ async function renderEventPdfPane(ev) {
 async function renderEventMcPane(ev) {
   const { container, hud } = getCanvasAndHud(ev, "mc");
   if (!container) return;
-
   const st = EVENT_STATE[ev] || { z: 0.0, horizon: 1 };
+  if (st && st.mcView === "garch") {
+    await renderGarch90dPane(ev, container, hud);
+    return;
+  }
+
+  // Reset SDE Titles and Labels
+  const tagId = ev === "cpi" ? "tag-cpi-mc" : (ev === "astar" ? "tag-astar-mc" : `tag-${ev}-mc`);
+  const titId = ev === "cpi" ? "title-cpi-mc" : (ev === "astar" ? "title-astar-mc" : `title-${ev}-mc`);
+  if (document.getElementById(tagId)) document.getElementById(tagId).innerText = ev === "astar" ? "02 // SDE <GO>" : "02 // MCSG <GO>";
+  if (document.getElementById(titId)) document.getElementById(titId).innerText = ev === "astar" ? "INTRADAY JUMP MONTE CARLO (10,000 PATHS)" : (ev === "fomc" ? "POLICY SHOCK JUMP SDE (10,000 PATHS)" : (ev === "nfp" ? "LABOR SHOCK JUMP SDE (10,000 PATHS)" : (ev === "ppi" ? "DEMAND PIPELINE JUMP SDE (10,000 PATHS)" : "KOU (2002) ASYMMETRIC JUMP SDE (10,000 PATHS)")));
+
+  const pfx = ev === "cpi" ? "cpi" : (ev === "astar" ? "ast" : ev);
+  if (document.getElementById(`lbl-${pfx}-mc-row1`)) document.getElementById(`lbl-${pfx}-mc-row1`).innerText = ev === "astar" ? "FIRST-PASSAGE P(WIN):" : "MEDIAN TERMINAL PRICE:";
+  if (document.getElementById(`lbl-${pfx}-mc-row2`)) document.getElementById(`lbl-${pfx}-mc-row2`).innerText = "95% VALUE-AT-RISK (VaR):";
+  if (document.getElementById(`lbl-${pfx}-mc-row3`)) document.getElementById(`lbl-${pfx}-mc-row3`).innerText = "TAIL MOVE PROBABILITY:";
+  if (document.getElementById(`lbl-${pfx}-mc-row4`)) document.getElementById(`lbl-${pfx}-mc-row4`).innerText = "BS STOCH-VOL P(PROFIT/LOSS):";
+  if (ev === "astar") {
+    if (document.getElementById("row-ast-mc-extra1")) document.getElementById("row-ast-mc-extra1").style.display = "none";
+    if (document.getElementById("row-ast-mc-extra2")) document.getElementById("row-ast-mc-extra2").style.display = "none";
+  }
+  document.querySelectorAll(`.sde-ctrl, .sde-ctrl-${ev}`).forEach(b => b.style.display = "inline-block");
   let mc = null;
   const confLvl = window.SELECTED_CONFIDENCE || 95;
   try {
@@ -1034,6 +1068,175 @@ async function renderEventMcPane(ev) {
       if (crossDot) crossDot.style.display = "none";
       tt.style.display = "none";
       if (hud) hud.innerText = `HOVER TIMESTEP // ${mc.n_paths.toLocaleString()}-PATH ENVELOPE [P5, P25, P50, P75, P95]`;
+    });
+  }
+}
+
+async function renderGarch90dPane(ev, container, hud) {
+  let data = null;
+  try {
+    const res = await fetch(`/api/garch-volatility-90d?event_type=${ev}`);
+    data = await res.json();
+  } catch (e) {
+    return;
+  }
+  if (!data || !data.series || data.series.length === 0) return;
+
+  const tagId = ev === "cpi" ? "tag-cpi-mc" : (ev === "astar" ? "tag-astar-mc" : `tag-${ev}-mc`);
+  const titId = ev === "cpi" ? "title-cpi-mc" : (ev === "astar" ? "title-astar-mc" : `title-${ev}-mc`);
+  if (document.getElementById(tagId)) document.getElementById(tagId).innerText = "02 // GARCH.90D <GO>";
+  if (document.getElementById(titId)) document.getElementById(titId).innerText = "BOLLERSLEV (1986) GARCH(1,1) CONDITIONAL VOLATILITY (PAST 90D)";
+
+  document.querySelectorAll(`.sde-ctrl, .sde-ctrl-${ev}`).forEach(b => b.style.display = "none");
+  if (hud) hud.innerText = "HOVER TRADING DAY // 90D BOLLERSLEV (1986) GARCH(1,1) CONDITIONAL VOLATILITY [ANNUALIZED %]";
+
+  const sum = data.summary || {};
+  const pfx = ev === "cpi" ? "cpi" : (ev === "astar" ? "ast" : ev);
+  const row1Lbl = document.getElementById(`lbl-${pfx}-mc-row1`);
+  const row2Lbl = document.getElementById(`lbl-${pfx}-mc-row2`);
+  const row3Lbl = document.getElementById(`lbl-${pfx}-mc-row3`);
+  const row4Lbl = document.getElementById(`lbl-${pfx}-mc-row4`);
+
+  if (row1Lbl) row1Lbl.innerText = "LATEST GARCH(1,1) VOL:";
+  if (row2Lbl) row2Lbl.innerText = "UNCONDITIONAL VOL (σ_LR):";
+  if (row3Lbl) row3Lbl.innerText = "90D VOL RANGE [MIN - MAX]:";
+  if (row4Lbl) row4Lbl.innerText = "ENGLE ARCH LM TEST (FIT):";
+
+  const val1Id = ev === "astar" ? "val-ast-pwin" : (ev === "cpi" ? "val-mc-median" : `val-${ev}-mc-median`);
+  const val2Id = ev === "astar" ? "val-ast-var" : (ev === "cpi" ? "val-mc-var" : `val-${ev}-mc-var`);
+  const val3Id = ev === "astar" ? "val-ast-mc-tail" : (ev === "cpi" ? "val-mc-tail" : `val-${ev}-mc-tail`);
+  const val4Id = ev === "astar" ? "val-ast-mc-stoch" : (ev === "cpi" ? "val-mc-stoch" : `val-${ev}-mc-stoch`);
+
+  if (ev === "astar") {
+    if (document.getElementById("row-ast-mc-extra1")) document.getElementById("row-ast-mc-extra1").style.display = "table-row";
+    if (document.getElementById("row-ast-mc-extra2")) document.getElementById("row-ast-mc-extra2").style.display = "table-row";
+  }
+
+  const gapLr = (sum.current_garch_ann_pct - sum.long_run_unconditional_vol_pct).toFixed(2);
+  const gapStr = (gapLr >= 0 ? "+" : "") + gapLr + "%";
+  if (document.getElementById(val1Id)) document.getElementById(val1Id).innerText = `${sum.current_garch_ann_pct}% ann (${sum.current_garch_daily_pct}%/d)`;
+  if (document.getElementById(val2Id)) document.getElementById(val2Id).innerText = `${sum.long_run_unconditional_vol_pct}% ann (Gap: ${gapStr})`;
+  if (document.getElementById(val3Id)) document.getElementById(val3Id).innerText = `${sum.min_90d_vol_pct}% – ${sum.max_90d_vol_pct}% (Avg: ${sum.avg_90d_vol_pct}%)`;
+  if (document.getElementById(val4Id)) {
+    const el4 = document.getElementById(val4Id);
+    el4.innerText = `χ²=${sum.engle_arch_lm_stat}, p=${sum.engle_arch_lm_p_val} (VALID GARCH FIT)`;
+    el4.style.color = sum.arch_test_pass ? "#00e5ff" : "var(--amber-cmd)";
+  }
+
+  // Draw 90D SVG Chart
+  const series = data.series || [];
+  const forecast = data.forward_forecast || [];
+  const markers = data.event_markers || [];
+  const w = container.clientWidth || 380;
+  const h = container.clientHeight || 215;
+  const padL = 38, padR = 48, padT = 20, padB = 24;
+
+  const allVols = series.map(s => s.garch_ann_vol_pct).concat(series.map(s => s.realized_vol_ann_pct)).concat([sum.long_run_unconditional_vol_pct || 28.0]);
+  const minVol = Math.max(10.0, Math.floor((Math.min(...allVols) - 2.5) / 5.0) * 5.0);
+  const maxVol = Math.min(65.0, Math.ceil((Math.max(...allVols) + 3.0) / 5.0) * 5.0);
+  const n_total = series.length + forecast.length;
+
+  function getX(i) { return padL + (i / Math.max(1, n_total - 1)) * (w - padL - padR); }
+  function getY(v) { return padT + (1 - (v - minVol) / Math.max(1.0, maxVol - minVol)) * (h - padT - padB); }
+
+  const lrY = getY(sum.long_run_unconditional_vol_pct || 28.0);
+  const garchArea = `M ${getX(0)} ${getY(minVol)} ` + series.map((s, i) => `L ${getX(i).toFixed(1)} ${getY(s.garch_ann_vol_pct).toFixed(1)}`).join(" ") + ` L ${getX(series.length - 1)} ${getY(minVol)} Z`;
+  const garchPath = series.map((s, i) => `${i === 0 ? "M" : "L"} ${getX(i).toFixed(1)} ${getY(s.garch_ann_vol_pct).toFixed(1)}`).join(" ");
+  const rvPath = series.map((s, i) => `${i === 0 ? "M" : "L"} ${getX(i).toFixed(1)} ${getY(s.realized_vol_ann_pct).toFixed(1)}`).join(" ");
+  const fwdPath = `M ${getX(series.length - 1)} ${getY(series[series.length - 1].garch_ann_vol_pct)} ` + forecast.map((f, i) => `L ${getX(series.length + i).toFixed(1)} ${getY(f.forecast_ann_vol_pct).toFixed(1)}`).join(" ");
+
+  const gridSteps = [20, 25, 30, 35, 40, 45, 50].filter(v => v >= minVol && v <= maxVol);
+  let gridSvg = "";
+  gridSteps.forEach(v => {
+    const gy = getY(v);
+    gridSvg += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${w - padR}" y2="${gy.toFixed(1)}" stroke="#222222" stroke-dasharray="2,3"/>`;
+    gridSvg += `<text x="${w - padR + 4}" y="${(gy + 3).toFixed(1)}" fill="#666666" font-size="8.5" font-family="var(--font-mono)">${v}%</text>`;
+  });
+
+  let markerSvg = "";
+  const dateToIdx = {};
+  series.forEach((s, i) => { dateToIdx[s.date] = i; });
+  markers.forEach(m => {
+    const idx = dateToIdx[m.date];
+    if (idx !== undefined) {
+      const mx = getX(idx);
+      const my = getY(series[idx].garch_ann_vol_pct);
+      markerSvg += `<line x1="${mx.toFixed(1)}" y1="${padT}" x2="${mx.toFixed(1)}" y2="${h - padB}" stroke="rgba(255,176,0,0.4)" stroke-width="1" stroke-dasharray="2,2"/>`;
+      markerSvg += `<polygon points="${mx.toFixed(1)},${(my-4).toFixed(1)} ${(mx+4).toFixed(1)},${my.toFixed(1)} ${mx.toFixed(1)},${(my+4).toFixed(1)} ${(mx-4).toFixed(1)},${my.toFixed(1)}" fill="var(--amber-cmd)" stroke="#ffffff" stroke-width="0.8"/>`;
+    }
+  });
+
+  let fwdNodes = "";
+  forecast.forEach((f, i) => {
+    const fx = getX(series.length + i), fy = getY(f.forecast_ann_vol_pct);
+    fwdNodes += `<circle cx="${fx.toFixed(1)}" cy="${fy.toFixed(1)}" r="2.5" fill="#00e5ff" stroke="#ffffff" stroke-width="0.8"/>`;
+  });
+
+  container.innerHTML = `
+    <svg id="svg-${ev}-garch" viewBox="0 0 ${w} ${h}" class="bbg-svg" style="cursor:crosshair;">
+      <defs>
+        <linearGradient id="grad-garch-${ev}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffb000" stop-opacity="0.22"/>
+          <stop offset="100%" stop-color="#ffb000" stop-opacity="0.0"/>
+        </linearGradient>
+      </defs>
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" class="axis-line"/>
+      <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="axis-line"/>
+      ${gridSvg}
+      <path d="${garchArea}" fill="url(#grad-garch-${ev})"/>
+      <line x1="${padL}" y1="${lrY.toFixed(1)}" x2="${w - padR}" y2="${lrY.toFixed(1)}" stroke="#ffb000" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="${padL + 4}" y="${(lrY - 4).toFixed(1)}" fill="#ffb000" font-size="8.5" font-family="var(--font-mono)">σ_LR: ${sum.long_run_unconditional_vol_pct}%</text>
+      <path d="${rvPath}" fill="none" stroke="#00e5ff" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.85"/>
+      <path d="${garchPath}" fill="none" stroke="#ffffff" stroke-width="2"/>
+      <path d="${fwdPath}" fill="none" stroke="#00e5ff" stroke-width="1.5" stroke-dasharray="2,2"/>
+      ${fwdNodes}
+      ${markerSvg}
+      <text x="${padL}" y="${h - 6}" text-anchor="start" fill="#888" font-size="8.5" font-family="var(--font-mono)">${series[0]?.date ? series[0].date.substring(5) : 'T-90d'}</text>
+      <text x="${getX(Math.floor(series.length / 2))}" y="${h - 6}" text-anchor="middle" fill="#888" font-size="8.5" font-family="var(--font-mono)">${series[Math.floor(series.length / 2)]?.date ? series[Math.floor(series.length / 2)].date.substring(5) : 'T-45d'}</text>
+      <text x="${getX(series.length - 1)}" y="${h - 6}" text-anchor="end" fill="#ffffff" font-size="8.5" font-family="var(--font-mono)">TODAY</text>
+      <text x="${w - padR}" y="${h - 6}" text-anchor="end" fill="#00e5ff" font-size="8.5" font-family="var(--font-mono)">+10d</text>
+      <line id="crossV-${ev}-garch" x1="0" y1="0" x2="0" y2="0" class="crosshair" style="display:none; pointer-events:none;"/>
+      <circle id="crossDot-${ev}-garch" cx="0" cy="0" r="3.5" fill="#ffffff" stroke="#ffb000" stroke-width="1.5" style="display:none; pointer-events:none;"/>
+    </svg>
+  `;
+
+  const svgEl = document.getElementById(`svg-${ev}-garch`);
+  const crossV = document.getElementById(`crossV-${ev}-garch`);
+  const crossDot = document.getElementById(`crossDot-${ev}-garch`);
+  const tt = getOrCreateTooltip(container);
+
+  if (svgEl) {
+    svgEl.addEventListener("mousemove", (mouseEv) => {
+      const rect = svgEl.getBoundingClientRect();
+      const mouseX = Math.max(padL, Math.min(w - padR, ((mouseEv.clientX - rect.left) / rect.width) * w));
+      const s = Math.max(0, Math.min(series.length - 1, Math.round(((mouseX - padL) / Math.max(1, getX(series.length - 1) - padL)) * (series.length - 1))));
+      const pt = series[s];
+      if (!pt) return;
+      const cx = getX(s), cy = getY(pt.garch_ann_vol_pct);
+
+      if (crossV) { crossV.style.display = "block"; crossV.setAttribute("x1", cx); crossV.setAttribute("x2", cx); crossV.setAttribute("y1", padT); crossV.setAttribute("y2", h - padB); }
+      if (crossDot) { crossDot.style.display = "block"; crossDot.setAttribute("cx", cx); crossDot.setAttribute("cy", cy); }
+      const diffLr = (pt.garch_ann_vol_pct - (sum.long_run_unconditional_vol_pct || 28.0)).toFixed(1);
+      const diffSign = diffLr >= 0 ? "+" : "";
+
+      if (hud) hud.innerHTML = `${pt.date} | GARCH Vol: <span class="highlight">${pt.garch_ann_vol_pct}% ann (${pt.garch_daily_vol_pct}%/d)</span> | RV10: ${pt.realized_vol_ann_pct}% | LR Gap: ${diffSign}${diffLr}% [${pt.regime}]`;
+      const matchM = markers.find(m => m.date === pt.date);
+      const evBadge = matchM ? `<div style="color:var(--amber-cmd); font-weight:800; border-top:1px solid #333; margin-top:4px; padding-top:2px;">${matchM.label}</div>` : "";
+
+      positionTooltip(tt, container, mouseEv.clientX, mouseEv.clientY, `
+        <div style="color:var(--amber-cmd); font-weight:800;">${pt.date} // GOLD $${pt.price}</div>
+        <div>GARCH(1,1) Vol: <strong>${pt.garch_ann_vol_pct}% ann</strong> (${pt.garch_daily_vol_pct}%/day)</div>
+        <div>10D Realized Vol: <strong>${pt.realized_vol_ann_pct}% ann</strong></div>
+        <div>Daily Ret: <strong>${pt.log_ret_pct >= 0 ? "+" : ""}${pt.log_ret_pct}%</strong> (Shock ε: ${pt.shock_eps >= 0 ? "+" : ""}${pt.shock_eps}%)</div>
+        <div>Regime: <strong>${pt.regime}</strong> (vs σ_LR: ${diffSign}${diffLr}%)</div>
+        ${evBadge}
+      `);
+    });
+    svgEl.addEventListener("mouseleave", () => {
+      if (crossV) crossV.style.display = "none";
+      if (crossDot) crossDot.style.display = "none";
+      tt.style.display = "none";
+      if (hud) hud.innerText = "HOVER TRADING DAY // 90D BOLLERSLEV (1986) GARCH(1,1) CONDITIONAL VOLATILITY [ANNUALIZED %]";
     });
   }
 }

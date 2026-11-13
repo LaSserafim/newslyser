@@ -457,6 +457,9 @@ def get_garch_predicted_shock(event_type: str = "cpi"):
     vix_val = live.get("prices", {}).get("VIX", lead.get("vix_last", 17.5))
     wti_22d = lead.get("wti_22d_pct", 0.0)
     return quant_model.predict_garch_shock_dispersion(event_type=event_type, vix_val=vix_val, wti_change_pct=wti_22d)
+@app.get("/api/garch-volatility-90d")
+def get_garch_volatility_90d(event_type: str = "cpi"):
+    return quant_model.calculate_garch_90d_volatility(event_type=event_type)
 @app.get("/api/yoy-timeline")
 def get_yoy_timeline():
     with open(os.path.join(DATA_DIR, "cpi_yoy_timeline.json")) as f:
@@ -524,6 +527,7 @@ def _clear_quant_caches():
     quant_model._DAILY_OLS_CACHE["ts"] = 0.0
     quant_model._CONF_PROFILE_CACHE.clear()
     quant_model._MC_RESULT_CACHE.clear()
+    quant_model._GARCH_90D_CACHE.clear()
     quant_model._INTRADAY_CACHE["closes"] = None
     quant_model._INTRADAY_CACHE["ts"] = 0.0
 
