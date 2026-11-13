@@ -1270,6 +1270,7 @@ def calculate_lot_and_risk(
     spec = inst_specs.get(inst, inst_specs["XAUUSD"])
     c_size = contract_size if (contract_size and contract_size != 100.0) else spec["contract"]
     pip_val = spec["pip"]
+    price_dec = 4 if pip_val < 0.01 else 2
     pip_value_per_lot = c_size * pip_val
 
     eq = max(10.0, float(equity))
@@ -1290,7 +1291,7 @@ def calculate_lot_and_risk(
     if sl_pips is not None and float(sl_pips) > 0:
         pips_sl = round(float(sl_pips), 1)
         sl_dist = pips_sl * pip_val
-        sl = round(entry - sl_dist if is_buy else entry + sl_dist, 2) if sl_price is None else float(sl_price)
+        sl = round(entry - sl_dist if is_buy else entry + sl_dist, price_dec) if sl_price is None else float(sl_price)
     elif sl_price is not None:
         sl = float(sl_price)
         sl_dist = abs(entry - sl)
@@ -1298,12 +1299,12 @@ def calculate_lot_and_risk(
     else:
         pips_sl = 100.0
         sl_dist = pips_sl * pip_val
-        sl = round(entry - sl_dist if is_buy else entry + sl_dist, 2)
+        sl = round(entry - sl_dist if is_buy else entry + sl_dist, price_dec)
 
     if tp1_pips is not None and float(tp1_pips) > 0:
         pips_tp1 = round(float(tp1_pips), 1)
         tp1_dist = pips_tp1 * pip_val
-        tp1 = round(entry + tp1_dist if is_buy else entry - tp1_dist, 2) if tp1_price is None else float(tp1_price)
+        tp1 = round(entry + tp1_dist if is_buy else entry - tp1_dist, price_dec) if tp1_price is None else float(tp1_price)
     elif tp1_price is not None:
         tp1 = float(tp1_price)
         tp1_dist = abs(tp1 - entry)
@@ -1311,12 +1312,12 @@ def calculate_lot_and_risk(
     else:
         pips_tp1 = pips_sl * 2.5
         tp1_dist = pips_tp1 * pip_val
-        tp1 = round(entry + tp1_dist if is_buy else entry - tp1_dist, 2)
+        tp1 = round(entry + tp1_dist if is_buy else entry - tp1_dist, price_dec)
 
     if tp2_pips is not None and float(tp2_pips) > 0:
         pips_tp2 = round(float(tp2_pips), 1)
         tp2_dist = pips_tp2 * pip_val
-        tp2 = round(entry + tp2_dist if is_buy else entry - tp2_dist, 2) if tp2_price is None else float(tp2_price)
+        tp2 = round(entry + tp2_dist if is_buy else entry - tp2_dist, price_dec) if tp2_price is None else float(tp2_price)
     elif tp2_price is not None:
         tp2 = float(tp2_price)
         tp2_dist = abs(tp2 - entry)
@@ -1324,8 +1325,7 @@ def calculate_lot_and_risk(
     else:
         pips_tp2 = pips_sl * 4.0
         tp2_dist = pips_tp2 * pip_val
-        tp2 = round(entry + tp2_dist if is_buy else entry - tp2_dist, 2)
-
+        tp2 = round(entry + tp2_dist if is_buy else entry - tp2_dist, price_dec)
     # Pip-based lot sizing: Lot = Risk$ / (SL_Pips * Pip_Value_Per_Lot)
     raw_lot = target_risk_dollars / max(0.01, (pips_sl * pip_value_per_lot))
     computed_lot = max(0.01, round(raw_lot * 100.0) / 100.0)

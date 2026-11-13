@@ -2665,8 +2665,9 @@ function initLotCalculator() {
     if (document.getElementById("out-calc-lot")) {
       document.getElementById("out-calc-lot").innerText = `${lot.toFixed(2)} LOT`;
     }
+    const priceDec = pipVal < 0.01 ? 4 : 2;
     if (document.getElementById("out-calc-notional")) {
-      document.getElementById("out-calc-notional").innerText = `$${notional.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD Notional (${(lot * cSize / 100.0 * 2.0).toFixed(1)} ${spec.unit})`;
+      document.getElementById("out-calc-notional").innerText = `$${notional.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD Notional (${(lot * cSize).toLocaleString("en-US", { maximumFractionDigits: 1 })} ${spec.unit})`;
     }
     if (document.getElementById("out-calc-risk-usd")) {
       document.getElementById("out-calc-risk-usd").innerText = `-$${actualRiskUsd.toFixed(2)} USD`;
@@ -2675,7 +2676,7 @@ function initLotCalculator() {
       document.getElementById("out-calc-risk-pct").innerText = `${actualRiskPct.toFixed(2)}% of Equity (${currentRiskMode === "cash" ? "Fixed Cash Mode" : "% Mode"})`;
     }
     if (document.getElementById("out-calc-sl-dist")) {
-      document.getElementById("out-calc-sl-dist").innerText = `$${slDist.toFixed(2)} (${slPips.toFixed(1)} pips @ $${(lot * pipValuePerLot).toFixed(2)}/pip)`;
+      document.getElementById("out-calc-sl-dist").innerText = `${pipVal < 0.01 ? "" : "$"}${slDist.toFixed(priceDec)} (${slPips.toFixed(1)} pips @ $${(lot * pipValuePerLot).toFixed(2)}/pip)`;
     }
     if (document.getElementById("out-calc-margin")) {
       document.getElementById("out-calc-margin").innerText = `$${margin.toFixed(2)} USD (1:${lev})`;
@@ -2769,13 +2770,14 @@ function initLotCalculator() {
     const entry = parseFloat(entInput?.value || 3925.0);
     const spec = getSpec();
     const pipVal = spec.pip;
+    const priceDec = pipVal < 0.01 ? 4 : 2;
     const slPips = parseFloat(slPipsInput?.value || 100.0);
     const tp1Pips = parseFloat(tp1PipsInput?.value || 250.0);
     const tp2Pips = parseFloat(tp2PipsInput?.value || 500.0);
 
-    if (slInput) slInput.value = (currentDirection === "BUY" ? entry - slPips * pipVal : entry + slPips * pipVal).toFixed(2);
-    if (tp1Input) tp1Input.value = (currentDirection === "BUY" ? entry + tp1Pips * pipVal : entry - tp1Pips * pipVal).toFixed(2);
-    if (tp2Input) tp2Input.value = (currentDirection === "BUY" ? entry + tp2Pips * pipVal : entry - tp2Pips * pipVal).toFixed(2);
+    if (slInput) slInput.value = (currentDirection === "BUY" ? entry - slPips * pipVal : entry + slPips * pipVal).toFixed(priceDec);
+    if (tp1Input) tp1Input.value = (currentDirection === "BUY" ? entry + tp1Pips * pipVal : entry - tp1Pips * pipVal).toFixed(priceDec);
+    if (tp2Input) tp2Input.value = (currentDirection === "BUY" ? entry + tp2Pips * pipVal : entry - tp2Pips * pipVal).toFixed(priceDec);
   }
 
   function syncPipsFromPrices() {
@@ -2909,10 +2911,11 @@ function initLotCalculator() {
       btnDirBuy?.classList.remove("active");
     }
 
-    if (entInput) entInput.value = entryVal.toFixed(2);
-    if (slInput) slInput.value = slVal.toFixed(2);
-    if (tp1Input) tp1Input.value = tp1Val.toFixed(2);
-    if (tp2Input) tp2Input.value = tp2Val.toFixed(2);
+    const syncDec = getSpec().pip < 0.01 ? 4 : 2;
+    if (entInput) entInput.value = entryVal.toFixed(syncDec);
+    if (slInput) slInput.value = slVal.toFixed(syncDec);
+    if (tp1Input) tp1Input.value = tp1Val.toFixed(syncDec);
+    if (tp2Input) tp2Input.value = tp2Val.toFixed(syncDec);
     syncPipsFromPrices();
     recalculate();
   }
