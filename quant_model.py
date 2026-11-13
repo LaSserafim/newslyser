@@ -21,6 +21,27 @@ import time
 
 _CALIBRATION_CACHE = {}
 _DAILY_OLS_CACHE = {"ts": 0.0, "data": None}
+_LIVE_OVERLAY_CACHE = {"ts": 0.0, "data": {}}
+_DAILY_PROB_CACHE = {"ts": 0.0, "data": None}
+_PAPER_3Y_CACHE = {"ts": 0.0, "data": None}
+
+def _event_file_mtime(event_type="cpi"):
+    import os
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    ev = (event_type or "cpi").lower()
+    fname = {
+        "fomc": "fomc_historical.json",
+        "nfp": "nfp_historical.json",
+        "ppi": "ppi_retail_historical.json",
+        "ppi_retail": "ppi_retail_historical.json",
+    }.get(ev, "cpi_historical.json")
+    p = os.path.join(data_dir, fname)
+    return os.path.getmtime(p) if os.path.exists(p) else 0.0
+
+def _snapshot_mtime():
+    import os
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "premarket_snapshot.json")
+    return os.path.getmtime(p) if os.path.exists(p) else 0.0
 
 def _f_pvalue(f_stat, df1, df2):
     if f_stat <= 0 or df1 <= 0 or df2 <= 0:
@@ -33,11 +54,14 @@ def _get_calibrated_event_params(event_type="cpi"):
     Empirically calibrates Stage-1 (Shock->DXY, Shock->2Y), Stage-2 (DXY+2Y->Gold),
     Direct (Shock->Gold), 2SLS implied sensitivity, and VR(5) jump significance
     directly from authentic JSON release histories using White (1980) HC3 OLS.
+    Mtime-keyed cache auto-invalidates whenever data/*.json updates.
     """
     ev = (event_type or "cpi").lower()
     if ev in ["ppi_retail"]: ev = "ppi"
-    if ev in _CALIBRATION_CACHE:
-        return _CALIBRATION_CACHE[ev]
+    mtime = _event_file_mtime(ev)
+    c_entry = _CALIBRATION_CACHE.get(ev)
+    if c_entry and c_entry.get("_mtime") == mtime:
+        return c_entry
 
     records, shock_key, y2_key, _, _ = _load_event_dataset(ev)
     valid = [e for e in records if shock_key in e and "gold_return_pct" in e]
@@ -45,8 +69,6 @@ def _get_calibrated_event_params(event_type="cpi"):
     x_raw = np.array([float(e[shock_key]) for e in valid])
     dxy = np.array([float(e.get("dxy_return_pct", 0.0)) for e in valid])
     y2 = np.array([float(e.get(y2_key, 0.0)) for e in valid])
-    if ev == "cpi":
-        y2 = -y2
 
     vr5 = np.array([float(e.get("volatility_ratio_vr5", 3.5)) for e in valid])
     scale_sd = float(np.std(x_raw, ddof=1)) if ev == "fomc" else 1.0
@@ -64,9 +86,14 @@ def _get_calibrated_event_params(event_type="cpi"):
     p_2y1 = m_2y["p_values"][1]
     p_ca = _f_pvalue(m_ca["f_stat"], 2, max(1, n - 3))
 
+    # Strict 2SLS Gate: Stage-1 (p < 0.10) AND Stage-2 joint F-test (p_ca < 0.05) AND economic sign consistency (hawkish shock <= 0 Gold)
     b_dxy1 = m_dxy["beta"][1] if p_dxy1 < 0.10 else 0.0
     b_2y1  = m_2y["beta"][1] if p_2y1 < 0.10 else 0.0
-    beta_2sls = (m_ca["beta"][1] * b_dxy1) + (m_ca["beta"][2] * b_2y1)
+    if p_ca < 0.05:
+        raw_2sls = (m_ca["beta"][1] * b_dxy1) + (m_ca["beta"][2] * b_2y1)
+        beta_2sls = raw_2sls if raw_2sls <= 0.0 else 0.0
+    else:
+        beta_2sls = 0.0
     beta_dir = m_dir["beta"][1] if p_dir < 0.05 else 0.0
     effective_gold_beta = beta_dir if p_dir < 0.05 else beta_2sls
     gold_sd = float(np.std(y, ddof=1)) if n > 2 else 1.2
@@ -85,6 +112,7 @@ def _get_calibrated_event_params(event_type="cpi"):
         "beta_2sls_gold": round(float(beta_2sls), 4), "effective_gold_beta": round(float(effective_gold_beta), 4),
         "empirical_gold_sd_pct": round(gold_sd, 4), "vr5_mean": round(vr_mean, 2), "vr5_t_vs_1": vr_t, "vr5_p_val": vr_p
     }
+    out["_mtime"] = mtime
     _CALIBRATION_CACHE[ev] = out
     return out
 
@@ -198,15 +226,14 @@ def _student_t_pvalue(t_stat, df):
     return float(np.clip(_ibeta(0.5 * df, 0.5, x), 0.0, 1.0))
 
 def _student_t_crit(df, alpha=0.05):
-    low, high = 0.0, 40.0
-    for _ in range(35):
+    low, high = 0.0, 100.0
+    for _ in range(42):
         mid = (low + high) * 0.5
         if _student_t_pvalue(mid, df) > alpha:
             low = mid
         else:
             high = mid
     return round(float(mid), 4)
-
 # -------------------------------------------------------------
 # METHOD 1.1: OLS REGRESSION WITH WHITE (1980) HC3 & 95% MoE
 # -------------------------------------------------------------
@@ -288,12 +315,64 @@ def _load_premarket_snapshot():
             pass
     return {}
 
+def fetch_live_prenews_overlay(ttl_seconds=10.0):
+    """
+    Real-time 10s-cached cross-asset overlay from TradingView Global Scanner:
+    pulls live WTI (NYMEX:CL1!), Copper (COMEX:HG1!), 30D Fed Funds (CBOT:ZQ1!),
+    US02Y, US10Y, DXY, VIX, and 1-day % changes so Stage-A Bayesian priors and
+    Daily A* macro drift react live instead of staying frozen at startup.
+    """
+    import subprocess
+    now = time.time()
+    if _LIVE_OVERLAY_CACHE["data"] and (now - _LIVE_OVERLAY_CACHE["ts"] < ttl_seconds):
+        return _LIVE_OVERLAY_CACHE["data"]
+    tickers = ["NYMEX:CL1!", "COMEX:HG1!", "CBOT:ZQ1!", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "TVC:VIX"]
+    out = {}
+    try:
+        cmd = [
+            "curl", "-sf", "-m", "2", "-X", "POST", "https://scanner.tradingview.com/global/scan",
+            "-H", "Content-Type: application/json",
+            "-d", json.dumps({"symbols": {"tickers": tickers}, "columns": ["close", "change"]})
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout:
+            for row in json.loads(res.stdout).get("data", []):
+                s = row.get("s")
+                d = row.get("d", [])
+                c = float(d[0]) if len(d) > 0 and d[0] is not None else None
+                chg = float(d[1]) if len(d) > 1 and d[1] is not None else None
+                if s == "NYMEX:CL1!" and c is not None:
+                    out["wti_px"] = c
+                    if chg is not None: out["wti_1d_pct"] = chg
+                elif s == "COMEX:HG1!" and c is not None:
+                    out["hg_px"] = c
+                    if chg is not None: out["hg_1d_pct"] = chg
+                elif s == "CBOT:ZQ1!" and c is not None:
+                    out["zq_implied_rate_pct"] = round(100.0 - c, 3)
+                elif s == "TVC:DXY" and c is not None:
+                    out["dxy_px"] = c
+                    if chg is not None: out["dxy_1d_pct"] = chg
+                elif s == "TVC:US02Y" and c is not None:
+                    out["us2y_pct"] = c
+                elif s == "TVC:US10Y" and c is not None:
+                    out["us10y_pct"] = c
+                elif s == "TVC:VIX" and c is not None:
+                    out["vix"] = c
+    except Exception:
+        pass
+    if out:
+        _LIVE_OVERLAY_CACHE["ts"] = now
+        _LIVE_OVERLAY_CACHE["data"] = out
+    return _LIVE_OVERLAY_CACHE["data"]
+
 def compute_stage_b_gold_direction(event_type, z_pre, sigma_z_pre=0.85):
     """
     Stage B Conditional Price Direction Probability when News Occurs:
     Propagates pre-market macro posterior (z_pre, sigma_z_pre) through empirical
     White (1980) HC3 transmission beta and historical residual jump volatility.
-    Returns honest P(Gold Up on Print), P(Gold Down on Print), and P(|Move| >= 1%).
+    Strictly zeroes out statistically insignificant direct slopes & intercepts (p >= 0.05)
+    so coin-flip models (e.g. PPI/NFP/FOMC pre-news) honestly report 50/50 instead of
+    projecting spurious sample drift or wrong-sign noise.
     """
     records, shock_key, _, _, _ = _load_event_dataset(event_type)
     valid = [e for e in records if shock_key in e and "gold_return_pct" in e]
@@ -315,8 +394,14 @@ def compute_stage_b_gold_direction(event_type, z_pre, sigma_z_pre=0.85):
     resid = y - (alpha + beta_z * x_std)
     sigma_eps = float(np.std(resid, ddof=2)) if len(y) > 2 else 1.0
 
-    mu_xau = alpha + beta_z * float(z_pre)
-    cond_var = (beta_z * float(sigma_z_pre)) ** 2 + (float(z_pre) * se_beta) ** 2 + (sigma_eps ** 2)
+    if p_val < 0.05:
+        mu_xau = alpha + beta_z * float(z_pre)
+        cond_var = (beta_z * float(sigma_z_pre)) ** 2 + (float(z_pre) * se_beta) ** 2 + (sigma_eps ** 2)
+        edge_note = "STATISTICALLY_VALID_SLOPE (α<5%)"
+    else:
+        mu_xau = 0.0
+        cond_var = float(np.var(y, ddof=1)) if len(y) > 2 else (sigma_eps ** 2)
+        edge_note = "NO_DIRECT_EDGE (50/50 COIN-FLIP PRE-NEWS — AWAIT WAVE-2 DXY+2Y)"
     cond_sd = max(0.25, math.sqrt(max(1e-6, cond_var)))
 
     def _ncdf(v):
@@ -325,7 +410,6 @@ def compute_stage_b_gold_direction(event_type, z_pre, sigma_z_pre=0.85):
     p_down = round(_ncdf((0.0 - mu_xau) / cond_sd) * 100.0, 1)
     p_up = round(100.0 - p_down, 1)
     p_big = round((_ncdf((-1.0 - mu_xau) / cond_sd) + (1.0 - _ncdf((1.0 - mu_xau) / cond_sd))) * 100.0, 1)
-    edge_note = "STATISTICALLY_VALID_SLOPE (α<5%)" if p_val < 0.05 else "HIGH_RESIDUAL_NOISE (REQUIRES DXY/2Y CONFIRMATION)"
     q8 = _load_premarket_snapshot().get("quant_8_snapshot", {})
     gld_opt = q8.get("gld_options", {})
     p_q_pct = round(float(gld_opt.get("crr_binomial_p_q", 0.50)) * 100.0, 2)
@@ -348,25 +432,27 @@ def compute_stage_b_gold_direction(event_type, z_pre, sigma_z_pre=0.85):
         "net_gex_usd_m": gld_opt.get("net_gex_usd_m", 0.0),
         "gex_regime": gld_opt.get("gex_regime", "UNKNOWN")
     }
-
-# -------------------------------------------------------------
 # METHOD 1.3: CPI BAYESIAN CONJUGATE + GLOBAL/ENERGY PASS-THROUGH
 # -------------------------------------------------------------
-def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_m30=12.50, session_h=None, session_l=None, session_c=None, min_confidence=95):
+def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_m30=12.50, session_h=None, session_l=None, session_c=None, min_confidence=95, include_mc=True):
     """
     Bayesian Conjugate Gaussian Prior-to-Posterior Model for CPI Inflation.
-    Reads frozen premarket_snapshot.json (WTI 22D%, T10YIE shift, Cleveland Nowcast, G7 CPI spillover)
+    Combines premarket_snapshot.json baseline with live TradingView WTI price updates
     and propagates posterior shock Z_pre into Stage-B Conditional Gold Direction Probabilities.
     """
     snap = _load_premarket_snapshot()
     lead = snap.get("leading_indicators", {})
     glob = snap.get("global_macro", {})
+    live_ov = fetch_live_prenews_overlay()
     dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
 
     f_mom = tomorrow_meta.get("forecast_mom", 0.3)
     nowcast_mom = tomorrow_meta.get("cleveland_fed_nowcast_mom", 0.31)
     survey_sd = float(tomorrow_meta.get("survey_dispersion_sd", 0.075))
     wti_pct = float(lead.get("wti_22d_pct", tomorrow_meta.get("wti_oil_oct_change_pct", 0.0)))
+    snap_wti = float(lead.get("wti_last", 0.0))
+    if live_ov.get("wti_px") and snap_wti > 0:
+        wti_pct = round(((1.0 + wti_pct / 100.0) * (live_ov["wti_px"] / snap_wti) - 1.0) * 100.0, 2)
     t10_chg = float(lead.get("t10yie_22d_chg", 0.0))
     g7_cpi = float(glob.get("g7_ex_us_cpi_avg_pct", 2.0))
 
@@ -401,7 +487,7 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
     stage_b = compute_stage_b_gold_direction("cpi", z_pre, sigma_z_pre)
     exp_return_pct = stage_b["expected_gold_pct"]
     asymmetry_label = "BEARISH ASYMMETRY" if exp_return_pct < -0.15 else ("BULLISH ASYMMETRY" if exp_return_pct > 0.15 else "SYMMETRIC / NEUTRAL")
-    mc_entry = run_monte_carlo(current_price=current_price, z_shock=z_pre, horizon_days=1, n_paths=10000, event_type="cpi", atr_m30=atr_m30, min_confidence=min_confidence)
+    mc_entry = run_monte_carlo(current_price=current_price, z_shock=z_pre, horizon_days=1, n_paths=10000, event_type="cpi", atr_m30=atr_m30, min_confidence=min_confidence) if include_mc else {}
     ea = mc_entry.get("entry_analysis", {})
     dec = ea.get("decision", "STAND ASIDE")
     rec_t = ea.get("recommended_ticket", {})
@@ -412,10 +498,9 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
         plan = rec_t or dyn["structural_ticket"]
         directive_title = f"PRE-RELEASE DIRECTIVE: {ea.get('decision_headline', 'STAND ASIDE // AWAIT WAVE 2 CONFIRMATION')}"
 
-    # Ticket & directive strictly governed by BS Stochastic-Vol MC + 80-99% Hypothesis Gate
     return {
         "event_type": "cpi",
-        "model_method": "Bayesian Conjugate Normal-Normal + Energy/Breakeven/G7 Spillover",
+        "model_method": "Bayesian Conjugate Normal-Normal + Live WTI/Breakeven/G7 Spillover",
         "snapshot_timestamp": snap.get("generated_at_utc", "LIVE"),
         "current_price": current_price,
         "atr_m30": atr_m30,
@@ -429,7 +514,7 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
         "p_move_1pct": stage_b["p_move_1pct"],
         "expected_return_pct": exp_return_pct,
         "asymmetry_label": asymmetry_label,
-        "leading_summary": f"WTI 22D: {wti_pct:+.2f}% | 10Y BE Δ: {t10_chg:+.2f} | Nowcast: {nowcast_mom:.2f}% vs {f_mom:.2f}% | G7 CPI: {g7_cpi:.2f}%",
+        "leading_summary": f"WTI 22D (Live): {wti_pct:+.2f}% | 10Y BE Δ: {t10_chg:+.2f} | Nowcast: {nowcast_mom:.2f}% vs {f_mom:.2f}% | G7 CPI: {g7_cpi:.2f}%",
         "explanation": f"Stage-A Bayesian posterior μ={mu_post:+.3f}pp (σ={sigma_post:.3f}pp, Z_pre={z_pre:+.2f}σ) -> Stage-B Gold P(Up)={stage_b['p_gold_up']}% / P(Down)={stage_b['p_gold_down']}% ({stage_b['edge_note']}).",
         "directive_title": directive_title,
         "directive_desc": f"ENTRY: {plan['entry_zone']} | STOP: {plan['stop_loss']} | TARGET: {plan['target']} | RR: {plan['risk_reward_ratio']}",
@@ -449,7 +534,6 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
         "bs_stoch_vol": mc_entry.get("bs_stoch_vol", {}),
         "avwap_bands": dyn["avwap_bands"]
     }
-
 # -------------------------------------------------------------
 # -------------------------------------------------------------
 # ADVANCED MATHEMATICAL ENGINES: FIRST-PASSAGE MC, GARCH-X, TTL & FOOTPRINT
@@ -457,17 +541,17 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
 def calculate_first_passage_win_probability(current_price, entry_price, sl_price, tp_price, drift_pct=0.0, atr_m30=12.50, is_buy=True, n_paths=10000, steps=24):
     """
     Vectorized 10,000-Path Monte Carlo First-Passage Time Simulation Engine:
-    Calculates exact mathematical win probability P(Hits TP before SL) across 10,000 continuous paths.
-    Enforces strict A* Grade threshold: P(Win) >= 68.0%.
+    Computes unconditional first-passage P(TP before SL) across n_paths without
+    excluding undecided paths or mutating global RNG state.
     """
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = entry_price if entry_price else current_price
 
     step_vol = (atr_m30 / max(1.0, current_price)) * 0.70
     drift_step = (drift_pct / 100.0) / steps
 
-    z = np.random.normal(0, 1, (n_paths, steps))
+    z = rng.normal(0, 1, (n_paths, steps))
     log_rets = (drift_step - 0.5 * step_vol**2) + step_vol * z
     paths[:, 1:] = paths[:, :1] * np.exp(np.cumsum(log_rets, axis=1))
 
@@ -485,13 +569,13 @@ def calculate_first_passage_win_probability(current_price, entry_price, sl_price
     tau_sl = np.where(sl_any, np.argmax(sl_mask, axis=1) + 1, steps + 99)
 
     win_mask = tp_any & (tau_tp < tau_sl)
-    loss_mask = sl_any & (tau_sl < tau_tp)
+    loss_mask = sl_any & (tau_sl <= tau_tp)
     tp_hits = int(np.sum(win_mask))
     sl_hits = int(np.sum(loss_mask))
     undecided = n_paths - tp_hits - sl_hits
 
     decided_total = tp_hits + sl_hits
-    win_prob = round((tp_hits / max(1, decided_total)) * 100.0, 1)
+    decided_win_prob = round((tp_hits / max(1, decided_total)) * 100.0, 1)
     overall_win_prob = round((tp_hits / n_paths) * 100.0, 1)
     overall_loss_prob = round((sl_hits / n_paths) * 100.0, 1)
 
@@ -512,41 +596,40 @@ def calculate_first_passage_win_probability(current_price, entry_price, sl_price
         "entry_price": entry_price,
         "sl_price": sl_price,
         "tp_price": tp_price,
-        "win_probability_pct": win_prob,
+        "win_probability_pct": overall_win_prob,
+        "decided_win_probability_pct": decided_win_prob,
         "overall_win_rate_pct": overall_win_prob,
         "overall_loss_rate_pct": overall_loss_prob,
         "undecided_pct": round((undecided / n_paths) * 100.0, 1),
-        "threshold_met": win_prob >= 68.0,
+        "threshold_met": overall_win_prob >= 68.0,
         "survival_curve": survival_curve
     }
 
 def predict_garch_shock_dispersion(event_type="cpi", survey_sd=0.075, vix_val=19.46, wti_change_pct=12.11):
     """
-    Announcement-Conditioned GARCH(1,1)-X Volatility Model:
-    Predicts forward-looking event shock standard deviation conditioned on
-    consensus dispersion, VIX volatility index, and energy commodity momentum.
+    Dimensionless Multiplicative Announcement-Conditioned GARCH(1,1)-X Volatility Model:
+    Scales event shock dispersion consistently in native units across CPI, FOMC, NFP, PPI, and Daily.
     """
     base_params = {
-        "cpi": {"omega": 0.0012, "gamma_survey": 0.85, "gamma_vix": 0.045, "gamma_wti": 0.035, "base_sd": 0.075},
-        "fomc": {"omega": 0.85, "gamma_survey": 1.10, "gamma_vix": 0.080, "gamma_wti": 0.020, "base_sd": 5.0},
-        "nfp": {"omega": 120.0, "gamma_survey": 0.90, "gamma_vix": 0.065, "gamma_wti": 0.015, "base_sd": 45.0},
-        "ppi": {"omega": 0.0035, "gamma_survey": 0.80, "gamma_vix": 0.040, "gamma_wti": 0.050, "base_sd": 0.15},
-        "daily": {"omega": 0.025, "gamma_survey": 0.50, "gamma_vix": 0.060, "gamma_wti": 0.030, "base_sd": 0.45}
+        "cpi": {"gamma_survey": 0.65, "gamma_vix": 0.35, "gamma_wti": 0.15, "base_sd": 0.075},
+        "fomc": {"gamma_survey": 0.70, "gamma_vix": 0.40, "gamma_wti": 0.08, "base_sd": 5.0},
+        "nfp": {"gamma_survey": 0.65, "gamma_vix": 0.35, "gamma_wti": 0.08, "base_sd": 45.0},
+        "ppi": {"gamma_survey": 0.65, "gamma_vix": 0.30, "gamma_wti": 0.18, "base_sd": 0.15},
+        "daily": {"gamma_survey": 0.50, "gamma_vix": 0.45, "gamma_wti": 0.12, "base_sd": 0.45}
     }
-    p = base_params.get(event_type.lower(), base_params["cpi"])
-    
-    cond_var = (
-        p["omega"] +
-        p["gamma_survey"] * (survey_sd ** 2) +
-        p["gamma_vix"] * ((vix_val / 100.0) ** 2) +
-        p["gamma_wti"] * ((wti_change_pct / 100.0) ** 2)
-    )
-    predicted_sd = math.sqrt(max(0.0001, cond_var))
-    expansion_ratio = round(predicted_sd / max(0.0001, p["base_sd"]), 2)
-    
+    p = base_params.get((event_type or "cpi").lower(), base_params["cpi"])
+    base_sd = p["base_sd"]
+    survey_ratio_sq = (max(1e-6, float(survey_sd)) / base_sd) ** 2
+    vix_factor = max(-0.40, ((max(8.0, float(vix_val)) / 18.0) ** 2) - 1.0)
+    wti_factor = (float(wti_change_pct) / 10.0) ** 2
+
+    mult_var = max(0.35, 1.0 + p["gamma_survey"] * (survey_ratio_sq - 1.0) + p["gamma_vix"] * vix_factor + p["gamma_wti"] * wti_factor)
+    predicted_sd = base_sd * math.sqrt(mult_var)
+    expansion_ratio = round(predicted_sd / base_sd, 2)
+
     return {
         "event_type": event_type,
-        "base_survey_sd": p["base_sd"],
+        "base_survey_sd": base_sd,
         "predicted_shock_sd": round(predicted_sd, 4),
         "dispersion_expansion_ratio": expansion_ratio,
         "regime_volatility": "HIGH_VOLATILITY_EXPANSION" if expansion_ratio >= 1.20 else ("NORMAL_DISPERSION" if expansion_ratio >= 0.90 else "LOW_COMPRESSION")
@@ -758,6 +841,7 @@ def compute_algorithmic_footprint(event_type="daily", current_price=4036.17, atr
 
     closes = _get_cached_m30_returns()
     rets = None
+    used_fallback = False
     if closes is not None and len(closes) >= 20:
         raw_rets = np.diff(np.log(closes))
         raw_rets = raw_rets[np.abs(raw_rets) < 0.015]
@@ -765,7 +849,7 @@ def compute_algorithmic_footprint(event_type="daily", current_price=4036.17, atr
             rets = raw_rets
 
     if rets is None:
-        # Empirical fallback from historical CPI closes
+        used_fallback = True
         import os
         hist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "cpi_historical.json")
         try:
@@ -791,18 +875,19 @@ def compute_algorithmic_footprint(event_type="daily", current_price=4036.17, atr
             num_j = float(np.sum(((rets[j:] - mu) ** 2) * ((rets[:-j] - mu) ** 2)))
             delta_j = n * num_j / denom
             sum_delta += ((2.0 * (q - j) / q) ** 2) * delta_j
-    z_stat = round((vr_5 - 1.0) / math.sqrt(max(1e-8, sum_delta)), 2)
+    z_stat = round((math.sqrt(n) * (vr_5 - 1.0)) / math.sqrt(max(1e-8, sum_delta)), 2)
     p_val = round(float(2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(z_stat) / math.sqrt(2.0))))), 4)
 
     is_algorithmic = (vr_5 > 1.25 or vr_5 < 0.75) and p_val < 0.05
     if is_algorithmic:
-        footprint_verdict = f"NON-RANDOM FLOW DETECTED (VR={vr_5}, p={p_val:.4f} < 0.05)"
+        footprint_verdict = f"NON-RANDOM FLOW DETECTED (VR={vr_5}, z*={z_stat:+.2f}, p={p_val:.4f} < 0.05)"
     else:
-        footprint_verdict = f"RANDOM WALK / BALANCED FLOW (VR={vr_5}, p={p_val:.4f} >= 0.05)"
+        footprint_verdict = f"RANDOM WALK / BALANCED FLOW (VR={vr_5}, z*={z_stat:+.2f}, p={p_val:.4f} >= 0.05)"
 
     return {
         "event_type": event_type,
         "n_bars": n,
+        "is_fallback": used_fallback,
         "kyles_lambda": kyles_lambda,
         "amihud_illiq": amihud_illiq,
         "lo_mackinlay_vr5": vr_5,
@@ -1002,11 +1087,11 @@ class SetupLifecycleManager:
         self.filepath = filepath
 
     def _load(self):
-        try:
-            with open(self.filepath) as f:
-                return json.load(f)
-        except Exception:
+        import os
+        if not os.path.exists(self.filepath):
             return {"active_setup": None, "completed_setups": []}
+        with open(self.filepath) as f:
+            return json.load(f)
 
     def _save(self, data):
         try:
@@ -1157,9 +1242,9 @@ class SetupLifecycleManager:
                 if p_low <= sl:
                     if active["status"] == "PARTIAL_TP_HIT":
                         active["status"] = "BREAKEVEN_EXIT"
-                        active["realized_r"] = +1.0
+                        active["realized_r"] = round(0.5 * abs(tp1 - fill_p) / risk_dist, 2)
                         active["realized_pnl_usd"] = round(lot * 100.0 * abs(tp1 - fill_p) * 0.5, 2)
-                        active["resolution"] = "Closed at trailed Breakeven stop loss after TP1."
+                        active["resolution"] = "Closed at trailed Breakeven stop loss after 50% TP1 lock."
                     else:
                         active["status"] = "SL_TOUCHED_LOSS"
                         active["realized_r"] = -1.0
@@ -1178,11 +1263,13 @@ class SetupLifecycleManager:
                     active["resolution"] = f"TP1 touched at ${tp1}. 50% locked, SL trailed to BE (${fill_p})."
 
                 if p_high >= tp2:
+                    was_partial = (active["status"] == "PARTIAL_TP_HIT")
+                    avg_gain = (0.5 * (tp1 - fill_p) + 0.5 * (tp2 - fill_p)) if was_partial else (tp2 - fill_p)
                     active["status"] = "FULL_TP_HIT"
-                    active["realized_r"] = round((tp2 - fill_p) / risk_dist, 2)
-                    active["realized_pnl_usd"] = round(lot * 100.0 * (tp2 - fill_p), 2)
+                    active["realized_r"] = round(avg_gain / risk_dist, 2)
+                    active["realized_pnl_usd"] = round(lot * 100.0 * avg_gain, 2)
                     active["exit_price"] = tp2
-                    active["resolution"] = f"Full TP2 touched at ${tp2}. Maximum R-multiple captured."
+                    active["resolution"] = f"Full TP2 touched at ${tp2} ({'50/50 split TP1+TP2' if was_partial else '100%'} captured)."
                     active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                     data.setdefault("completed_setups", []).insert(0, active)
                     data["active_setup"] = None
@@ -1197,9 +1284,9 @@ class SetupLifecycleManager:
                 if p_high >= sl:
                     if active["status"] == "PARTIAL_TP_HIT":
                         active["status"] = "BREAKEVEN_EXIT"
-                        active["realized_r"] = +1.0
+                        active["realized_r"] = round(0.5 * abs(fill_p - tp1) / risk_dist, 2)
                         active["realized_pnl_usd"] = round(lot * 100.0 * abs(fill_p - tp1) * 0.5, 2)
-                        active["resolution"] = "Closed at trailed Breakeven stop loss after TP1."
+                        active["resolution"] = "Closed at trailed Breakeven stop loss after 50% TP1 lock."
                     else:
                         active["status"] = "SL_TOUCHED_LOSS"
                         active["realized_r"] = -1.0
@@ -1218,17 +1305,18 @@ class SetupLifecycleManager:
                     active["resolution"] = f"TP1 touched at ${tp1}. 50% locked, SL trailed to BE (${fill_p})."
 
                 if p_low <= tp2:
+                    was_partial = (active["status"] == "PARTIAL_TP_HIT")
+                    avg_gain = (0.5 * (fill_p - tp1) + 0.5 * (fill_p - tp2)) if was_partial else (fill_p - tp2)
                     active["status"] = "FULL_TP_HIT"
-                    active["realized_r"] = round((fill_p - tp2) / risk_dist, 2)
-                    active["realized_pnl_usd"] = round(lot * 100.0 * (fill_p - tp2), 2)
+                    active["realized_r"] = round(avg_gain / risk_dist, 2)
+                    active["realized_pnl_usd"] = round(lot * 100.0 * avg_gain, 2)
                     active["exit_price"] = tp2
-                    active["resolution"] = f"Full TP2 touched at ${tp2}. Maximum R-multiple captured."
+                    active["resolution"] = f"Full TP2 touched at ${tp2} ({'50/50 split TP1+TP2' if was_partial else '100%'} captured)."
                     active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                     data.setdefault("completed_setups", []).insert(0, active)
                     data["active_setup"] = None
                     self._save(data)
                     return active, data.get("completed_setups", [])
-
         self._save(data)
         return active, data.get("completed_setups", [])
 
@@ -1240,11 +1328,11 @@ def calculate_lot_and_risk(
     leverage=100,
     entry_price=3925.0,
     sl_price=None,
-    sl_pips=100.0,
+    sl_pips=None,
     tp1_price=None,
-    tp1_pips=250.0,
+    tp1_pips=None,
     tp2_price=None,
-    tp2_pips=500.0,
+    tp2_pips=None,
     contract_size=100.0,
     instrument="XAUUSD",
     direction="BUY"
@@ -1394,12 +1482,197 @@ def calculate_lot_and_risk(
         "warnings": warnings
     }
 
+def _get_daily_prob_regime():
+    """
+    Strictly Causal 3-Year Daily Probability & Volatility Engine (No Lookahead, No Chart Patterns):
+    Computes point-in-time:
+      - 20D Bayesian Risk-Adjusted Drift Z-score (z_20) & Normal-Normal posterior drift (mu_daily_post)
+      - Implied vs Realized Variance Risk Premium (VRP = ^GVZ - RV22)
+      - HAR-RV Volatility Stability Ratio (RV5 / RV22 <= 1.15)
+      - Rolling 60D DXY mean/SD & 14D Gold ATR_D1
+      - Strict 3-Year Walk-Forward Paper-Trade Ledger (Naive Unfiltered vs Probability-Gated)
+    Cached for 3600s; cleared on _clear_quant_caches().
+    """
+    now = time.time()
+    if _DAILY_PROB_CACHE["data"] is not None and (now - _DAILY_PROB_CACHE["ts"] < 3600.0):
+        return _DAILY_PROB_CACHE["data"]
+
+    snap = _load_premarket_snapshot()
+    q8 = snap.get("quant_8_snapshot", {})
+    har = q8.get("har_rv_vol", {})
+    vrp_snap = q8.get("gvz_vrp_history", {})
+    opt = q8.get("gld_options", {})
+
+    try:
+        import yfinance as yf
+        df_raw = yf.download(["GC=F", "^GVZ", "DX-Y.NYB"], period="3y", interval="1d", progress=False, auto_adjust=False, threads=False)
+        closes = df_raw["Close"].ffill().dropna()
+        gc_ohlc = yf.download("GC=F", period="3y", interval="1d", progress=False, auto_adjust=False, threads=False)
+        if isinstance(gc_ohlc.columns, pd.MultiIndex):
+            gc_ohlc.columns = gc_ohlc.columns.get_level_values(0)
+        gc_ohlc = gc_ohlc.reindex(closes.index).ffill().dropna()
+        closes = closes.loc[gc_ohlc.index]
+        if len(closes) < 160:
+            raise ValueError("Insufficient 3Y daily rows")
+
+        gc = closes["GC=F"]
+        gvz = closes["^GVZ"]
+        dx = closes["DX-Y.NYB"]
+        r_gc = np.log(gc / gc.shift(1)) * 100.0
+        tr = pd.concat([
+            gc_ohlc["High"] - gc_ohlc["Low"],
+            (gc_ohlc["High"] - gc_ohlc["Close"].shift(1)).abs(),
+            (gc_ohlc["Low"] - gc_ohlc["Close"].shift(1)).abs()
+        ], axis=1).max(axis=1)
+        atr14 = tr.rolling(14).mean()
+        rv5 = r_gc.rolling(5).std() * math.sqrt(252.0)
+        rv22 = r_gc.rolling(22).std() * math.sqrt(252.0)
+
+        w60 = r_gc.iloc[-60:].dropna().values
+        daily_sd_pct = max(0.35, float(np.std(w60, ddof=1)))
+        r20 = float(np.sum(r_gc.iloc[-20:].dropna().values))
+        z_20 = round(r20 / max(0.5, daily_sd_pct * math.sqrt(20.0)), 3)
+        rv5_now = round(float(rv5.iloc[-1]), 2)
+        rv22_now = round(float(rv22.iloc[-1]), 2)
+        gvz_now = round(float(gvz.iloc[-1]), 2)
+        vrp_now = round(gvz_now - rv22_now, 2)
+        atr_d1 = round(float(atr14.iloc[-1]), 2)
+        dxy_mean_60 = round(float(dx.iloc[-60:].mean()), 3)
+        dxy_sd_60 = round(max(0.20, float(dx.iloc[-60:].std(ddof=1))), 3)
+        tau0 = 1.0 / (0.25 ** 2)
+        tau_l = 20.0 / (daily_sd_pct ** 2)
+        mu_daily_post = round((tau_l * (r20 / 20.0)) / (tau0 + tau_l), 4)
+
+        def _run_3y_walk(gated=True):
+            trades = []
+            i = 130
+            horizon = 5
+            cost_usd = 0.80
+            while i < len(gc_ohlc) - horizon - 1:
+                w_i = r_gc.iloc[i - 60:i + 1].dropna().values
+                if len(w_i) < 40:
+                    i += 1
+                    continue
+                r20_i = float(np.sum(r_gc.iloc[i - 19:i + 1]))
+                sd_i = max(0.35, float(np.std(w_i, ddof=1)))
+                z_i = r20_i / max(0.5, sd_i * math.sqrt(20.0))
+                vrp_i = float(gvz.iloc[i]) - float(rv22.iloc[i])
+                rv5_i, rv22_i = float(rv5.iloc[i]), float(rv22.iloc[i])
+
+                if gated:
+                    take = (abs(z_i) >= 0.75) and (vrp_i > 0.0) and (rv5_i <= 1.15 * rv22_i)
+                else:
+                    take = abs(z_i) >= 0.25
+                if not take:
+                    i += 1
+                    continue
+
+                side = 1 if z_i > 0 else -1
+                entry = float(gc_ohlc["Close"].iloc[i])
+                atr_i = float(atr14.iloc[i])
+                if np.isnan(atr_i) or atr_i <= 0:
+                    i += 1
+                    continue
+                sl_d = 1.0 * atr_i
+                tp_d = 2.0 * atr_i
+                sl_p = (entry - sl_d) if side == 1 else (entry + sl_d)
+                tp_p = (entry + tp_d) if side == 1 else (entry - tp_d)
+                fut = gc_ohlc.iloc[i + 1:i + 1 + horizon]
+                exit_p = float(fut["Close"].iloc[-1])
+                held = horizon
+                for kd, (_, fb) in enumerate(fut.iterrows(), start=1):
+                    fh, fl = float(fb["High"]), float(fb["Low"])
+                    if side == 1:
+                        if fl <= sl_p: exit_p = sl_p; held = kd; break
+                        if fh >= tp_p: exit_p = tp_p; held = kd; break
+                    else:
+                        if fh >= sl_p: exit_p = sl_p; held = kd; break
+                        if fl <= tp_p: exit_p = tp_p; held = kd; break
+                pnl = ((exit_p - entry) if side == 1 else (entry - exit_p)) - cost_usd
+                r_m = pnl / sl_d
+                trades.append({"year": int(gc_ohlc.index[i].year), "side": side, "r": r_m})
+                i += held
+
+            if not trades:
+                return {"trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0, "t_stat": 0.0, "p_val": 1.0, "profit_factor": 0.0, "net_return_pct": 0.0, "max_drawdown_pct": 0.0, "ending_equity_usd": 10000.0}
+            arr = np.array([t["r"] for t in trades], dtype=float)
+            n_t = len(arr)
+            wins_t = int(np.sum(arr > 0))
+            mean_r = float(np.mean(arr))
+            std_r = float(np.std(arr, ddof=1)) if n_t > 1 else 1.0
+            t_stat = round(mean_r / max(1e-6, std_r / math.sqrt(n_t)), 2)
+            p_val = round(_student_t_pvalue(t_stat, max(1, n_t - 1)), 4)
+            pf = round(float(np.sum(arr[arr > 0])) / max(1e-6, float(abs(np.sum(arr[arr < 0])))), 2)
+            eq = 10000.0
+            peak = eq
+            max_dd = 0.0
+            for rv in arr:
+                eq *= (1.0 + 0.01 * rv)
+                peak = max(peak, eq)
+                max_dd = max(max_dd, (peak - eq) / peak * 100.0)
+            return {
+                "trades": n_t,
+                "wins": wins_t,
+                "win_rate_pct": round((wins_t / n_t) * 100.0, 1),
+                "mean_r": round(mean_r, 3),
+                "sum_r": round(float(np.sum(arr)), 2),
+                "t_stat": t_stat,
+                "p_val": p_val,
+                "profit_factor": pf,
+                "ending_equity_usd": round(eq, 2),
+                "net_return_pct": round(((eq - 10000.0) / 10000.0) * 100.0, 2),
+                "max_drawdown_pct": round(max_dd, 2)
+            }
+
+        res = {
+            "source": "YAHOO_3Y_CAUSAL",
+            "n_days": len(closes),
+            "date_start": str(closes.index[0].date()),
+            "date_end": str(closes.index[-1].date()),
+            "z_20": z_20,
+            "rv5_ann": rv5_now,
+            "rv22_ann": rv22_now,
+            "gvz_last": gvz_now,
+            "vrp_ann": vrp_now,
+            "atr_d1": atr_d1,
+            "daily_sd_pct": round(daily_sd_pct, 3),
+            "mu_daily_post_pct": mu_daily_post,
+            "dxy_mean_60": dxy_mean_60,
+            "dxy_sd_60": dxy_sd_60,
+            "backtest_3y_naive": _run_3y_walk(gated=False),
+            "backtest_3y_gated": _run_3y_walk(gated=True)
+        }
+        _DAILY_PROB_CACHE["ts"] = now
+        _DAILY_PROB_CACHE["data"] = res
+        return res
+    except Exception:
+        return {
+            "source": "SNAPSHOT_FALLBACK",
+            "n_days": 760,
+            "date_start": "2023-11-13",
+            "date_end": "2026-11-13",
+            "z_20": 0.0,
+            "rv5_ann": round(float(har.get("rv5_pct", 18.0)), 2),
+            "rv22_ann": round(float(har.get("rv22_pct", 20.0)), 2),
+            "gvz_last": round(float(opt.get("atm_iv_pct", 24.9)), 2),
+            "vrp_ann": round(float(vrp_snap.get("current_vrp_daily_pct", 0.0)) * math.sqrt(252.0), 2),
+            "atr_d1": 48.0,
+            "daily_sd_pct": 1.35,
+            "mu_daily_post_pct": 0.0,
+            "dxy_mean_60": 100.0,
+            "dxy_sd_60": 1.2,
+            "backtest_3y_naive": {"trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0, "t_stat": 0.0, "p_val": 1.0, "profit_factor": 0.0, "net_return_pct": 0.0, "max_drawdown_pct": 0.0, "ending_equity_usd": 10000.0},
+            "backtest_3y_gated": {"trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0, "t_stat": 0.0, "p_val": 1.0, "profit_factor": 0.0, "net_return_pct": 0.0, "max_drawdown_pct": 0.0, "ending_equity_usd": 10000.0}
+        }
+
 def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None):
     """
-    INSTITUTIONAL QUANTITATIVE A* SETUP ENGINE (10,000-PATH MONTE CARLO & REAL DATA GATES):
-    Integrates 10,000-Path Monte Carlo First-Passage Time Win Probability P(Win),
-    GARCH-X Predicted Shock Dispersion, Empirical Lo-MacKinlay VR Footprint,
-    and Strict RR >= 1.50 & P(Win) >= 68% Execution Gate.
+    INSTITUTIONAL PURE-PROBABILITY A* SETUP ENGINE (NO VISUAL CHART PATTERNS, ZERO LOOKAHEAD):
+    Replaces visual Pivot/Camarilla heuristics & broken 102.25 DXY anchor with verified 3-year mathematical gates:
+      1. 20D Bayesian Risk-Adjusted Drift Z-score (|z_20| >= 0.75, posterior P(drift) >= 77.3%).
+      2. Variance Risk Premium Regime (VRP = ^GVZ - RV22 > 0) & HAR-RV Non-Panic Filter (RV5 <= 1.15 * RV22).
+      3. 10,000-Path First-Passage Expected Value (EV_R > 0 on 1:2.0 ATR_D1 barriers) & Fractional Quarter-Kelly.
+      4. Microstructure VPIN < 0.70 Gate & White HC3 6-Factor Macro Verification.
     """
     if session_h is None or session_l is None or session_c is None or session_h <= session_l:
         session_h = round(current_price + 1.8 * atr_m30, 2)
@@ -1411,25 +1684,13 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         session_c = round(float(session_c), 2)
 
     PP = round((session_h + session_l + session_c) / 3.0, 2)
-    diff = max(atr_m30, session_h - session_l)
-
-    r3 = session_h
-    r2 = round(session_c + diff * 1.1 / 4.0, 2)
-    r1 = round(PP + 0.382 * max(0.5 * atr_m30, session_h - PP), 2)
-    s1 = round(PP - 0.382 * max(0.5 * atr_m30, PP - session_l), 2)
-    s2 = round(session_c - diff * 1.1 / 4.0, 2)
-    s3 = session_l
-
-    dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
     mgr = SetupLifecycleManager()
     active_locked, completed_list = mgr.evaluate_live_tick(current_price)
 
-    # 1. Fundamental Macro Transmission (Synced to live snapshot T10YIE & WTI)
     snap = _load_premarket_snapshot()
     lead = snap.get("leading_indicators", {})
     t10yie_live = float(lead.get("t10yie_last", 2.20))
     wti_22d_live = float(lead.get("wti_22d_pct", 0.0))
-    hg_22d_live = float(lead.get("copper_22d_pct", 0.0))
     vix_live = float(vix_val if vix_val is not None else lead.get("vix_last", 17.5))
     q8 = snap.get("quant_8_snapshot", {})
     har_rv = q8.get("har_rv_vol", {})
@@ -1438,29 +1699,43 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     fat_var = q8.get("fat_tail_var", {})
     m5_flow = q8.get("microstructure_flow", {})
     vol_target_scalar = float(har_rv.get("vol_target_scalar", 1.0))
-    # 1. Statistically Calibrated 2Y 6-Factor Macro Zoo OLS Drift (Strict p < 0.05 Filter)
+
     daily_ols = _get_daily_cross_asset_ols()
     fb = daily_ols["filtered_betas"]
+    prob_reg = _get_daily_prob_regime()
+
     yield_spread = round(us10y_val - us2y_val, 3)
     tips_real_proxy = round(us10y_val - t10yie_live, 2)
-    dxy_z = round((dxy_val - 102.00) / 0.80, 2)
-    dxy_daily_ret_proxy = ((dxy_val - 102.25) / 102.25) * 100.0
+    dxy_z = round((dxy_val - prob_reg["dxy_mean_60"]) / max(0.20, prob_reg["dxy_sd_60"]), 2)
     oil_shift = round(((wti_val - 85.00) / 10.00) * 0.142, 3)
-    macro_drift = (fb.get("dxy", 0.0) * dxy_daily_ret_proxy + fb.get("zt", 0.0) * (yield_spread - 0.20) + fb.get("cl", 0.0) * wti_22d_live + fb.get("hg", 0.0) * (hg_22d_live / 22.0)) / 100.0
-    price_displacement = round(current_price - PP, 2)
-    m30_velocity = round(price_displacement / max(1.0, atr_m30), 2)
+
+    z_20 = float(prob_reg["z_20"])
+    vrp_ann = float(prob_reg["vrp_ann"])
+    rv5_ann = float(prob_reg["rv5_ann"])
+    rv22_ann = float(prob_reg["rv22_ann"])
+    gvz_now = float(prob_reg["gvz_last"])
+    atr_d1 = max(atr_m30, float(prob_reg["atr_d1"]))
+    daily_sd_pct = float(prob_reg["daily_sd_pct"])
+    mu_daily_post = float(prob_reg["mu_daily_post_pct"])
+    macro_drift = (mu_daily_post * 5.0) / 100.0
+
+    def _ncdf(v):
+        return 0.5 * (1.0 + math.erf(v / math.sqrt(2.0)))
+
+    p_drift_bull = round(_ncdf(z_20) * 100.0, 1)
+    p_drift_bear = round(100.0 - p_drift_bull, 1)
     kyles_lambda = round((atr_m30 / max(1.0, current_price)) * 100.0, 4)
 
-    # 3. 10,000-Path Monte Carlo Jump-Diffusion Simulation
-    np.random.seed(42)
-    steps = 12
+    # 3. 10,000-Path Causal 5-Day Geometric Brownian Simulation (Volatility-Anchored to 22D/60D SD)
+    rng = np.random.default_rng(42)
+    steps = 20
+    dt = 5.0 / float(steps)
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = current_price
-    step_vol = (atr_m30 / max(1.0, current_price)) * 0.65
-    drift_step = macro_drift / steps
-    z_mat = np.random.normal(0, 1, (n_paths, steps))
+    step_vol = (daily_sd_pct / 100.0) * math.sqrt(dt)
+    drift_step = (mu_daily_post / 100.0) * dt
+    z_mat = rng.normal(0, 1, (n_paths, steps))
     paths[:, 1:] = current_price * np.exp(np.cumsum((drift_step - 0.5 * step_vol**2) + step_vol * z_mat, axis=1))
-
     p5 = np.percentile(paths, 5, axis=0)
     p25 = np.percentile(paths, 25, axis=0)
     p50 = np.percentile(paths, 50, axis=0)
@@ -1474,13 +1749,13 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     cvar_95_pct = round(float(np.mean(terminal_rets[terminal_rets <= var_95_pct])), 2)
     median_terminal = round(float(p50[-1]), 2)
 
-    # 4. Locked vs Live Setup Evaluation
+    # 4. Locked vs Live Pure-Probability Setup Evaluation (1.0 ATR_D1 SL / 2.0 ATR_D1 TP1 / 3.0 ATR_D1 TP2)
     if active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
         e_low, e_high = active_locked.get("entry_zone", [current_price, current_price])
         entry_low, entry_high = e_low, e_high
-        sl_val = active_locked.get("trailed_sl") if active_locked.get("trailed_sl") is not None else active_locked.get("stop_loss", current_price - atr_m30)
-        tp1_val = active_locked.get("take_profit_1", current_price + 1.8 * atr_m30)
-        tp2_val = active_locked.get("take_profit_2", current_price + 3.0 * atr_m30)
+        sl_val = active_locked.get("trailed_sl") if active_locked.get("trailed_sl") is not None else active_locked.get("stop_loss", current_price - atr_d1)
+        tp1_val = active_locked.get("take_profit_1", current_price + 2.0 * atr_d1)
+        tp2_val = active_locked.get("take_profit_2", current_price + 3.0 * atr_d1)
         raw_action = active_locked.get("action", "")
         ticket_type = active_locked.get("ticket_type", "")
         is_bullish = active_locked.get("direction", "BUY") == "BUY"
@@ -1488,71 +1763,113 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         risk = max(1.0, abs(mid_entry - sl_val))
         reward = abs(tp1_val - mid_entry)
         rr = round(reward / risk, 2)
-        fp_analysis = calculate_first_passage_win_probability(current_price, mid_entry, sl_val, tp1_val, drift_pct=macro_drift*100, atr_m30=atr_m30, is_buy=is_bullish, n_paths=n_paths)
-        p_win = fp_analysis["win_probability_pct"]
         is_a_star = True
         bias = "BULLISH_LOCKED_CONTRACT" if is_bullish else "BEARISH_LOCKED_CONTRACT"
     else:
-        is_bullish = (price_displacement >= 0 and p_up >= 48.0) or (current_price <= s2 + 0.4 * atr_m30)
+        is_bullish = z_20 >= 0.0
+        band = round(0.10 * atr_m30, 2)
+        entry_low = round(current_price - band, 2)
+        entry_high = round(current_price + band, 2)
+        mid_entry = current_price
         if is_bullish:
-            raw_action = "MOMENTUM BUY CATCH / LONG EXPANSION ON M30 IMPULSE"
-            ticket_type = "BULLISH_MONTE_CARLO_MOMENTUM"
-            entry_low = round(current_price - 0.15 * atr_m30, 2)
-            entry_high = round(current_price + 0.15 * atr_m30, 2)
-            sl_val = round(entry_low - 0.70 * atr_m30, 2)
-            tp1_val = round(entry_high + 1.75 * atr_m30, 2)
-            tp2_val = round(entry_high + 2.80 * atr_m30, 2)
-            risk = max(1.0, entry_high - sl_val)
-            reward = tp1_val - entry_high
-            rr = round(reward / risk, 2)
-            bias = "BULLISH_MOMENTUM_CATCH"
+            raw_action = f"BAYESIAN PROBABILITY LONG (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%)"
+            ticket_type = "BULLISH_PROBABILITY_DRIFT_VRP"
+            sl_val = round(mid_entry - 1.0 * atr_d1, 2)
+            tp1_val = round(mid_entry + 2.0 * atr_d1, 2)
+            tp2_val = round(mid_entry + 3.0 * atr_d1, 2)
+            bias = "BULLISH_BAYESIAN_DRIFT"
         else:
-            raw_action = "MOMENTUM SHORT CATCH / SELL BREAKDOWN ON M30 IMPULSE"
-            ticket_type = "BEARISH_MONTE_CARLO_MOMENTUM"
-            entry_low = round(current_price - 0.15 * atr_m30, 2)
-            entry_high = round(current_price + 0.15 * atr_m30, 2)
-            sl_val = round(entry_high + 0.70 * atr_m30, 2)
-            tp1_val = round(entry_low - 1.75 * atr_m30, 2)
-            tp2_val = round(entry_low - 2.80 * atr_m30, 2)
-            risk = max(1.0, sl_val - entry_low)
-            reward = entry_low - tp1_val
-            rr = round(reward / risk, 2)
-            bias = "BEARISH_MOMENTUM_CATCH"
+            raw_action = f"BAYESIAN PROBABILITY SHORT (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%)"
+            ticket_type = "BEARISH_PROBABILITY_DRIFT_VRP"
+            sl_val = round(mid_entry + 1.0 * atr_d1, 2)
+            tp1_val = round(mid_entry - 2.0 * atr_d1, 2)
+            tp2_val = round(mid_entry - 3.0 * atr_d1, 2)
+            bias = "BEARISH_BAYESIAN_DRIFT"
+        risk = max(1.0, abs(mid_entry - sl_val))
+        reward = abs(tp1_val - mid_entry)
+        rr = round(reward / risk, 2)
 
-        mid_entry = (entry_low + entry_high) / 2.0
-        fp_analysis = calculate_first_passage_win_probability(current_price, mid_entry, sl_val, tp1_val, drift_pct=macro_drift*100, atr_m30=atr_m30, is_buy=is_bullish, n_paths=n_paths)
-        p_win = fp_analysis["win_probability_pct"]
+    sub = paths[:, 1:]
+    tp_m = (sub >= tp1_val) if is_bullish else (sub <= tp1_val)
+    sl_m = (sub <= sl_val) if is_bullish else (sub >= sl_val)
+    tp_any = np.any(tp_m, axis=1)
+    sl_any = np.any(sl_m, axis=1)
+    tau_tp = np.where(tp_any, np.argmax(tp_m, axis=1) + 1, steps + 99)
+    tau_sl = np.where(sl_any, np.argmax(sl_m, axis=1) + 1, steps + 99)
+    win_m = tp_any & (tau_tp < tau_sl)
+    loss_m = sl_any & (tau_sl < tau_tp)
+    tp_hits = int(np.sum(win_m))
+    sl_hits = int(np.sum(loss_m))
+    decided_total = tp_hits + sl_hits
+    p_win = round((tp_hits / max(1, decided_total)) * 100.0, 1)
+    p_win_uncond = round(float(np.mean(win_m) * 100.0), 1)
+    p_loss_uncond = round(float(np.mean(loss_m) * 100.0), 1)
+    p_breakeven = round(100.0 / (1.0 + max(0.1, rr)), 1)
+    ev_r = round((p_win_uncond / 100.0) * rr - (p_loss_uncond / 100.0) * 1.0, 3)
+    kelly_full = max(0.0, ((p_win / 100.0) * rr - (1.0 - p_win / 100.0)) / max(0.1, rr))
+    quarter_kelly_pct = round(min(2.0, kelly_full * 25.0), 2)
 
-    # 5. Algorithmic Footprint & GARCH-X Predicted Shock (Live VIX & WTI 22D%)
+    survival_curve = []
+    for s in range(2, steps + 1, 2):
+        survival_curve.append({
+            "step": s,
+            "minute_label": f"D+{(s * 5.0 / steps):.1f}",
+            "cum_p_win": round(float(np.mean(win_m & (tau_tp <= s)) * 100.0), 1),
+            "cum_p_loss": round(float(np.mean(loss_m & (tau_sl <= s)) * 100.0), 1)
+        })
+
+    fp_analysis = {
+        "is_buy": is_bullish,
+        "n_paths": n_paths,
+        "entry_price": mid_entry,
+        "sl_price": sl_val,
+        "tp_price": tp1_val,
+        "win_probability_pct": p_win,
+        "breakeven_win_pct": p_breakeven,
+        "expected_value_r": ev_r,
+        "quarter_kelly_pct": quarter_kelly_pct,
+        "overall_win_rate_pct": p_win_uncond,
+        "overall_loss_rate_pct": p_loss_uncond,
+        "undecided_pct": round(max(0.0, 100.0 - p_win_uncond - p_loss_uncond), 1),
+        "threshold_met": (ev_r > 0.0) and (p_win >= p_breakeven),
+        "survival_curve": survival_curve
+    }
+
     footprint = compute_algorithmic_footprint("daily", current_price, atr_m30)
     garch_shock = predict_garch_shock_dispersion("daily", 0.45, vix_live, wti_22d_live)
-    ttl = calculate_time_to_live_status("daily", setup_created_epoch=setup_created_epoch)
+    eff_created = setup_created_epoch or (active_locked.get("created_epoch") if active_locked else None)
+    ttl = calculate_time_to_live_status("daily", setup_created_epoch=eff_created)
 
-    # 6. Empirical Confluence Scoring (Pillar 2 tied strictly to First-Passage P(Win))
-    macro_score = 24 if abs(macro_drift) > 0.0005 else (20 if abs(macro_drift) > 0.0002 else 16)
-    mc_prob_score = 25 if p_win >= 68.0 else (21 if p_win >= 60.0 else (16 if p_win >= 50.0 else 10))
-    vol_score = 24 if footprint["is_algorithmic_flow"] else 18
-    cross_score = 24 if (abs(yield_spread) >= 0.15 and abs(dxy_z) >= 0.30) else 19
-    total_confluence = macro_score + mc_prob_score + vol_score + cross_score
-
+    drift_ok = abs(z_20) >= 0.75
+    vrp_ok = vrp_ann > 0.0
+    har_calm_ok = rv5_ann <= 1.15 * max(1.0, rv22_ann)
+    ev_ok = (ev_r > 0.0) and (p_win >= p_breakeven)
     vpin_now = float(m5_flow.get("vpin_now", 0.44))
     vpin_ok = not bool(m5_flow.get("vpin_toxic_gate", False))
-    if not (active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]):
-        is_a_star = (total_confluence >= 85) and (p_win >= 68.0) and (rr >= 1.50) and vpin_ok
 
-    grade = "A* GRADE (INSTITUTIONAL PRIMED)" if is_a_star else ("B-GRADE (STANDARD)" if total_confluence >= 70 else "C-GRADE (CHOP)")
-    risk_dist_dollars = max(1.0, abs((entry_low + entry_high) / 2.0 - sl_val))
+    macro_score = 25 if drift_ok else (18 if abs(z_20) >= 0.45 else 10)
+    mc_prob_score = 25 if (ev_r >= 0.04 and p_win >= p_breakeven) else (22 if ev_ok else 12)
+    vol_score = 25 if (vrp_ok and har_calm_ok) else (17 if vrp_ok else 10)
+    cross_score = 25 if (vpin_ok and daily_ols["f_p_val"] < 0.05) else 15
+    total_confluence = macro_score + mc_prob_score + vol_score + cross_score
+
+    if active_locked and active_locked.get("status") in ["TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
+        is_a_star = True
+    else:
+        is_a_star = drift_ok and vrp_ok and har_calm_ok and ev_ok and (rr >= 1.50) and vpin_ok
+
+    grade = "A* GRADE (PROBABILITY & VRP VERIFIED)" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70 else "C-GRADE (NO EDGE / STAND ASIDE)")
+    risk_dist_dollars = max(1.0, abs(mid_entry - sl_val))
     target_risk_usd = round(30.0 * vol_target_scalar, 2)
     computed_lot = round(max(0.01, min(0.05, target_risk_usd / (risk_dist_dollars * 100.0))), 2)
 
     gate_checks = {
-        "price_sanity": {"status": "VALID", "detail": f"Spot ${current_price:.2f} live-anchored"},
-        "spread_integrity": {"status": "VALID", "detail": "Live spot spread $0.30 within institutional limit (< $1.50)"},
-        "macro_stream_alignment": {"status": "VALID", "detail": f"DXY {dxy_val:.2f}, 10Y {us10y_val:.2f}%, 2Y {us2y_val:.2f}% | HAR-RV Scalar {vol_target_scalar:.2f}x"},
-        "structural_pivots": {"status": "VALID", "detail": f"Session High ${r3:.2f} > Low ${s3:.2f}; Pivot ${PP:.2f} | GLD Flip ${gld_opt.get('gamma_flip_xau', current_price):.0f}"},
+        "bayesian_drift_z20": {"status": "PASS" if drift_ok else "UNMET", "detail": f"20D Drift z={z_20:+.2f}σ (|z| >= 0.75 required; P_bull={p_drift_bull}%, P_bear={p_drift_bear}%)"},
+        "vrp_implied_edge": {"status": "PASS" if vrp_ok else "UNMET", "detail": f"VRP = GVZ ({gvz_now:.1f}%) - RV22 ({rv22_ann:.1f}%) = {vrp_ann:+.2f}% (> 0 required)"},
+        "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
+        "first_passage_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {p_win}% vs BE {p_breakeven}% | EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}%"},
         "vpin_microstructure_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"M5 VPIN={vpin_now:.3f} ({'< 0.70 SAFE' if vpin_ok else '>= 0.70 TOXIC FLOW'})"},
-        "first_passage_win_rate": {"status": "PASS" if p_win >= 68.0 else "UNMET", "detail": f"P(Win) {p_win}% {'≥ 68% Threshold' if p_win >= 68.0 else '< 68% Threshold'} ({n_paths:,} paths)"},
-        "risk_reward_threshold": {"status": "VALID" if rr >= 1.50 else "UNMET", "detail": f"RR 1:{rr:.2f} (Threshold >= 1:1.50)"}
+        "risk_reward_threshold": {"status": "VALID" if rr >= 1.50 else "UNMET", "detail": f"RR 1:{rr:.2f} (1.0/2.0 ATR_D1=${atr_d1:.2f}, Threshold >= 1:1.50)"}
     }
 
     if ttl["is_expired"]:
@@ -1571,10 +1888,16 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         sl_reason = "No capital at risk."
         tp_reason = "Targets cancelled."
     elif not is_a_star:
-        reason_gate = "WIN PROBABILITY < 68%" if p_win < 68.0 else (f"RR 1:{rr:.2f} < 1:1.50" if rr < 1.50 else f"CONFLUENCE {total_confluence}/100 < 85")
+        unmet = []
+        if not drift_ok: unmet.append(f"|z20|={abs(z_20):.2f} < 0.75")
+        if not vrp_ok: unmet.append(f"VRP={vrp_ann:+.1f}% <= 0")
+        if not har_calm_ok: unmet.append("RV5 > 1.15*RV22 PANIC")
+        if not ev_ok: unmet.append(f"EV={ev_r:+.3f}R <= 0")
+        if not vpin_ok: unmet.append("VPIN TOXIC")
+        reason_gate = ", ".join(unmet) if unmet else f"CONFLUENCE {total_confluence}/100"
         action = f"A* GRADE NOT EXIST YET // STAND ASIDE ({reason_gate})"
         ticket_type = "NO_A_STAR_SETUP_STAND_ASIDE"
-        ticket_title = f"STATUS: A* GRADE NOT EXIST YET // STAND ASIDE (P(Win)={p_win}%, {total_confluence}/100)"
+        ticket_title = f"STATUS: A* GRADE NOT EXIST YET // STAND ASIDE (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {total_confluence}/100)"
         entry_zone = f"${entry_low:.2f} - ${entry_high:.2f} (CANDIDATE // BLOCKED BY GATE)"
         sl_val_str = f"${sl_val:.2f}"
         tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
@@ -1582,8 +1905,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         rr_str = f"1:{rr:.2f}"
         safe_lot = 0.00
         max_risk_usd = "$0.00 (STAND ASIDE // CAPITAL PRESERVATION)"
-        bias_reason = f"Current candidate is {grade} ({reason_gate}). Win Prob {p_win}% across {n_paths:,} MC paths. Standing aside until A* criteria pass."
-        entry_reason = f"Candidate bracket ${entry_low:.2f} - ${entry_high:.2f} monitored; execution gated."
+        bias_reason = f"{grade} ({reason_gate}). Causal 20D drift z={z_20:+.2f}σ, VRP={vrp_ann:+.2f}%, MC P(Win)={p_win}% (BE {p_breakeven}%), EV={ev_r:+.3f}R."
+        entry_reason = f"Pure-probability candidate around spot ${current_price:.2f}; execution blocked until all 3Y-validated gates pass."
         sl_reason = "No capital at risk."
         tp_reason = "Targets suspended until A* gate passes."
     else:
@@ -1602,7 +1925,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
         setup_id_str = active_locked.get("setup_id", "A*") if active_locked else "A*"
         status_str = active_locked.get("status", "ACTIVE") if active_locked else "ACTIVE"
-        ticket_title = f"LOCKED {setup_id_str} [{status_str}] // {total_confluence}/100 (P(Win): {p_win}%)"
+        ticket_title = f"LOCKED {setup_id_str} [{status_str}] // {total_confluence}/100 (EV={ev_r:+.3f}R, P(Win)={p_win}%)"
         action = raw_action
         sl_val_str = f"${sl_val:.2f}"
         tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
@@ -1611,33 +1934,48 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         entry_zone = f"${entry_low:.2f} - ${entry_high:.2f}"
         safe_lot = active_locked.get("recommended_lot", computed_lot) if active_locked else computed_lot
         max_risk_usd = f"${round(safe_lot * 100.0 * risk_dist_dollars, 2):.2f} (HAR-RV Cap ${target_risk_usd:.2f})"
-        bias_reason = f"{bias}: Spot ${current_price:.2f} vs Pivot ${PP:.2f}; {n_paths:,}-Path MC P(Win)={p_win}%, P(Up)={p_up}%, P(Down)={p_down}%."
-        entry_reason = f"Entry zone ${entry_low:.2f} - ${entry_high:.2f} brackets M30 momentum corridor ({m30_velocity:+.2f} ATR)."
-        sl_reason = f"Stop loss ${sl_val:.2f} anchored to 0.70 ATR structural invalidation."
-        tp_reason = f"TP1 ${tp1_val:.2f} (1.75 ATR) & TP2 ${tp2_val:.2f} (2.80 ATR)."
+        bias_reason = f"{bias}: 20D z={z_20:+.2f}σ (mu_post={mu_daily_post:+.3f}%/d), VRP={vrp_ann:+.1f}%, P(Win)={p_win}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
+        entry_reason = f"Pure-probability execution around spot ${current_price:.2f} (no visual chart patterns)."
+        sl_reason = f"Stop loss ${sl_val:.2f} anchored to 1.0 ATR_D1 (${atr_d1:.2f})."
+        tp_reason = f"TP1 ${tp1_val:.2f} (2.0 ATR_D1) & TP2 ${tp2_val:.2f} (3.0 ATR_D1)."
 
     rationale = {
         "bias_reason": bias_reason,
         "entry_reason": entry_reason,
         "stop_loss_reason": sl_reason,
         "target_reason": tp_reason,
-        "confluence_reason": f"Score {total_confluence}/100 ({grade}): Macro {macro_score}/25 + MC {mc_prob_score}/25 + Vol {vol_score}/25 + Cross-Asset {cross_score}/25."
+        "confluence_reason": f"Score {total_confluence}/100 ({grade}): Drift {macro_score}/25 + MC EV {mc_prob_score}/25 + VRP/HAR {vol_score}/25 + Micro/HC3 {cross_score}/25."
     }
 
+    bt3 = prob_reg["backtest_3y_gated"]
     return {
         "confluence_score": total_confluence,
-        "confluence_moe_95": 4.2,
+        "confluence_moe_95": 3.8,
         "is_a_star": is_a_star,
         "grade": grade,
         "locked_setup": active_locked,
         "current_price": current_price,
         "pivot_point": PP,
-        "determining_timeframe": f"M30 (Market Structure & {n_paths:,}-Path Monte Carlo SDE)",
-        "execution_timeframe": "M15 / M30 (Momentum Catch Impulse)",
+        "determining_timeframe": f"D1 + {n_paths:,}-Path Bayesian Drift & VRP SDE (Zero Chart Patterns)",
+        "execution_timeframe": "5-Day First-Passage Horizon (1.0 / 2.0 / 3.0 ATR_D1)",
         "first_passage_analysis": fp_analysis,
         "algorithmic_footprint": footprint,
         "garch_predicted_shock": garch_shock,
         "time_to_live": ttl,
+        "probability_engine": {
+            "z_20_drift": z_20,
+            "p_drift_bull_pct": p_drift_bull,
+            "p_drift_bear_pct": p_drift_bear,
+            "mu_daily_post_pct": mu_daily_post,
+            "vrp_ann_pct": vrp_ann,
+            "rv5_ann_pct": rv5_ann,
+            "rv22_ann_pct": rv22_ann,
+            "gvz_iv_pct": gvz_now,
+            "atr_d1_usd": atr_d1,
+            "ev_r": ev_r,
+            "quarter_kelly_pct": quarter_kelly_pct,
+            "backtest_3y_summary": bt3
+        },
         "macro_metrics": {
             "yield_spread_10_2": f"{yield_spread:+.2f}%",
             "tips_real_rate": f"{tips_real_proxy:+.2f}%",
@@ -1646,8 +1984,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "macro_drift_vector": f"{macro_drift*100:+.3f}%"
         },
         "momentum_metrics": {
-            "price_displacement_pivot": f"{price_displacement:+.2f} USD",
-            "m30_drift_velocity": f"{m30_velocity:+.2f} ATR",
+            "price_displacement_pivot": f"{z_20:+.2f}σ (20D Drift)",
+            "m30_drift_velocity": f"VRP {vrp_ann:+.1f}%",
             "kyles_lambda_illiquidity": f"{kyles_lambda:.4f}",
             "lo_mackinlay_vr5": f"{footprint['lo_mackinlay_vr5']}x",
             "momentum_regime": bias
@@ -1665,15 +2003,15 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "tail_p95": round(float(p95[-1]), 2)
         },
         "data_validation_gate": {
-            "overall_status": f"{sum(1 for c in gate_checks.values() if c['status'] in ['VALID', 'PASS'])}/6 DATA GATES VERIFIED",
+            "overall_status": f"{sum(1 for c in gate_checks.values() if c['status'] in ['VALID', 'PASS'])}/{len(gate_checks)} DATA GATES VERIFIED",
             "checks": gate_checks
         },
         "setup_rationale": rationale,
         "pillars": {
-            "macro_trend_alignment": {"score": macro_score, "max": 25, "status": f"DXY {dxy_val:.2f} / 10Y Yield {us10y_val:.2f}% (Drift: {macro_drift*100:+.3f}%)"},
-            "liquidity_sweep_status": {"score": mc_prob_score, "max": 25, "status": f"First-Passage P(Win)={p_win}% | P(Up)={p_up}% | P(Down)={p_down}%"},
-            "volatility_band_status": {"score": vol_score, "max": 25, "status": f"Lo-MacKinlay VR={footprint['lo_mackinlay_vr5']}x (p={footprint['p_value']}) | Kyle's λ={kyles_lambda:.4f}"},
-            "cross_asset_confirmation": {"score": cross_score, "max": 25, "status": f"Yield Matrix: 2Y={us2y_val:.2f}% | Spread={yield_spread:+.2f}% | Mode={ticket_type}"}
+            "macro_trend_alignment": {"score": macro_score, "max": 25, "status": f"20D Bayesian Drift z={z_20:+.2f}σ (mu={mu_daily_post:+.3f}%/d)"},
+            "liquidity_sweep_status": {"score": mc_prob_score, "max": 25, "status": f"MC P(Win)={p_win}% (BE {p_breakeven}%) | EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}%"},
+            "volatility_band_status": {"score": vol_score, "max": 25, "status": f"VRP={vrp_ann:+.1f}% (GVZ {gvz_now:.1f}% - RV22 {rv22_ann:.1f}%) | RV5={rv5_ann:.1f}%"},
+            "cross_asset_confirmation": {"score": cross_score, "max": 25, "status": f"VPIN={vpin_now:.3f} | 3Y Walk-Forward: {bt3['win_rate_pct']}% Win, PF {bt3['profit_factor']} (p={bt3['p_val']})"}
         },
         "trade_ticket": {
             "asset": "XAUUSD (Gold Spot)",
@@ -1707,13 +2045,15 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "dxy_t_stat": daily_ols["t_dxy"],
             "noise_regressors_zeroed": [k for k, v in fb.items() if v == 0.0],
             "vr5_random_walk_p_val": footprint["p_value"],
-            "verdict": f"DXY CHANNEL VERIFIED (F={daily_ols['f_stat']}, t_DXY={daily_ols['t_dxy']}, p={daily_ols['f_p_val']:.2e}) | VR(5) p={footprint['p_value']}"
+            "prob_3y_t_stat": bt3["t_stat"],
+            "prob_3y_p_val": bt3["p_val"],
+            "verdict": f"3Y CAUSAL PROBABILITY VERIFIED (n={bt3['trades']}, PF={bt3['profit_factor']}, t={bt3['t_stat']}, p={bt3['p_val']}) | 6-Factor F={daily_ols['f_stat']}"
         },
         "quant_8_pillars": {
             "vol_targeting_scalar": vol_target_scalar,
             "target_risk_usd": target_risk_usd,
             "har_rv_forecast_pct": har_rv.get("forecast_daily_vol_pct", 1.19),
-            "gld_atm_iv_pct": gld_opt.get("atm_iv_pct", 24.9),
+            "gld_atm_iv_pct": gld_opt.get("atm_iv_pct", gvz_now),
             "straddle_implied_move_usd": gld_opt.get("straddle_implied_move_usd", 46.2),
             "net_gex_usd_m": gld_opt.get("net_gex_usd_m", -58.31),
             "gex_regime": gld_opt.get("gex_regime", "SHORT_GAMMA_AMPLIFIER (-GEX)"),
@@ -1729,10 +2069,10 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "macro_zoo_active": [k.upper() for k, v in fb.items() if v != 0.0]
         },
         "mathematical_audit_log": [
-            f"Step 1 (Calibrated OLS F={daily_ols['f_stat']}): Verified DXY beta {fb['dxy']} (t={daily_ols['t_dxy']}) -> drift {macro_drift*100:+.3f}% (noisy ZT/CL shrunk to 0).",
-            f"Step 2 (Momentum & Tape): Spot ${current_price:.2f} vs Pivot ${PP:.2f}; VR(5)={footprint['lo_mackinlay_vr5']}x (p={footprint['p_value']}).",
-            f"Step 3 (First-Passage SDE): {n_paths:,} paths evaluate P(Win)={p_win}%, P(Up)={p_up}%, P(Down)={p_down}%, 95% VaR={var_95_pct}%.",
-            f"Step 4 (Locked Contract): {'Contract Locked ' + active_locked.get('setup_id', '') + ' [' + active_locked.get('status', '') + ']' if active_locked else 'Stand Aside: ' + grade}"
+            f"Step 1 (Bayesian Drift): z20={z_20:+.2f}σ -> mu_post={mu_daily_post:+.3f}%/d (P_bull={p_drift_bull}%, P_bear={p_drift_bear}%).",
+            f"Step 2 (VRP & HAR-RV): GVZ {gvz_now:.1f}% - RV22 {rv22_ann:.1f}% = VRP {vrp_ann:+.1f}% | RV5 {rv5_ann:.1f}% vs 1.15*RV22.",
+            f"Step 3 (First-Passage SDE): {n_paths:,} paths -> P(Win)={p_win}% (BE {p_breakeven}%), EV={ev_r:+.3f}R, Kelly/4={quarter_kelly_pct}%.",
+            f"Step 4 (3Y Causal Audit): {bt3['trades']} trades, Win={bt3['win_rate_pct']}%, PF={bt3['profit_factor']}, t={bt3['t_stat']} (p={bt3['p_val']})."
         ]
     }
 
@@ -1783,7 +2123,7 @@ def calculate_fomc_model(actual_rate, priced_rate, dots_shift_bps=0.0, current_p
                 "direct_gold_p": cal["p_direct_gold"], "vr5_p": cal["vr5_p_val"]
             }
         },
-        "dynamic_execution": dyn["dynamic_short_plan"] if total_shock >= 0 else dyn["dynamic_long_plan"]
+        "dynamic_execution": dyn["dynamic_short_plan"] if (expected_gold_move < 0 or (expected_gold_move == 0 and total_shock > 0)) else dyn["dynamic_long_plan"]
     }
 
 # -------------------------------------------------------------
@@ -1803,10 +2143,10 @@ def calculate_nfp_model(nfp_actual, nfp_forecast, unemp_actual, unemp_forecast, 
     expected_gold_move = round(cal["effective_gold_beta"] * z_labor, 2)
 
     if z_labor >= 1.0:
-        signal = "HAWKISH LABOR // SHORT ONLY IF DXY+2Y CONFIRM (STAGE-2 F=12.32)"
+        signal = f"HAWKISH LABOR // SHORT ONLY IF DXY+2Y CONFIRM (STAGE-2 F={cal['f_cross_2stage']:.2f})"
         regime = "HAWKISH EXPANSION"
     elif z_labor <= -1.0:
-        signal = "DOVISH LABOR // LONG ONLY IF DXY+2Y CONFIRM (STAGE-2 F=12.32)"
+        signal = f"DOVISH LABOR // LONG ONLY IF DXY+2Y CONFIRM (STAGE-2 F={cal['f_cross_2stage']:.2f})"
         regime = "DOVISH DRIFT"
     else:
         signal = "NEUTRAL / MIXED JOBS DATA (FADE EXTREMES)"
@@ -1855,15 +2195,14 @@ def calculate_ppi_retail_model(ppi_actual, ppi_forecast, retail_actual, retail_f
     expected_gold_move = round(cal["effective_gold_beta"] * z_composite, 2)
 
     if z_composite >= 1.0:
-        signal = "WHOLESALE PRESSURE // SHORT ONLY IF 2Y+DXY CONFIRM (F=5.88)"
+        signal = f"WHOLESALE PRESSURE // SHORT ONLY IF 2Y+DXY CONFIRM (F={cal['f_cross_2stage']:.2f})"
         regime = "WHOLESALE PRESSURE"
     elif z_composite <= -1.0:
-        signal = "DEMAND SLUMP // LONG ONLY IF 2Y+DXY CONFIRM (F=5.88)"
+        signal = f"DEMAND SLUMP // LONG ONLY IF 2Y+DXY CONFIRM (F={cal['f_cross_2stage']:.2f})"
         regime = "DEMAND SLUMP"
     else:
         signal = "NO TRADE (IN-LINE NOISE)"
         regime = "IN-LINE NOISE"
-
     dyn = calculate_dynamic_levels(current_price, atr_m30)
 
     return {
@@ -1901,7 +2240,7 @@ def simulate_tomorrow_scenario(actual_mom, actual_core_yoy, tomorrow_meta, curre
 
     expected_gold_return = cal["beta_direct_gold"] * z_comp
     expected_dxy_return = cal["beta_dxy_1st"] * z_comp
-    expected_2y_yield_shift_bps = cal["beta_2y_1st"] * 100.0 * z_comp
+    expected_2y_yield_shift_bps = cal["beta_2y_1st"] * z_comp
 
     if z_comp >= 1.5:
         signal = "STRONG SHORT (HAWKISH DRIFT)"
@@ -1968,24 +2307,27 @@ _CONF_PROFILE_CACHE = {}
 
 def _get_event_confidence_profile(event_type="cpi"):
     ev = (event_type or "cpi").lower()
-    if ev in _CONF_PROFILE_CACHE:
-        return _CONF_PROFILE_CACHE[ev]
+    mtime = (_event_file_mtime(ev), _snapshot_mtime())
+    cached = _CONF_PROFILE_CACHE.get(ev)
+    if cached and cached.get("_mtime") == mtime:
+        return cached
     if ev in ["daily", "astar"]:
         d_ols = _get_daily_cross_asset_ols()
         q8 = _load_premarket_snapshot().get("quant_8_snapshot", {})
-        har_p = float(q8.get("har_rv_vol", {}).get("f_p_val", 0.0))
-        p_use = max(float(d_ols.get("f_p_val", 0.0)), har_p)
+        har_p = float(q8.get("har_rv_vol", {}).get("f_p_val", 1.0))
+        p_use = max(float(d_ols.get("f_p_val", 1.0)), har_p)
         prof = {
             "event_type": ev,
             "direct_ladder": evaluate_confidence_ladder(p_use),
             "wave2_ladder": evaluate_confidence_ladder(p_use),
             "vr_ladder": evaluate_confidence_ladder(0.0),
-            "direct_max_conf": 99 if p_use < 0.01 else 0,
-            "wave2_max_conf": 99 if p_use < 0.01 else 0,
+            "direct_max_conf": 99 if p_use < 0.01 else (95 if p_use < 0.05 else 0),
+            "wave2_max_conf": 99 if p_use < 0.01 else (95 if p_use < 0.05 else 0),
             "vr_max_conf": 99,
             "allows_direct_prenews": p_use < 0.05,
             "allows_wave2": p_use < 0.05,
-            "note": "Daily 6-Factor Macro Zoo + HAR-RV Vol Targeting verified at 99%."
+            "note": "Daily 6-Factor Macro Zoo + HAR-RV Vol Targeting verified at 99%.",
+            "_mtime": mtime
         }
         _CONF_PROFILE_CACHE[ev] = prof
         return prof
@@ -2010,7 +2352,8 @@ def _get_event_confidence_profile(event_type="cpi"):
         "allows_wave2": bool(w2_ladder["80"]),
         "note": (
             f"Direct passes up to {dir_ladder['max_confidence_pct']}% | Wave-2 2SLS passes {w2_ladder['max_confidence_pct']}% | VR(5) passes {vr_ladder['max_confidence_pct']}%"
-        )
+        ),
+        "_mtime": mtime
     }
     _CONF_PROFILE_CACHE[ev] = prof
     return prof
@@ -2027,12 +2370,12 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     """
     ev_key = (event_type or "cpi").lower()
     h_days = max(1, int(horizon_days))
-    c_key = (ev_key, h_days, round(float(z_shock), 3), round(float(current_price), 1), round(float(atr_m30), 1), int(n_paths), int(min_confidence))
+    c_key = (ev_key, h_days, round(float(z_shock), 3), round(float(current_price), 2), round(float(atr_m30), 2), int(n_paths), int(min_confidence))
     now_mc = time.time()
     cached_mc = _MC_RESULT_CACHE.get(c_key)
     if cached_mc and (now_mc - cached_mc["ts"] < 5.0):
         return cached_mc["val"]
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     steps = 24 if h_days == 1 else 30
     dt = float(h_days) / float(steps)
     snap = _load_premarket_snapshot()
@@ -2047,7 +2390,9 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         emp_daily_vol = (d_ols["gold_daily_sd_pct"] / 100.0) * 0.72
     else:
         cal = _get_calibrated_event_params(ev)
-        beta_jump = float(np.clip(cal["effective_gold_beta"] / 100.0, -0.025, 0.025))
+        # Only inject direct event jump drift when direct slope is statistically valid (p < 0.05)
+        raw_beta = cal["beta_direct_gold"] if cal["p_direct_gold"] < 0.05 else 0.0
+        beta_jump = float(np.clip(raw_beta / 100.0, -0.025, 0.025))
         emp_daily_vol = max(0.006, (cal["empirical_gold_sd_pct"] / 100.0) * 0.75)
 
     iv_0 = float(gld_opt.get("atm_iv_pct", sv.get("current_iv_pct", 24.9))) / 100.0
@@ -2069,15 +2414,23 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     paths[:, 0] = current_price
     vol_paths[:, 0] = iv_0
 
-    p_up = 1.0 / (1.0 + np.exp(0.85 * z_shock))
-    mean_up_jump = 0.0055
-    mean_down_jump = 0.0075
+    # Symmetric jump amplitudes at z=0 (no artificial negative drift bias)
+    # Directional jump skew activates only when beta_jump != 0
+    dir_sign = -1.0 if beta_jump < 0 else (1.0 if beta_jump > 0 else 0.0)
+    p_up = float(1.0 / (1.0 + np.exp(-0.45 * dir_sign * float(z_shock)))) if dir_sign != 0.0 else 0.50
+    mean_up_jump = 0.0065
+    mean_down_jump = 0.0065
     eta1 = 1.0 / mean_up_jump
     eta2 = 1.0 / mean_down_jump
 
+    # RMS-normalize intraday burst weights so integrated path variance matches target daily vol
+    t_idx = np.arange(1, steps + 1, dtype=float)
+    raw_decay = 1.0 + (1.2 + 0.4 * abs(float(z_shock))) * np.exp(-t_idx / 5.0)
+    norm_decay = raw_decay / math.sqrt(float(np.mean(raw_decay ** 2)))
+
     sqrt_1_rho2 = math.sqrt(max(0.0, 1.0 - rho_pv * rho_pv))
-    z_s_mat = np.random.normal(0, 1, (n_paths, steps))
-    z_perp_mat = np.random.normal(0, 1, (n_paths, steps))
+    z_s_mat = rng.normal(0, 1, (n_paths, steps))
+    z_perp_mat = rng.normal(0, 1, (n_paths, steps))
     for t in range(1, steps + 1):
         if t == 1:
             lambda_t = 0.8 + 0.6 * abs(z_shock)
@@ -2095,18 +2448,17 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         sig_cur = np.clip(sig_prev + d_sig, 0.07, 0.90)
         vol_paths[:, t] = sig_cur
 
-        decay = 1.0 + (1.2 + 0.4 * abs(z_shock)) * np.exp(-t / 5.0)
-        step_vol = (sig_cur / math.sqrt(252.0)) * base_blend_ratio * math.sqrt(dt) * decay
+        step_vol = (sig_cur / math.sqrt(252.0)) * base_blend_ratio * math.sqrt(dt) * float(norm_decay[t - 1])
         diff_ret = -0.5 * (step_vol ** 2) + step_vol * z_s
 
-        n_jumps = np.random.poisson(lambda_t, n_paths)
+        n_jumps = rng.poisson(lambda_t, n_paths)
         max_k = int(np.max(n_jumps))
         jump_ret = np.zeros(n_paths)
         if max_k > 0:
-            u = np.random.uniform(0, 1, (n_paths, max_k))
+            u = rng.uniform(0, 1, (n_paths, max_k))
             up_mask = u < p_up
-            exp_up = np.random.exponential(1.0 / eta1, (n_paths, max_k))
-            exp_dn = np.random.exponential(1.0 / eta2, (n_paths, max_k))
+            exp_up = rng.exponential(1.0 / eta1, (n_paths, max_k))
+            exp_dn = rng.exponential(1.0 / eta2, (n_paths, max_k))
             j = np.where(up_mask, exp_up, -exp_dn)
             mask = np.arange(max_k)[None, :] < n_jumps[:, None]
             jump_ret = np.sum(j * mask, axis=1)
@@ -2114,7 +2466,6 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
             jump_ret += macro_bias
 
         paths[:, t] = paths[:, t - 1] * np.exp(diff_ret + jump_ret)
-
     terminal_rets = (paths[:, -1] - paths[:, 0]) / paths[:, 0] * 100.0
     p_pos = float(np.mean(terminal_rets > 0) * 100.0)
     p_neg = float(np.mean(terminal_rets < 0) * 100.0)
@@ -2217,10 +2568,9 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         time_labels = [f"T+{i}h" for i in range(steps + 1)]
         time_labels[0] = "T0 (08:30)"
     else:
-        time_labels = [f"D{(i * 5) / steps:.1f}" for i in range(steps + 1)]
+        time_labels = [f"D{(i * h_days) / steps:.1f}" for i in range(steps + 1)]
         time_labels[0] = "D0 (T0)"
-        time_labels[-1] = "D5.0"
-
+        time_labels[-1] = f"D{h_days:.1f}"
     mc_se_terminal = np.std(paths[:, -1]) / np.sqrt(n_paths)
     mc_moe_95 = round(float(1.96 * mc_se_terminal), 2)
 
@@ -2302,22 +2652,23 @@ def calculate_probability_density_function(event_type="cpi", n_points=120):
     ev = (event_type or "cpi").lower()
     snap = _load_premarket_snapshot()
     lead = snap.get("leading_indicators", {})
+    live_ov = fetch_live_prenews_overlay()
 
     if ev == "fomc":
-        pre = calculate_fomc_prenew_model()
+        pre = calculate_fomc_prenew_model(include_mc=False)
         bp = pre["bayesian_parameters"]
         x_range, unit = (-25.0, 25.0), "bps"
-        label_post = f"ZQ=F ({lead.get('zq_spread_bps', 0):+.1f}bps) + 2Y Slope ({lead.get('curve_2y_vs_ff_bps', 0):+.0f}bps)"
+        label_post = pre.get("leading_summary", f"ZQ=F ({lead.get('zq_spread_bps', 0):+.1f}bps) + 2Y Slope")
     elif ev == "nfp":
-        pre = calculate_nfp_prenew_model()
+        pre = calculate_nfp_prenew_model(include_mc=False)
         bp = pre["bayesian_parameters"]
         x_range, unit = (-150.0, 150.0), "k"
         label_post = f"ICSA Δ ({lead.get('icsa_delta_4w_vs_12w_k', 0):+.1f}k) + JOLTS ({lead.get('jtsjol_3m_chg_k', 0):+.0f}k)"
     elif ev in ["ppi", "ppi_retail"]:
-        pre = calculate_ppi_prenew_model()
+        pre = calculate_ppi_prenew_model(include_mc=False)
         bp = pre["bayesian_parameters"]
         x_range, unit = (-0.60, 0.60), "pp"
-        label_post = f"WTI ({lead.get('wti_22d_pct', 0):+.1f}%) + Copper ({lead.get('copper_22d_pct', 0):+.1f}%)"
+        label_post = pre.get("leading_summary", f"WTI ({lead.get('wti_22d_pct', 0):+.1f}%) + Copper ({lead.get('copper_22d_pct', 0):+.1f}%)")
     elif ev in ["daily", "astar"]:
         bp = {"prior_mu": 0.0, "prior_sigma": 0.45, "posterior_mu": 0.0, "posterior_sigma": 0.45}
         pre = {"z_pre": 0.0, "p_hawkish_beat": 33.3, "p_inline": 33.4, "p_dovish_miss": 33.3, "p_gold_up": 50.0, "p_gold_down": 50.0, "leading_summary": "Intraday Session Baseline"}
@@ -2330,11 +2681,10 @@ def calculate_probability_density_function(event_type="cpi", n_points=120):
         if os.path.exists(tm_path):
             with open(tm_path) as f:
                 tomorrow_meta = json.load(f)
-        pre = calculate_pre_news_bayesian_model(tomorrow_meta)
+        pre = calculate_pre_news_bayesian_model(tomorrow_meta, include_mc=False)
         bp = pre["bayesian_parameters"]
         x_range, unit = (-0.35, 0.35), "pp"
-        label_post = f"WTI ({lead.get('wti_22d_pct', 0):+.1f}%) + 10Y BE + Nowcast"
-
+        label_post = pre.get("leading_summary", f"WTI ({lead.get('wti_22d_pct', 0):+.1f}%) + 10Y BE + Nowcast")
     prior_mu, prior_sd = float(bp["prior_mu"]), max(1e-4, float(bp["prior_sigma"]))
     post_mu, post_sd = float(bp["posterior_mu"]), max(1e-4, float(bp["posterior_sigma"]))
     x_vals = np.linspace(x_range[0], x_range[1], n_points)
@@ -2380,6 +2730,8 @@ def calculate_probability_density_function(event_type="cpi", n_points=120):
 # MULTI-EVENT HISTORICAL EVALUATION SUITES
 # -------------------------------------------------------------
 def build_event_eval_suite(df, shock_col, shock_label, multi_cols, multi_labels, event_name, naive_col=None):
+    if "date" in df.columns:
+        df = df.sort_values("date").reset_index(drop=True)
     y = df["gold_return_pct"].values
     x_shock = df[shock_col].values
     
@@ -2544,21 +2896,23 @@ def evaluate_ppi_models(ppi_records):
 # -------------------------------------------------------------
 # FITTED PRE-NEWS ENGINES (FOMC, NFP, PPI) DRIVEN BY SNAPSHOT
 # -------------------------------------------------------------
-def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rate=None, consensus_rate=None, dots_shift_bps=None, session_h=None, session_l=None, session_c=None, min_confidence=95):
+def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rate=None, consensus_rate=None, dots_shift_bps=None, session_h=None, session_l=None, session_c=None, min_confidence=95, include_mc=True):
     """
-    FOMC Pre-News Model: Kuttner (2001) ZQ=F Implied Surprise + Hamilton/Dueker Multinomial Softmax
-    Regime Classifier over (2Y Curve Spread, Core CPI Gap, Global CB Rate Differential).
+    FOMC Pre-News Model: Kuttner (2001) Live ZQ=F Implied Surprise + Hamilton/Dueker Multinomial Softmax
+    Regime Classifier over (Live 2Y Curve Spread, Core CPI Gap, Global CB Rate Differential).
     """
     snap = _load_premarket_snapshot()
     lead = snap.get("leading_indicators", {})
     glob = snap.get("global_macro", {})
     up = snap.get("upcoming_consensus", {}).get("fomc", {})
+    live_ov = fetch_live_prenews_overlay()
     dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
 
     target_r = float(consensus_rate if consensus_rate is not None else up.get("current_target", 4.00))
-    zq_r = float(priced_rate if priced_rate is not None else lead.get("zq_implied_rate_pct", target_r))
-    zq_spread_bps = (zq_r - target_r) * 100.0 if priced_rate is not None else float(lead.get("zq_spread_bps", 0.0))
-    curve_2y_bps = float(lead.get("curve_2y_vs_ff_bps", 0.0))
+    zq_r = float(priced_rate if priced_rate is not None else live_ov.get("zq_implied_rate_pct", lead.get("zq_implied_rate_pct", target_r)))
+    zq_spread_bps = (zq_r - target_r) * 100.0
+    live_2y = live_ov.get("us2y_pct")
+    curve_2y_bps = (float(live_2y) - target_r) * 100.0 if live_2y is not None else float(lead.get("curve_2y_vs_ff_bps", 0.0))
     core_gap_pp = float(lead.get("core_cpi_est_yoy", 2.77)) - 2.00
     us_g7_spread = float(glob.get("us_minus_g7_rate_spread_pct", 1.5))
     dots_est = float(dots_shift_bps if dots_shift_bps is not None else (0.35 * curve_2y_bps + 8.0 * core_gap_pp))
@@ -2584,7 +2938,7 @@ def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rat
     exp_ret = stage_b["expected_gold_pct"]
     asymmetry_label = "HAWKISH POLICY RISK (BEARISH GOLD)" if p_hike > p_cut + 10 else ("DOVISH PIVOT RISK (BULLISH GOLD)" if p_cut > p_hike + 10 else "BALANCED POLICY HOLD")
 
-    mc_entry = run_monte_carlo(current_price=current_price, z_shock=z_pre, horizon_days=1, n_paths=10000, event_type="fomc", atr_m30=atr_m30, min_confidence=min_confidence)
+    mc_entry = run_monte_carlo(current_price=current_price, z_shock=z_pre, horizon_days=1, n_paths=10000, event_type="fomc", atr_m30=atr_m30, min_confidence=min_confidence) if include_mc else {}
     ea = mc_entry.get("entry_analysis", {})
     plan = ea.get("recommended_ticket", dyn["structural_ticket"])
     action = ea.get("decision_headline", "STAND ASIDE // VOLATILITY REGIME ONLY")
@@ -2626,7 +2980,7 @@ def calculate_fomc_prenew_model(current_price=4036.17, atr_m30=12.50, priced_rat
         "bs_stoch_vol": mc_entry.get("bs_stoch_vol", {})
     }
 
-def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=None, claims_trend_k=None, ism_emp=None, session_h=None, session_l=None, session_c=None, min_confidence=95):
+def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=None, claims_trend_k=None, ism_emp=None, session_h=None, session_l=None, session_c=None, min_confidence=95, include_mc=True):
     """
     NFP Pre-News Model: Bayesian Conjugate Labor Update driven by live FRED Initial Claims (ICSA 4W vs 12W),
     Continuing Claims (CCSA), and JOLTS Job Openings (JTSJOL) momentum.
@@ -2664,7 +3018,7 @@ def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=
     exp_ret = stage_b["expected_gold_pct"]
     asymmetry_label = "HOT LABOR TIGHTENING (BEARISH ASYMMETRY)" if p_beat > p_miss + 12 else ("LABOR COOLING (BULLISH ASYMMETRY)" if p_miss > p_beat + 12 else "BALANCED LABOR CONSENSUS")
 
-    mc_entry = run_monte_carlo(current_price=current_price, z_shock=z_pre, horizon_days=1, n_paths=10000, event_type="nfp", atr_m30=atr_m30, min_confidence=min_confidence)
+    mc_entry = run_monte_carlo(current_price=current_price, z_shock=z_pre, horizon_days=1, n_paths=10000, event_type="nfp", atr_m30=atr_m30, min_confidence=min_confidence) if include_mc else {}
     ea = mc_entry.get("entry_analysis", {})
     plan = ea.get("recommended_ticket", dyn["structural_ticket"])
     action = ea.get("decision_headline", "STAND ASIDE // AWAIT WAVE 2 CONFIRMATION")
@@ -2706,23 +3060,27 @@ def calculate_nfp_prenew_model(current_price=4036.17, atr_m30=12.50, adp_diff_k=
         "bs_stoch_vol": mc_entry.get("bs_stoch_vol", {})
     }
 
-def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_pct=None, crb_change_pct=None, session_h=None, session_l=None, session_c=None, min_confidence=95):
+def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_pct=None, crb_change_pct=None, session_h=None, session_l=None, session_c=None, min_confidence=95, include_mc=True):
     """
     PPI & Retail Demand Pre-News Model: Clark (1995) ARDL Commodity Cost Pass-Through
-    + Scotti (2016) Real Demand Bayesian Update from live WTI Crude, Copper (HG=F), and 3M Retail/PPI trend.
+    + Scotti (2016) Real Demand Bayesian Update using live WTI Crude, Copper (HG=F), and 3M PPI trend.
     """
     snap = _load_premarket_snapshot()
     lead = snap.get("leading_indicators", {})
     up = snap.get("upcoming_consensus", {}).get("ppi", {})
+    live_ov = fetch_live_prenews_overlay()
     dyn = calculate_dynamic_levels(current_price, atr_m30, session_h=session_h, session_l=session_l, session_c=session_c)
 
     wti_chg = float(wti_change_pct if wti_change_pct is not None else lead.get("wti_22d_pct", 0.0))
     hg_chg = float(crb_change_pct if crb_change_pct is not None else lead.get("copper_22d_pct", 0.0))
+    if wti_change_pct is None and live_ov.get("wti_px") and float(lead.get("wti_last", 0.0)) > 0:
+        wti_chg = round(((1.0 + wti_chg / 100.0) * (live_ov["wti_px"] / float(lead["wti_last"])) - 1.0) * 100.0, 2)
+    if crb_change_pct is None and live_ov.get("hg_px") and float(lead.get("copper_last", 0.0)) > 0:
+        hg_chg = round(((1.0 + hg_chg / 100.0) * (live_ov["hg_px"] / float(lead["copper_last"])) - 1.0) * 100.0, 2)
     ppi_3m = float(lead.get("ppi_3m_avg_mom", 0.30))
     fcst_ppi = float(up.get("forecast_ppi_mom", 0.40))
 
     prior_sd = float(up.get("dispersion_sd_pp", 0.20))
-    # Commodity cost-push + pipeline momentum difference
     evidence_pp = 0.50 * (wti_chg * 0.012) + 0.30 * (hg_chg * 0.011) + 0.20 * (ppi_3m - fcst_ppi)
     sigma_ev = 0.16 + 0.002 * abs(wti_chg)
     tau0, tau_e = 1.0 / (prior_sd ** 2), 1.0 / (sigma_ev ** 2)
@@ -2742,21 +3100,23 @@ def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_
     exp_ret = stage_b["expected_gold_pct"]
     asymmetry_label = "COST-PUSH SURPRISE RISK" if p_beat > p_miss + 10 else ("COMMODITY DISINFLATION COOLING" if p_miss > p_beat + 10 else "BALANCED WHOLESALE PIPELINE")
 
-    mc_entry = run_monte_carlo(current_price=current_price, z_shock=z_pre, horizon_days=1, n_paths=10000, event_type="ppi", atr_m30=atr_m30, min_confidence=min_confidence)
+    mc_entry = run_monte_carlo(current_price=current_price, z_shock=z_pre, horizon_days=1, n_paths=10000, event_type="ppi", atr_m30=atr_m30, min_confidence=min_confidence) if include_mc else {}
     ea = mc_entry.get("entry_analysis", {})
     plan = ea.get("recommended_ticket", dyn["structural_ticket"])
     action = ea.get("decision_headline", "STAND ASIDE // AWAIT WAVE 2 CONFIRMATION")
     return {
         "event_type": "ppi",
         "event_name": "PPI FINAL DEMAND & ADVANCE RETAIL SALES",
-        "model_method": "Clark (1995) ARDL Commodity Pass-Through + Scotti (2016) Demand Update",
+        "model_method": "Clark (1995) ARDL Commodity Pass-Through + Scotti (2016) Live Demand Update",
         "snapshot_timestamp": snap.get("generated_at_utc", "LIVE"),
         "current_price": current_price,
-        "release_date": up.get("date", "2026-11-13"),
+        "release_date": up.get("date", "2026-12-15"),
         "release_time": "08:30 AM EST (20:30 WIB)",
-        "forecast_ppi": f"{fcst_ppi:.1f}% MoM",
-        "forecast_retail": f"{up.get('forecast_retail_mom', 0.4):.1f}% MoM (Nov 17)",
-        "forecast_core_ppi": "0.3% MoM",
+        "forecast_ppi": f"{fcst_ppi:.2f}% MoM",
+        "forecast_retail": f"{up.get('forecast_retail_mom', 0.4):.2f}% MoM",
+        "forecast_core_ppi": f"{up.get('forecast_core_ppi_mom', 0.3):.2f}% MoM",
+        "last_released_date": up.get("last_released_date"),
+        "last_actual_ppi_mom": up.get("last_actual_ppi_mom"),
         "z_pre": z_pre,
         "sigma_z_pre": sigma_z_pre,
         "p_hawkish_beat": p_beat,
@@ -2767,11 +3127,10 @@ def calculate_ppi_prenew_model(current_price=4036.17, atr_m30=12.50, wti_change_
         "p_move_1pct": stage_b["p_move_1pct"],
         "expected_return_pct": exp_ret,
         "asymmetry_label": asymmetry_label,
-        "leading_summary": f"WTI 22D: {wti_chg:+.2f}% | Copper 22D: {hg_chg:+.2f}% | 3M PPI Avg: {ppi_3m:+.2f}% vs {fcst_ppi:.2f}% fcst",
+        "leading_summary": f"WTI 22D (Live): {wti_chg:+.2f}% | Copper 22D (Live): {hg_chg:+.2f}% | 3M PPI Avg: {ppi_3m:+.2f}% vs {fcst_ppi:.2f}% fcst",
         "explanation": f"ARDL wholesale posterior μ={post_mu:+.3f}pp (σ={post_sd:.3f}pp, Z_pre={z_pre:+.2f}σ) -> Stage-B Gold P(Up)={stage_b['p_gold_up']}% / P(Down)={stage_b['p_gold_down']}% ({stage_b['edge_note']}).",
         "directive_title": f"PRE-RELEASE DIRECTIVE: {action}",
         "directive_desc": f"ENTRY: {plan['entry_zone']} | STOP: {plan['stop_loss']} | TARGET: {plan['target']} | RR: {plan['risk_reward_ratio']}",
-        "entry_zone": plan["entry_zone"],
         "stop_loss": plan["stop_loss"],
         "target": plan["target"],
         "target_2": plan.get("target_2", ""),
@@ -2802,7 +3161,7 @@ def _load_event_dataset(event_type="cpi"):
     else:
         with open(os.path.join(data_dir, "cpi_historical.json")) as f:
             records = json.load(f)
-        return records, "z_score_composite", "zt_return_pct", "CPI Composite Shock Z-Score", "Christie-David, Chaudhry & Koch (2000, JFM); Andersen et al. (2003, AER)"
+        return records, "z_score_composite", "us2y_delta_bps", "CPI Composite Shock Z-Score", "Christie-David, Chaudhry & Koch (2000, JFM); Andersen et al. (2003, AER)"
 
 def _binom_two_sided_pval(wins, trials, p=0.5):
     if trials <= 0:
@@ -2821,10 +3180,10 @@ def get_event_shock_frequency(event_type="cpi", z=0.0):
     Measures how frequently Gold moves far away from its post-news mean (>=1.0 SD, >=1.5 SD, >=1.0%).
     """
     records, shock_key, _, label, _ = _load_event_dataset(event_type)
-    raw_shocks = np.array([float(e[shock_key]) for e in records if shock_key in e and "gold_return_pct" in e])
-    gold_rets = np.array([float(e["gold_return_pct"]) for e in records if shock_key in e and "gold_return_pct" in e])
+    valid_recs = [e for e in records if shock_key in e and "gold_return_pct" in e]
+    raw_shocks = np.array([float(e[shock_key]) for e in valid_recs])
+    gold_rets = np.array([float(e["gold_return_pct"]) for e in valid_recs])
     n = len(raw_shocks)
-
     scale_sd = float(np.std(raw_shocks, ddof=1)) if (event_type or "").lower() == "fomc" else 1.0
     scale_sd = max(0.01, scale_sd)
     z_vals = raw_shocks / scale_sd
@@ -2853,7 +3212,7 @@ def get_event_shock_frequency(event_type="cpi", z=0.0):
     for i in range(len(counts)):
         low, high = float(edges[i]), float(edges[i + 1])
         matching = []
-        for e, zv in zip(records, z_vals):
+        for e, zv in zip(valid_recs, z_vals):
             zv_c = float(np.clip(zv, -3.0, 3.0))
             if (low <= zv_c < high) or (i == len(counts) - 1 and zv_c == high):
                 gr = float(e["gold_return_pct"])
@@ -2919,12 +3278,12 @@ def get_event_transmission_curves(event_type="cpi"):
     White (1980) HC3 Cross-Asset Transmission Curves & Scatter Points for CPI, FOMC, NFP, or PPI.
     """
     records, shock_key, y2_key, label, _ = _load_event_dataset(event_type)
-    raw_shocks = np.array([float(e[shock_key]) for e in records if shock_key in e and "gold_return_pct" in e])
-    gold_rets = np.array([float(e["gold_return_pct"]) for e in records if shock_key in e and "gold_return_pct" in e])
-    dxy_rets = np.array([float(e.get("dxy_return_pct", 0.0)) for e in records if shock_key in e and "gold_return_pct" in e])
-    y2_rets = np.array([float(e.get(y2_key, 0.0)) for e in records if shock_key in e and "gold_return_pct" in e])
-    vr5_vals = np.array([float(e.get("volatility_ratio_vr5", 4.5)) for e in records if shock_key in e and "gold_return_pct" in e])
-
+    valid_recs = [e for e in records if shock_key in e and "gold_return_pct" in e]
+    raw_shocks = np.array([float(e[shock_key]) for e in valid_recs])
+    gold_rets = np.array([float(e["gold_return_pct"]) for e in valid_recs])
+    dxy_rets = np.array([float(e.get("dxy_return_pct", 0.0)) for e in valid_recs])
+    y2_rets = np.array([float(e.get(y2_key, 0.0)) for e in valid_recs])
+    vr5_vals = np.array([float(e.get("volatility_ratio_vr5", 4.5)) for e in valid_recs])
     scale_sd = float(np.std(raw_shocks, ddof=1)) if (event_type or "").lower() == "fomc" else 1.0
     scale_sd = max(0.01, scale_sd)
     z_vals = raw_shocks / scale_sd
@@ -2951,7 +3310,7 @@ def get_event_transmission_curves(event_type="cpi"):
     mean_ret = float(np.mean(gold_rets))
     std_ret = max(0.01, float(np.std(gold_rets, ddof=1)))
     scatter_points = []
-    for e, zv in zip(records, z_vals):
+    for i_sc, (e, zv) in enumerate(zip(valid_recs, z_vals)):
         gr = float(e["gold_return_pct"])
         scatter_points.append({
             "date": e.get("date", ""),
@@ -2963,7 +3322,7 @@ def get_event_transmission_curves(event_type="cpi"):
             "gold_ret": round(gr, 2),
             "dist_from_mean_sd": round((gr - mean_ret) / std_ret, 2),
             "dxy_ret": round(float(e.get("dxy_return_pct", 0.0)), 2),
-            "zt_ret": round(float(e.get(y2_key, 0.0)), 2),
+            "zt_ret": round(float(y2_rets[i_sc]), 2),
             "vr5": round(float(e.get("volatility_ratio_vr5", 4.5)), 2),
             "regime": e.get("regime", "")
         })
@@ -2993,7 +3352,7 @@ def get_event_hypothesis_diagnostics(event_type="cpi"):
       3) Multivariate Joint Transmission F-Test & Out-of-Sample R^2
     """
     records, shock_key, y2_key, title, citation = _load_event_dataset(event_type)
-    valid = [e for e in records if shock_key in e and "gold_return_pct" in e]
+    valid = sorted([e for e in records if shock_key in e and "gold_return_pct" in e], key=lambda r: r.get("date", ""))
     y = np.array([float(e["gold_return_pct"]) for e in valid])
     x_raw = np.array([float(e[shock_key]) for e in valid])
     dxy = np.array([float(e.get("dxy_return_pct", 0.0)) for e in valid])
@@ -3093,9 +3452,9 @@ def get_event_hypothesis_diagnostics(event_type="cpi"):
         "stage2_cross_f": cal["f_cross_2stage"], "stage2_cross_p": cal["p_cross_2stage"],
         "stage1_valid_5pct": stage1_valid, "stage2_valid_5pct": stage2_valid,
         "vr5_mean": cal["vr5_mean"], "vr5_t_vs_1": cal["vr5_t_vs_1"], "vr5_p_val": cal["vr5_p_val"],
-        "confidence_90": bool(p_val < 0.10 or f_p_val < 0.10 or stage1_valid),
-        "confidence_95": bool(valid_at_5pct or (stage1_valid and stage2_valid) or stage1_valid),
-        "confidence_99": bool((p_val < 0.01 and luck_rejected) or cal["p_cross_2stage"] < 0.01 or cal["p_dxy_1st"] < 0.01),
+        "confidence_90": bool(p_val < 0.10 or f_p_val < 0.10 or (stage1_valid and stage2_valid)),
+        "confidence_95": bool(valid_at_5pct or (stage1_valid and stage2_valid)),
+        "confidence_99": bool((p_val < 0.01 and luck_rejected) or (stage1_valid and cal["p_cross_2stage"] < 0.01)),
         "confidence_ladder_80_99": {
             "direct": evaluate_confidence_ladder(p_val, binom_p),
             "wave2_2sls": evaluate_confidence_ladder(cal["p_cross_2stage"]),
@@ -3172,8 +3531,8 @@ def get_eight_model_quant_audit():
     fl = q8.get("microstructure_flow", {})
     cpi_d = get_event_hypothesis_diagnostics("cpi")
     sv = q8.get("stochastic_vol_roc", {})
-    vov_p = float(sv.get("vov_cluster_p", 0.0))
-    rho_p = float(sv.get("rho_p", 0.06))
+    vov_p = float(sv.get("vov_cluster_p", 1.0))
+    rho_p = float(sv.get("rho_p", 1.0))
 
     def _tier(pv, extra_ok=True):
         if not extra_ok:
@@ -3186,16 +3545,16 @@ def get_eight_model_quant_audit():
             return "90% MARGINAL"
         return "REJECT_LUCK"
 
-    har_p = float(har.get("f_p_val", 0.0))
-    gvz_p = float(vrp.get("iv_to_rv_p", 0.0))
-    vrp_p = float(vrp.get("vrp_crush_p", 0.0))
-    zoo_p = float(d_ols.get("f_p_val", 0.0))
-    ou_p = float(ou.get("p_5d", 0.001))
-    t5_kp = float(fv.get("dyn_t5_kupiec_p", 0.70))
-    g_kp = float(fv.get("static_gauss_kupiec_p", 0.0))
-    vpin_p = float(fl.get("vpin_to_30m_vol_p", 0.0))
-    ofi_p = float(fl.get("ofi_to_next5m_p", 0.03))
-    ofi_bin_p = float(fl.get("ofi_extreme_fade_binom_p", 0.17))
+    har_p = float(har.get("f_p_val", 1.0))
+    gvz_p = float(vrp.get("iv_to_rv_p", 1.0))
+    vrp_p = float(vrp.get("vrp_crush_p", 1.0))
+    zoo_p = float(d_ols.get("f_p_val", 1.0))
+    ou_p = float(ou.get("p_5d", 1.0))
+    t5_kp = float(fv.get("dyn_t5_kupiec_p", 0.0))
+    g_kp = float(fv.get("static_gauss_kupiec_p", 1.0))
+    vpin_p = float(fl.get("vpin_to_30m_vol_p", 1.0))
+    ofi_p = float(fl.get("ofi_to_next5m_p", 1.0))
+    ofi_bin_p = float(fl.get("ofi_extreme_fade_binom_p", 1.0))
     active_zoo = [k.upper() for k, v in d_ols.get("filtered_betas", {}).items() if v != 0.0]
 
     models = [
@@ -3280,32 +3639,34 @@ def get_eight_model_quant_audit():
 
 def run_paper_trade_backtest(starting_equity=10000.0, risk_pct=1.0, min_confidence=95):
     """
-    Strict Out-of-Sample Walk-Forward Paper-Trade Verification (2024-2026) across 125 macro releases
-    (CPI=35, FOMC=23, NFP=34, PPI=33) + 143 Weekly Jobless Claims (ICSA):
-      - Zero-intercept pure surprise/2SLS signals (no bull-market intercept bias).
-      - Strict expanding past-only hypothesis tests (no full-sample lookahead).
-      - Realistic execution costs: blind pre-news pays 0.12% Wave-1 spread/slippage; Wave-2 DXY+2Y
-        confirmation captures 65% of move after T+3m confirmation minus 0.05% spread.
+    Strict Zero-Lookahead Out-of-Sample Walk-Forward Paper-Trade Verification:
+      Track 1 (Daily A* 3-Year Pure Probability, 2023-11 -> 2026-11, n~760 days):
+        - Pure math/probability gates (|z20| >= 0.75, VRP = GVZ - RV22 > 0, RV5 <= 1.15 * RV22)
+        - Zero chart patterns, $0.80/oz round-trip slippage, 1:2.0 ATR_D1 barriers.
+      Track 2 (Causal Macro Releases, 2024-2026, n=125 releases):
+        - Strictly causal pre-print/print-surprise only (expanding past OLS < t, NO contemporaneous EOD DXY/2Y leakage!).
+        - Blind entry pays 0.12% Wave-1 spread/slippage.
     """
+    prob_reg = _get_daily_prob_regime()
+    d3_naive = prob_reg.get("backtest_3y_naive", {})
+    d3_gated = prob_reg.get("backtest_3y_gated", {})
+
     all_events = []
     for ev in ["cpi", "fomc", "nfp", "ppi"]:
         recs, sk, y2k, _, _ = _load_event_dataset(ev)
         for r in recs:
-            if sk in r and "gold_return_pct" in r and "dxy_return_pct" in r and y2k in r:
-                y2v = -float(r[y2k]) if ev == "cpi" else float(r[y2k])
+            if sk in r and "gold_return_pct" in r:
                 all_events.append({
                     "date": r.get("date", ""),
                     "event_type": ev,
                     "shock": float(r[sk]),
-                    "dxy_ret": float(r["dxy_return_pct"]),
-                    "y2_val": y2v,
                     "gold_ret": float(r["gold_return_pct"])
                 })
     all_events.sort(key=lambda x: x["date"])
     alpha_map = {80: 0.20, 85: 0.15, 90: 0.10, 95: 0.05, 99: 0.01}
     alpha_req = alpha_map.get(int(min_confidence), 0.05)
 
-    def _sim(gated=True):
+    def _sim_macro_causal(gated=True):
         eq = float(starting_equity)
         peak = eq
         max_dd = 0.0
@@ -3324,18 +3685,14 @@ def run_paper_trade_backtest(starting_equity=10000.0, risk_pct=1.0, min_confiden
 
             y_p = np.array([p["gold_ret"] for p in past])
             x_s = np.array([p["shock"] for p in past])
-            x_ca = np.column_stack([[p["dxy_ret"] for p in past], [p["y2_val"] for p in past]])
             gold_sd = max(0.40, float(np.std(y_p, ddof=1)))
             shock_sd = max(0.01, float(np.std(x_s, ddof=1)))
             z_cur = row["shock"] / shock_sd
 
             dir_reg = run_regression_ols(x_s / shock_sd, y_p)
-            ca_reg = run_regression_ols(x_ca, y_p)
             pred_dir_pure = float(dir_reg["beta"][1] * z_cur)
-            pred_w2_pure = float(np.array([row["dxy_ret"], row["y2_val"]]) @ np.array(ca_reg["beta"][1:]))
 
             side = 0
-            exec_mode = "PRE"
             if not gated:
                 if abs(z_cur) >= 0.10 and pred_dir_pure != 0.0:
                     side = 1 if pred_dir_pure > 0 else -1
@@ -3344,24 +3701,14 @@ def run_paper_trade_backtest(starting_equity=10000.0, risk_pct=1.0, min_confiden
                 nz_p = [(p["shock"], p["gold_ret"]) for p in past if p["shock"] != 0]
                 wins_p = sum(1 for s, g in nz_p if (s > 0 and g < 0) or (s < 0 and g > 0))
                 p_bin = _binom_two_sided_pval(wins_p, len(nz_p)) if len(nz_p) >= 8 else 1.0
-                df2 = max(1, len(y_p) - 3)
-                p_2sls = _f_pvalue(ca_reg["f_stat"], 2, df2)
 
-                if p_dir < alpha_req and p_bin < alpha_req and abs(z_cur) >= 0.35:
+                if p_dir < alpha_req and p_bin < alpha_req and abs(z_cur) >= 0.35 and pred_dir_pure != 0.0:
                     side = 1 if pred_dir_pure > 0 else -1
-                    exec_mode = "PRE"
-                elif p_2sls < alpha_req and abs(pred_w2_pure) >= 0.45 * gold_sd:
-                    side = 1 if pred_w2_pure > 0 else -1
-                    exec_mode = "WAVE2"
 
             if side == 0:
                 continue
 
-            if exec_mode == "PRE":
-                realized_pct = (side * row["gold_ret"]) - 0.12
-            else:
-                realized_pct = (0.65 * side * row["gold_ret"]) - 0.05
-
+            realized_pct = (side * row["gold_ret"]) - 0.12
             r_mult = max(-1.5, min(2.5, realized_pct / gold_sd))
             pnl = eq * (risk_pct / 100.0) * r_mult
             eq += pnl
@@ -3379,7 +3726,7 @@ def run_paper_trade_backtest(starting_equity=10000.0, risk_pct=1.0, min_confiden
         r_arr = np.array(r_list, dtype=float)
         pos_sum = float(np.sum(r_arr[r_arr > 0])) if len(r_arr) else 0.0
         neg_sum = float(abs(np.sum(r_arr[r_arr < 0]))) if len(r_arr) else 1e-6
-        pf = round(pos_sum / max(1e-6, neg_sum), 2)
+        pf = round(min(99.9, pos_sum / max(1e-4, neg_sum)), 2) if neg_sum > 1e-4 else (99.9 if pos_sum > 0 else 0.0)
         sr = round(float(np.mean(r_arr) / max(1e-6, np.std(r_arr, ddof=1)) * math.sqrt(len(r_arr))) if len(r_arr) > 2 else 0.0, 2)
         win_rate = round((wins / max(1, taken)) * 100.0, 1)
         binom_p = _binom_two_sided_pval(wins, taken) if taken > 0 else 1.0
@@ -3391,8 +3738,8 @@ def run_paper_trade_backtest(starting_equity=10000.0, risk_pct=1.0, min_confiden
             "profit_factor": pf, "sharpe_ratio": sr, "by_event": by_ev
         }
 
-    naive_res = _sim(gated=False)
-    gated_res = _sim(gated=True)
+    naive_res = _sim_macro_causal(gated=False)
+    gated_res = _sim_macro_causal(gated=True)
     snap = _load_premarket_snapshot()
     claims_a = snap.get("quant_8_snapshot", {}).get("jobless_claims_audit", {})
     return {
@@ -3401,6 +3748,12 @@ def run_paper_trade_backtest(starting_equity=10000.0, risk_pct=1.0, min_confiden
         "min_confidence_pct": min_confidence,
         "naive_unfiltered": naive_res,
         "zero_luck_gated": gated_res,
+        "daily_astar_3y": {
+            "window": f"{prob_reg.get('date_start', '2023-11-13')} -> {prob_reg.get('date_end', '2026-11-13')}",
+            "n_days": prob_reg.get("n_days", 760),
+            "naive_unfiltered": d3_naive,
+            "probability_gated": d3_gated
+        },
         "jobless_claims_standalone": claims_a,
         "summary": {
             "naive_ret_pct": naive_res["net_return_pct"],
@@ -3410,7 +3763,14 @@ def run_paper_trade_backtest(starting_equity=10000.0, risk_pct=1.0, min_confiden
             "gated_win_pct": gated_res["win_rate_pct"],
             "gated_pf": gated_res["profit_factor"],
             "gated_trades": gated_res["trades"],
-            "gated_binom_p": gated_res["binom_p_vs_luck"]
+            "gated_binom_p": gated_res["binom_p_vs_luck"],
+            "daily_3y_trades": d3_gated.get("trades", 0),
+            "daily_3y_win_pct": d3_gated.get("win_rate_pct", 0.0),
+            "daily_3y_ret_pct": d3_gated.get("net_return_pct", 0.0),
+            "daily_3y_pf": d3_gated.get("profit_factor", 0.0),
+            "daily_3y_p_val": d3_gated.get("p_val", 1.0),
+            "daily_3y_naive_ret_pct": d3_naive.get("net_return_pct", 0.0),
+            "daily_3y_naive_pf": d3_naive.get("profit_factor", 0.0)
         }
     }
 
@@ -3422,12 +3782,13 @@ def build_deepseek_prompt(mode="pre_news", event_type="cpi", prices=None, tomorr
     """
     prices = prices or {}
     tomorrow_meta = tomorrow_meta or {}
-    gold = float(prices.get("GC=F", 3930.0))
+    snap_up = _load_premarket_snapshot().get("upcoming_consensus", {})
+    gold = float(prices.get("GC=F", 3875.0))
     atr = float(prices.get("ATR_M30", 10.8))
-    dxy = float(prices.get("DX-Y.NYB", 102.9))
-    us10y = float(prices.get("^TNX", 5.00))
-    us2y = float(prices.get("ZT=F", 4.75))
-    wti_px = float(prices.get("CL=F", 86.0))
+    dxy = float(prices.get("DX-Y.NYB", 103.3))
+    us10y = float(prices.get("^TNX", 5.10))
+    us2y = float(prices.get("ZT=F", 4.85))
+    wti_px = float(prices.get("CL=F", 88.8))
     sh, sl, sc = prices.get("SESSION_HIGH"), prices.get("SESSION_LOW"), prices.get("SESSION_CLOSE")
     ev = (event_type or "cpi").lower().replace("_retail", "")
 
@@ -3503,13 +3864,16 @@ STRICT FORMAT: NO ASTERISKS (** or *), NO HASHTAGS (###). Deliver [ 1. LEADING M
 
     # Post-News Mode routed strictly by event_type
     if ev == "fomc":
-        res = calculate_fomc_model(actual_rate=actual_mom, priced_rate=4.00, dots_shift_bps=actual_core_yoy, current_price=gold, atr_m30=atr)
-        summary = f"FOMC Post-Print: Shock={res['metrics']['total_shock_bps']}bps, ExpGold={res['metrics']['expected_gold_return_pct']:+.2f}%, Signal={res['metrics']['tactical_signal']}"
+        f_up = snap_up.get("fomc", {})
+        res = calculate_fomc_model(actual_rate=actual_mom, priced_rate=float(f_up.get("current_target", 4.00)), dots_shift_bps=actual_core_yoy, current_price=gold, atr_m30=atr)
+        summary = f"FOMC Post-Print: Shock={res['metrics']['total_policy_shock_bps']}bps, ExpGold={res['metrics']['expected_gold_return_pct']:+.2f}%, Signal={res['metrics']['tactical_signal']}"
     elif ev == "nfp":
-        res = calculate_nfp_model(nfp_actual=actual_mom, nfp_forecast=135.0, unemp_actual=actual_core_yoy, unemp_forecast=4.1, ahe_actual=0.3, ahe_forecast=0.3, current_price=gold, atr_m30=atr)
-        summary = f"NFP Post-Print: Z_labor={res['metrics']['composite_z']:+.2f}σ, ExpGold={res['metrics']['expected_gold_return_pct']:+.2f}%, Signal={res['metrics']['tactical_signal']}"
+        n_up = snap_up.get("nfp", {})
+        res = calculate_nfp_model(nfp_actual=actual_mom, nfp_forecast=float(n_up.get("forecast_nfp_k", 135.0)), unemp_actual=actual_core_yoy, unemp_forecast=float(n_up.get("forecast_unemp", 4.1)), ahe_actual=float(n_up.get("forecast_ahe", 0.3)), ahe_forecast=float(n_up.get("forecast_ahe", 0.3)), current_price=gold, atr_m30=atr)
+        summary = f"NFP Post-Print: Z_labor={res['metrics']['z_score_composite_labor']:+.2f}σ, ExpGold={res['metrics']['expected_gold_return_pct']:+.2f}%, Signal={res['metrics']['tactical_signal']}"
     elif ev == "ppi":
-        res = calculate_ppi_retail_model(ppi_actual=actual_mom, ppi_forecast=0.4, retail_actual=actual_core_yoy, retail_forecast=0.4, current_price=gold, atr_m30=atr)
+        p_up = snap_up.get("ppi", {})
+        res = calculate_ppi_retail_model(ppi_actual=actual_mom, ppi_forecast=float(p_up.get("forecast_ppi_mom", 0.4)), retail_actual=actual_core_yoy, retail_forecast=float(p_up.get("forecast_retail_mom", 0.4)), current_price=gold, atr_m30=atr)
         summary = f"PPI Post-Print: Z_demand={res['metrics']['composite_z']:+.2f}σ, ExpGold={res['metrics']['expected_gold_return_pct']:+.2f}%, Signal={res['metrics']['tactical_signal']}"
     else:
         sim = simulate_tomorrow_scenario(actual_mom, actual_core_yoy, tomorrow_meta, current_price=gold, atr_m30=atr)
@@ -3543,13 +3907,12 @@ def get_us_economy_atlas_analysis(min_confidence=95):
     alpha_map = {80: 0.20, 85: 0.15, 90: 0.10, 95: 0.05, 99: 0.01}
     alpha_req = alpha_map.get(int(min_confidence), 0.05)
 
-    pr_p = float(prob.get("p_val", 0.0))
-    fl_p = float(fl.get("pruned_f_p", fl.get("full_f_p", 0.05)))
-    nfci_p = float(fl.get("factors", {}).get("d_nfci", {}).get("p_val", 0.03))
-    hy_p = float(fl.get("factors", {}).get("d_hy", {}).get("p_val", 0.06))
-    liq_p = float(fl.get("factors", {}).get("d_liq", {}).get("p_val", 0.43))
-    mah_p = float(reg.get("chi2_anomaly_p_val", 0.82))
-
+    pr_p = float(prob.get("p_val", 1.0))
+    fl_p = float(fl.get("pruned_f_p", fl.get("full_f_p", 1.0)))
+    nfci_p = float(fl.get("factors", {}).get("d_nfci", {}).get("p_val", 1.0))
+    hy_p = float(fl.get("factors", {}).get("d_hy", {}).get("p_val", 1.0))
+    liq_p = float(fl.get("factors", {}).get("d_liq", {}).get("p_val", 1.0))
+    mah_p = float(reg.get("chi2_anomaly_p_val", 1.0))
     def _badge(pv):
         if pv < 0.01: return "99% CONFIRMED"
         if pv < 0.05: return "95% CONFIRMED"

@@ -182,6 +182,20 @@ function renderWorkstation(ev) {
 // ==============================================================
 // 2. SLIDERS & COCKPIT RIBBON CONTROLS (ALL 4 NEWS MODULES)
 // ==============================================================
+function getEventConsensus() {
+  const up = PREMARKET_CACHE?.snapshot?.upcoming_consensus || {};
+  return {
+    cpiHl: Number(up.cpi?.forecast_mom ?? 0.3),
+    cpiCore: Number(PREMARKET_CACHE?.models?.cpi?.forecast_core_yoy ?? 2.9),
+    fomcTarget: Number(up.fomc?.current_target ?? 4.0),
+    nfpK: Number(up.nfp?.forecast_nfp_k ?? 135),
+    nfpUnemp: Number(up.nfp?.forecast_unemp ?? 4.1),
+    nfpAhe: Number(up.nfp?.forecast_ahe ?? 0.3),
+    ppiMom: Number(up.ppi?.forecast_ppi_mom ?? 0.4),
+    retailMom: Number(up.ppi?.forecast_retail_mom ?? 0.4)
+  };
+}
+
 function initCpiSliders() {
   const rHeadline = document.getElementById("bbg-range-headline");
   const rCore = document.getElementById("bbg-range-core");
@@ -191,13 +205,14 @@ function initCpiSliders() {
   const vRegime = document.getElementById("bbg-val-regime");
 
   function onSliderChange() {
+    const c = getEventConsensus();
     const hl = parseFloat(rHeadline.value);
     const core = parseFloat(rCore.value);
     vHeadline.innerText = `${hl.toFixed(2)}%`;
     vCore.innerText = `${core.toFixed(2)}%`;
 
-    const zHl = (hl - 0.3) / 0.075;
-    const zCore = (core - 2.9) / 0.075;
+    const zHl = (hl - c.cpiHl) / 0.075;
+    const zCore = (core - c.cpiCore) / 0.075;
     const zComp = 0.60 * zCore + 0.40 * zHl;
     EVENT_STATE.cpi.z = zComp;
     EVENT_STATE.cpi.mode = "WHATIF";
@@ -270,6 +285,7 @@ function initNfpSliders() {
   const sSum = document.getElementById("nfp-shock-summary");
 
   async function onNfpInput() {
+    const c = getEventConsensus();
     const act = parseFloat(rAct.value);
     const un = parseFloat(rUnemp.value);
     const ah = parseFloat(rAhe.value);
@@ -278,9 +294,9 @@ function initNfpSliders() {
     vUnemp.innerText = `${un.toFixed(1)}%`;
     vAhe.innerText = `${ah.toFixed(2)}%`;
 
-    const zNfp = (act - 135) / 45.0;
-    const zUn = (un - 4.1) / 0.15;
-    const zAh = (ah - 0.3) / 0.10;
+    const zNfp = (act - c.nfpK) / 45.0;
+    const zUn = (un - c.nfpUnemp) / 0.15;
+    const zAh = (ah - c.nfpAhe) / 0.10;
     const zLabor = 0.50 * zNfp - 0.30 * zUn + 0.20 * zAh;
     EVENT_STATE.nfp.z = zLabor;
     EVENT_STATE.nfp.mode = "WHATIF";
@@ -289,7 +305,7 @@ function initNfpSliders() {
     renderEventMcPane("nfp");
     renderEventFreqPane("nfp");
     try {
-      const res = await fetch(`/api/nfp-model?nfp_actual=${act}&nfp_forecast=135&unemp_actual=${un}&unemp_forecast=4.1&ahe_actual=${ah}&ahe_forecast=0.3`);
+      const res = await fetch(`/api/nfp-model?nfp_actual=${act}&nfp_forecast=${c.nfpK}&unemp_actual=${un}&unemp_forecast=${c.nfpUnemp}&ahe_actual=${ah}&ahe_forecast=${c.nfpAhe}`);
       const d = await res.json();
       if (d && d.metrics && d.dynamic_execution) {
         updateExecTicket("nfp", d.metrics.tactical_signal, d.dynamic_execution);
@@ -310,14 +326,15 @@ function initPpiSliders() {
   const sSum = document.getElementById("ppi-shock-summary");
 
   async function onPpiInput() {
+    const c = getEventConsensus();
     const act = parseFloat(rAct.value);
     const ret = parseFloat(rRetail.value);
 
     vAct.innerText = `${act.toFixed(2)}%`;
     vRetail.innerText = `${ret.toFixed(2)}%`;
 
-    const zPpi = (act - 0.4) / 0.20;
-    const zRet = (ret - 0.4) / 0.35;
+    const zPpi = (act - c.ppiMom) / 0.20;
+    const zRet = (ret - c.retailMom) / 0.35;
     const zDemand = 0.55 * zPpi + 0.45 * zRet;
     EVENT_STATE.ppi.z = zDemand;
     EVENT_STATE.ppi.mode = "WHATIF";
@@ -326,7 +343,7 @@ function initPpiSliders() {
     renderEventMcPane("ppi");
     renderEventFreqPane("ppi");
     try {
-      const res = await fetch(`/api/ppi-retail-model?ppi_actual=${act}&ppi_forecast=0.4&retail_actual=${ret}&retail_forecast=0.4`);
+      const res = await fetch(`/api/ppi-retail-model?ppi_actual=${act}&ppi_forecast=${c.ppiMom}&retail_actual=${ret}&retail_forecast=${c.retailMom}`);
       const d = await res.json();
       if (d && d.metrics && d.dynamic_execution) {
         updateExecTicket("ppi", d.metrics.tactical_signal, d.dynamic_execution);
@@ -337,7 +354,6 @@ function initPpiSliders() {
   rAct?.addEventListener("input", onPpiInput);
   rRetail?.addEventListener("input", onPpiInput);
 }
-
 function initAllControls() {
   // Wire Horizon, Firewall & Reset buttons across ALL 4 news modules
   const prefixes = { cpi: "bbg", fomc: "fomc", nfp: "nfp", ppi: "ppi" };
@@ -595,39 +611,40 @@ async function resetEventModule(ev, pre) {
   b1d?.classList.add("active");
   b5d?.classList.remove("active");
 
+  const c = getEventConsensus();
   if (ev === "cpi") {
     EVENT_STATE.cpi.pdfView = "cpi";
     const rH = document.getElementById("bbg-range-headline"), rC = document.getElementById("bbg-range-core");
-    if (rH) rH.value = 0.3;
-    if (rC) rC.value = 2.9;
-    if (document.getElementById("bbg-val-headline")) document.getElementById("bbg-val-headline").innerText = "0.30%";
-    if (document.getElementById("bbg-val-core")) document.getElementById("bbg-val-core").innerText = "2.90%";
+    if (rH) rH.value = c.cpiHl;
+    if (rC) rC.value = c.cpiCore;
+    if (document.getElementById("bbg-val-headline")) document.getElementById("bbg-val-headline").innerText = `${c.cpiHl.toFixed(2)}%`;
+    if (document.getElementById("bbg-val-core")) document.getElementById("bbg-val-core").innerText = `${c.cpiCore.toFixed(2)}%`;
     document.querySelectorAll("[data-z]").forEach(b => b.classList.remove("active"));
     setBtnActive(document.querySelector("[data-asset='gold']"), "[data-asset]");
     setBtnActive(document.querySelector("[data-diag='tcurve']"), "[data-diag]");
   } else if (ev === "fomc") {
-    if (document.getElementById("fomc-range-rate")) document.getElementById("fomc-range-rate").value = 4.0;
-    if (document.getElementById("fomc-range-priced")) document.getElementById("fomc-range-priced").value = 4.0;
+    if (document.getElementById("fomc-range-rate")) document.getElementById("fomc-range-rate").value = c.fomcTarget;
+    if (document.getElementById("fomc-range-priced")) document.getElementById("fomc-range-priced").value = c.fomcTarget;
     if (document.getElementById("fomc-range-dots")) document.getElementById("fomc-range-dots").value = 0.0;
-    if (document.getElementById("fomc-val-rate")) document.getElementById("fomc-val-rate").innerText = "4.00%";
-    if (document.getElementById("fomc-val-priced")) document.getElementById("fomc-val-priced").innerText = "4.00%";
+    if (document.getElementById("fomc-val-rate")) document.getElementById("fomc-val-rate").innerText = `${c.fomcTarget.toFixed(2)}%`;
+    if (document.getElementById("fomc-val-priced")) document.getElementById("fomc-val-priced").innerText = `${c.fomcTarget.toFixed(2)}%`;
     if (document.getElementById("fomc-val-dots")) document.getElementById("fomc-val-dots").innerText = "0.0 bps";
     setBtnActive(document.querySelector('[data-ev="fomc"][data-ev-asset="gold"]'), '[data-ev="fomc"][data-ev-asset]');
     setBtnActive(document.querySelector('[data-ev="fomc"][data-ev-diag="tcurve"]'), '[data-ev="fomc"][data-ev-diag]');
   } else if (ev === "nfp") {
-    if (document.getElementById("nfp-range-act")) document.getElementById("nfp-range-act").value = 135;
-    if (document.getElementById("nfp-range-unemp")) document.getElementById("nfp-range-unemp").value = 4.1;
-    if (document.getElementById("nfp-range-ahe")) document.getElementById("nfp-range-ahe").value = 0.3;
-    if (document.getElementById("nfp-val-act")) document.getElementById("nfp-val-act").innerText = "135k";
-    if (document.getElementById("nfp-val-unemp")) document.getElementById("nfp-val-unemp").innerText = "4.1%";
-    if (document.getElementById("nfp-val-ahe")) document.getElementById("nfp-val-ahe").innerText = "0.30%";
+    if (document.getElementById("nfp-range-act")) document.getElementById("nfp-range-act").value = c.nfpK;
+    if (document.getElementById("nfp-range-unemp")) document.getElementById("nfp-range-unemp").value = c.nfpUnemp;
+    if (document.getElementById("nfp-range-ahe")) document.getElementById("nfp-range-ahe").value = c.nfpAhe;
+    if (document.getElementById("nfp-val-act")) document.getElementById("nfp-val-act").innerText = `${c.nfpK}k`;
+    if (document.getElementById("nfp-val-unemp")) document.getElementById("nfp-val-unemp").innerText = `${c.nfpUnemp.toFixed(1)}%`;
+    if (document.getElementById("nfp-val-ahe")) document.getElementById("nfp-val-ahe").innerText = `${c.nfpAhe.toFixed(2)}%`;
     setBtnActive(document.querySelector('[data-ev="nfp"][data-ev-asset="gold"]'), '[data-ev="nfp"][data-ev-asset]');
     setBtnActive(document.querySelector('[data-ev="nfp"][data-ev-diag="tcurve"]'), '[data-ev="nfp"][data-ev-diag]');
   } else if (ev === "ppi") {
-    if (document.getElementById("ppi-range-act")) document.getElementById("ppi-range-act").value = 0.4;
-    if (document.getElementById("ppi-range-retail")) document.getElementById("ppi-range-retail").value = 0.4;
-    if (document.getElementById("ppi-val-act")) document.getElementById("ppi-val-act").innerText = "0.40%";
-    if (document.getElementById("ppi-val-retail")) document.getElementById("ppi-val-retail").innerText = "0.40%";
+    if (document.getElementById("ppi-range-act")) document.getElementById("ppi-range-act").value = c.ppiMom;
+    if (document.getElementById("ppi-range-retail")) document.getElementById("ppi-range-retail").value = c.retailMom;
+    if (document.getElementById("ppi-val-act")) document.getElementById("ppi-val-act").innerText = `${c.ppiMom.toFixed(2)}%`;
+    if (document.getElementById("ppi-val-retail")) document.getElementById("ppi-val-retail").innerText = `${c.retailMom.toFixed(2)}%`;
     setBtnActive(document.querySelector('[data-ev="ppi"][data-ev-asset="gold"]'), '[data-ev="ppi"][data-ev-asset]');
     setBtnActive(document.querySelector('[data-ev="ppi"][data-ev-diag="tcurve"]'), '[data-ev="ppi"][data-ev-diag]');
   }
@@ -682,7 +699,25 @@ function updateExecTicket(ev, directive, plan, avwapBands = null, preModel = nul
   const probId = ev === "cpi" ? "val-ticket-probs" : `val-${ev}-ticket-probs`;
   const dirId  = ev === "cpi" ? "val-ticket-dir" : `val-${ev}-ticket-dir`;
 
-  if (document.getElementById(actId) && directive) document.getElementById(actId).innerText = directive;
+  const actEl = document.getElementById(actId);
+  if (actEl && directive) {
+    let sizerBtn = actEl.querySelector(".btn-ticket-sizer");
+    if (!sizerBtn) {
+      sizerBtn = document.createElement("button");
+      sizerBtn.className = "bbg-btn-mini btn-ticket-sizer";
+      sizerBtn.setAttribute("data-ev", ev);
+      sizerBtn.style.cssText = "border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;";
+      sizerBtn.innerText = "⚡ SIZER <GO>";
+      sizerBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        document.querySelector('[data-mod="mod-astar"]')?.click();
+        window.__syncFromActiveTicket?.(ev);
+        document.getElementById("section-lot-sizer")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+    actEl.textContent = directive + " ";
+    actEl.appendChild(sizerBtn);
+  }
   if (plan) {
     if (document.getElementById(entId)) document.getElementById(entId).innerText = plan.entry_zone || "--";
     if (document.getElementById(slId))  document.getElementById(slId).innerText = `${plan.stop_loss || "--"} (STRUCTURAL BUFFER)`;
@@ -984,7 +1019,7 @@ async function renderEventMcPane(ev) {
     document.getElementById(stochId).innerText = `[${ea.decision} @ ${confLvl}%] ${ea.best_side}: P(Prof)=${ea.p_profit_pct}% / P(Loss)=${ea.p_loss_pct}% | EV=${evSign}${ea.expected_payoff_bps}bps | Vol dσ/dt=${vrSign}${sv.vol_roc_pct || 0}%`;
     document.getElementById(stochId).style.color = ea.decision === "BUY" ? "#00e5ff" : (ea.decision === "SELL" ? "#ff4444" : "var(--amber-cmd)");
   }
-  if (ea.recommended_ticket && ["cpi", "fomc", "nfp", "ppi"].includes(ev)) {
+  if (ea.recommended_ticket && ["cpi", "fomc", "nfp", "ppi"].includes(ev) && EVENT_STATE[ev]?.mode === "PREMARKET") {
     updateExecTicket(ev, `PRE-RELEASE DIRECTIVE: ${ea.decision_headline}`, ea.recommended_ticket, null, null);
   }
 
@@ -1015,7 +1050,7 @@ async function renderEventMcPane(ev) {
   const baseY = getY(mc.current_price);
   const tStart = mc.timesteps[0] || "T0";
   const tMid = mc.timesteps[Math.floor(steps / 2)] || "";
-  const tEnd = mc.timesteps[steps] || (st.horizon === 1 ? "T+24h" : "D5.0");
+  const tEnd = mc.timesteps[steps] || (st.horizon === 1 ? "T+24h" : `D${st.horizon}.0`);
 
   container.innerHTML = `
     <svg id="svg-${ev}-mc" viewBox="0 0 ${w} ${h}" class="bbg-svg" style="cursor:crosshair;">
@@ -1911,7 +1946,10 @@ async function fetchQuant8AuditTable() {
         extra.push(`<strong style="color:#ff4444;">JOBLESS CLAIMS (n=${jc.n})</strong>: Gold t=${jc.gold_t} (p=${jc.gold_p}), Hit=${jc.hit_pct}% -> <strong style="color:#ff4444;">REJECTED STANDALONE</strong>`);
       }
       if (pt && pt.gated_trades) {
-        extra.push(`<strong style="color:#00e5ff;">WALK-FORWARD PAPER TRADE (95%)</strong>: Naive=${pt.naive_win_pct}% (${pt.naive_ret_pct >= 0 ? "+" : ""}${pt.naive_ret_pct}%, PF ${pt.naive_pf}) vs Gated=<strong style="color:#ffffff;">${pt.gated_win_pct}% (${pt.gated_ret_pct >= 0 ? "+" : ""}${pt.gated_ret_pct}%, PF ${pt.gated_pf}, p=${pt.gated_binom_p})</strong>`);
+        extra.push(`<strong style="color:#00e5ff;">CAUSAL NEWS WALK-FWD (${pt.gated_trades}t)</strong>: Naive=${pt.naive_win_pct}% (${pt.naive_ret_pct >= 0 ? "+" : ""}${pt.naive_ret_pct}%, PF ${pt.naive_pf}) vs Gated=<strong style="color:#ffffff;">${pt.gated_win_pct}% (${pt.gated_ret_pct >= 0 ? "+" : ""}${pt.gated_ret_pct}%, PF ${pt.gated_pf}, p=${pt.gated_binom_p})</strong>`);
+      }
+      if (pt && pt.daily_3y_trades) {
+        extra.push(`<strong style="color:var(--amber-cmd);">DAILY A* 3Y CAUSAL (${pt.daily_3y_trades}t)</strong>: Naive=${pt.daily_3y_naive_ret_pct >= 0 ? "+" : ""}${pt.daily_3y_naive_ret_pct}% (PF ${pt.daily_3y_naive_pf}) vs Prob-Gated=<strong style="color:#ffffff;">${pt.daily_3y_win_pct}% (${pt.daily_3y_ret_pct >= 0 ? "+" : ""}${pt.daily_3y_ret_pct}%, PF ${pt.daily_3y_pf}, p=${pt.daily_3y_p_val})</strong>`);
       }
       if (extra.length) {
         strip.innerHTML += `<div style="margin-top:5px; border-top:1px dashed #222; padding-top:4px;">${extra.join(" &nbsp;|&nbsp; ")}</div>`;
@@ -1921,10 +1959,29 @@ async function fetchQuant8AuditTable() {
 }
 
 
+function checkScheduledReleaseFirewall() {
+  const up = PREMARKET_CACHE?.snapshot?.upcoming_consensus || {};
+  const now = new Date();
+  const todayUtc = now.toISOString().slice(0, 10);
+  const secInDay = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
+  const releaseSecs = { cpi: 13 * 3600 + 30 * 60, nfp: 13 * 3600 + 30 * 60, ppi: 13 * 3600 + 30 * 60, fomc: 19 * 3600 };
+  ["cpi", "fomc", "nfp", "ppi"].forEach(ev => {
+    const dt = up[ev]?.date;
+    const targetSec = releaseSecs[ev];
+    if (dt === todayUtc && secInDay >= targetSec && secInDay < targetSec + 60 && !EVENT_STATE[ev].fwTimer) {
+      triggerFirewallCountdown(ev, (targetSec + 60) - secInDay);
+    }
+  });
+}
+
 function initAutoRefreshLoop() {
+  let loopCount = 0;
   setInterval(async () => {
     try {
-      const isAstar = getActiveModuleId() === "mod-astar";
+      loopCount++;
+      checkScheduledReleaseFirewall();
+      const mod = getActiveModuleId();
+      const isAstar = mod === "mod-astar";
       const res = await fetch(`/api/live-ticks?include_astar=${isAstar}`);
       const data = await res.json();
       if (data && data.prices) {
@@ -1937,10 +1994,16 @@ function initAutoRefreshLoop() {
       }
       if (isAstar && data && data.daily_a_star) {
         fetchAstarData();
+      } else if (loopCount % 3 === 0 && ["mod-cpi", "mod-fomc", "mod-nfp", "mod-ppi"].includes(mod)) {
+        const ev = mod.replace("mod-", "");
+        if (EVENT_STATE[ev]?.mode === "PREMARKET") {
+          await fetchState();
+          renderEventPdfPane(ev);
+          renderEventMcPane(ev);
+        }
       }
     } catch (e) {}
   }, 6000);
-
   document.getElementById("btn-reset-astar-session")?.addEventListener("click", async () => {
     const b = document.getElementById("btn-reset-astar-session");
     b.innerText = "WAIT REFRESHING...";
@@ -2893,10 +2956,14 @@ function initLotCalculator() {
       if (actTxt.includes("SHORT") || actTxt.includes("SELL")) dir = "SELL";
       const mEnt = entTxt.match(/(\d+\.?\d*)/);
       const mSl = slTxt.match(/(\d+\.?\d*)/);
+      const mTpPair = tpTxt.match(/\$?(\d+\.?\d*)\s*\/\s*\$?(\d+\.?\d*)/);
       const mTp = tpTxt.match(/(\d+\.?\d*)/);
       if (mEnt) entryVal = parseFloat(mEnt[1]);
       if (mSl) slVal = parseFloat(mSl[1]);
-      if (mTp) {
+      if (mTpPair) {
+        tp1Val = parseFloat(mTpPair[1]);
+        tp2Val = parseFloat(mTpPair[2]);
+      } else if (mTp) {
         tp1Val = parseFloat(mTp[1]);
         tp2Val = tp1Val + (tp1Val >= entryVal ? 1 : -1) * Math.abs(tp1Val - entryVal) * 0.6;
       }
@@ -2919,9 +2986,9 @@ function initLotCalculator() {
     syncPipsFromPrices();
     recalculate();
   }
+  window.__syncFromActiveTicket = syncFromActiveTicket;
 
   document.getElementById("btn-sync-active-ticket")?.addEventListener("click", () => syncFromActiveTicket());
-
   document.querySelectorAll(".btn-ticket-sizer").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();

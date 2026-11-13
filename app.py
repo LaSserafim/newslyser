@@ -219,9 +219,18 @@ def fetch_live_macro_data():
     if "CL=F" not in prices:
         prices["CL=F"] = 86.28
 
-    # 2. Release detector (BLS API / ForexFactory)
-    headline_actual = 0.4
-    core_actual = 0.3
+    # 2. Release detector: read latest verified release status from tomorrow_preview.json (no hardcoded dummy actuals)
+    headline_actual = None
+    core_actual = None
+    try:
+        with open(os.path.join(DATA_DIR, "tomorrow_preview.json")) as f:
+            tm_cur = json.load(f)
+        today_s = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        if tm_cur.get("date", "9999-99-99") <= today_s:
+            headline_actual = tm_cur.get("last_actual_mom")
+            core_actual = tm_cur.get("last_actual_core_mom")
+    except Exception:
+        pass
 
     res = {
         "timestamp": now_utc,
@@ -236,18 +245,22 @@ def fetch_live_macro_data():
 
 @app.post("/api/sync-live")
 def sync_live():
+    sync_res = data_pipeline.sync_live_releases_if_stale(force=False)
+    if sync_res.get("rebuilt"):
+        _clear_quant_caches()
     _, tomorrow, _ = load_data()
+    _CACHE_MACRO["data"] = None
     live_data = fetch_live_macro_data()
-    
+
     hl_act = live_data["headline_actual"]
     core_act = live_data["core_actual"]
-    current_gold = live_data["prices"].get("GC=F", 4069.40)
-    
+    current_gold = live_data["prices"].get("GC=F", 3875.0)
+
     if hl_act is not None:
         est_core_yoy = tomorrow["forecast_core_yoy"] + (core_act - tomorrow["forecast_core_mom"]) if core_act else tomorrow["forecast_core_yoy"]
         est_core_yoy = round(est_core_yoy, 2)
         sim = quant_model.simulate_tomorrow_scenario(hl_act, est_core_yoy, tomorrow, current_price=current_gold)
-        
+
         return {
             "status": "RELEASED",
             "source": live_data.get("source", "BLS OFFICIAL FEED"),
@@ -257,20 +270,21 @@ def sync_live():
             "actual_mom": hl_act,
             "actual_core_yoy": est_core_yoy,
             "actual_core_mom": core_act,
-            "simulation": sim
+            "simulation": sim,
+            "sync_releases": sync_res
         }
-        
+
     return {
         "status": "AWAITING_RELEASE",
-        "message": "Live market baseline synced. Official October 2026 CPI release not yet published.",
+        "message": f"Live market baseline synced. Awaiting {tomorrow.get('ref_month', '')} CPI release ({tomorrow.get('date', '')}).",
         "timestamp": live_data["timestamp"],
         "prices": live_data["prices"],
         "forecast_mom": tomorrow["forecast_mom"],
         "forecast_core_yoy": tomorrow["forecast_core_yoy"],
         "target_date": tomorrow["date"],
-        "target_time": tomorrow["time"]
+        "target_time": tomorrow["time"],
+        "sync_releases": sync_res
     }
-
 @app.get("/")
 def get_index():
     res = FileResponse(os.path.join(STATIC_DIR, "index.html"))
@@ -530,6 +544,10 @@ def _clear_quant_caches():
     quant_model._GARCH_90D_CACHE.clear()
     quant_model._INTRADAY_CACHE["closes"] = None
     quant_model._INTRADAY_CACHE["ts"] = 0.0
+    quant_model._DAILY_PROB_CACHE["data"] = None
+    quant_model._DAILY_PROB_CACHE["ts"] = 0.0
+    quant_model._PAPER_3Y_CACHE["data"] = None
+    quant_model._PAPER_3Y_CACHE["ts"] = 0.0
 
 @app.post("/api/sync-releases")
 def sync_releases(force: bool = True):
@@ -570,9 +588,19 @@ def refresh_all():
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
-    fomc = quant_model.calculate_fomc_model(4.00, 4.00, 0.0, current_price=current_gold, atr_m30=atr_val)
-    nfp = quant_model.calculate_nfp_model(135.0, 135.0, 4.1, 4.1, 0.3, 0.3, current_price=current_gold, atr_m30=atr_val)
-    ppi = quant_model.calculate_ppi_retail_model(0.4, 0.4, 0.4, 0.4, current_price=current_gold, atr_m30=atr_val)
+    up_cons = quant_model._load_premarket_snapshot().get("upcoming_consensus", {})
+    f_up = up_cons.get("fomc", {})
+    n_up = up_cons.get("nfp", {})
+    p_up = up_cons.get("ppi", {})
+    f_r = float(f_up.get("current_target", 4.00))
+    fomc = quant_model.calculate_fomc_model(f_r, f_r, 0.0, current_price=current_gold, atr_m30=atr_val)
+    n_k = float(n_up.get("forecast_nfp_k", 135.0))
+    n_u = float(n_up.get("forecast_unemp", 4.1))
+    n_a = float(n_up.get("forecast_ahe", 0.3))
+    nfp = quant_model.calculate_nfp_model(n_k, n_k, n_u, n_u, n_a, n_a, current_price=current_gold, atr_m30=atr_val)
+    p_m = float(p_up.get("forecast_ppi_mom", 0.4))
+    p_rm = float(p_up.get("forecast_retail_mom", 0.4))
+    ppi = quant_model.calculate_ppi_retail_model(p_m, p_m, p_rm, p_rm, current_price=current_gold, atr_m30=atr_val)
     return {
         "status": "SUCCESS",
         "timestamp": live_data.get("timestamp"),
@@ -847,11 +875,11 @@ class LotCalcRequest(BaseModel):
     leverage: int = 100
     entry_price: float = 3925.0
     sl_price: float = None
-    sl_pips: float = 100.0
+    sl_pips: float = None
     tp1_price: float = None
-    tp1_pips: float = 250.0
+    tp1_pips: float = None
     tp2_price: float = None
-    tp2_pips: float = 500.0
+    tp2_pips: float = None
     contract_size: float = 100.0
     instrument: str = "XAUUSD"
     direction: str = "BUY"
@@ -869,7 +897,7 @@ def api_calculate_lot_size(req: LotCalcRequest):
     )
 
 @app.get("/api/calculate-lot-size")
-def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", risk_pct: float = 2.0, max_risk_usd: float = None, leverage: int = 100, entry: float = 3925.0, sl: float = None, sl_pips: float = 100.0, tp1: float = None, tp1_pips: float = 250.0, tp2: float = None, tp2_pips: float = 500.0, contract_size: float = 100.0, instrument: str = "XAUUSD", direction: str = "BUY"):
+def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", risk_pct: float = 2.0, max_risk_usd: float = None, leverage: int = 100, entry: float = 3925.0, sl: float = None, sl_pips: float = None, tp1: float = None, tp1_pips: float = None, tp2: float = None, tp2_pips: float = None, contract_size: float = 100.0, instrument: str = "XAUUSD", direction: str = "BUY"):
     return quant_model.calculate_lot_and_risk(
         equity=equity, risk_mode=risk_mode, risk_pct=risk_pct,
         max_risk_usd=max_risk_usd, leverage=leverage,
@@ -880,27 +908,11 @@ def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", r
         direction=direction
     )
 
-class SimReq(BaseModel):
-    actual_mom: float
-    actual_core_yoy: float
-    price: float = None
-
-@app.post("/api/simulate")
-def simulate(req: SimReq):
-    _, tomorrow, _ = load_data()
-    price = req.price or fetch_live_quotes().get("GC=F", 4047.30)
-    return quant_model.simulate_tomorrow_scenario(req.actual_mom, req.actual_core_yoy, tomorrow, current_price=price)
-
 @app.get("/api/cpi-historical")
-def get_historical():
+def get_cpi_historical():
     hist, _, _ = load_data()
     eval_results = quant_model.evaluate_models(hist)
     return {"count": len(hist), "events": hist, "models": eval_results}
-
-@app.get("/api/historical")
-def get_historical_alias():
-    return get_historical()
-
 @app.get("/api/hypothesis-test")
 def get_hypothesis_test(event_type: str = "cpi"):
     return quant_model.get_event_hypothesis_test(event_type=event_type)

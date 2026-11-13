@@ -191,11 +191,11 @@ class LotCalcRequest(BaseModel):
     leverage: int = 100
     entry_price: float = 3925.0
     sl_price: float = None
-    sl_pips: float = 100.0
+    sl_pips: float = None
     tp1_price: float = None
-    tp1_pips: float = 250.0
+    tp1_pips: float = None
     tp2_price: float = None
-    tp2_pips: float = 500.0
+    tp2_pips: float = None
     contract_size: float = 100.0
     instrument: str = "XAUUSD"
     direction: str = "BUY"
@@ -213,7 +213,7 @@ def api_calculate_lot_size(req: LotCalcRequest):
     )
 
 @app.get("/api/calculate-lot-size")
-def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", risk_pct: float = 2.0, max_risk_usd: float = None, leverage: int = 100, entry: float = 3925.0, sl: float = None, sl_pips: float = 100.0, tp1: float = None, tp1_pips: float = 250.0, tp2: float = None, tp2_pips: float = 500.0, contract_size: float = 100.0, instrument: str = "XAUUSD", direction: str = "BUY"):
+def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", risk_pct: float = 2.0, max_risk_usd: float = None, leverage: int = 100, entry: float = 3925.0, sl: float = None, sl_pips: float = None, tp1: float = None, tp1_pips: float = None, tp2: float = None, tp2_pips: float = None, contract_size: float = 100.0, instrument: str = "XAUUSD", direction: str = "BUY"):
     return quant_model.calculate_lot_and_risk(
         equity=equity, risk_mode=risk_mode, risk_pct=risk_pct,
         max_risk_usd=max_risk_usd, leverage=leverage,
@@ -410,6 +410,11 @@ def _clear_quant_caches():
     quant_model._MC_RESULT_CACHE.clear()
     quant_model._INTRADAY_CACHE["closes"] = None
     quant_model._INTRADAY_CACHE["ts"] = 0.0
+    quant_model._GARCH_90D_CACHE.clear()
+    quant_model._DAILY_PROB_CACHE["data"] = None
+    quant_model._DAILY_PROB_CACHE["ts"] = 0.0
+    quant_model._PAPER_3Y_CACHE["data"] = None
+    quant_model._PAPER_3Y_CACHE["ts"] = 0.0
 
 @app.post("/api/sync-releases")
 def sync_releases(force: bool = True):
