@@ -1753,13 +1753,24 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     cvar_95_pct = round(float(np.mean(terminal_rets[terminal_rets <= var_95_pct])), 2)
     median_terminal = round(float(p50[-1]), 2)
 
-    # 4. Locked vs Live Pure-Probability Setup Evaluation (1.0 ATR_D1 SL / 2.0 ATR_D1 TP1 / 3.0 ATR_D1 TP2)
-    if active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
+    # 4. Locked vs Live Pure-Probability Setup Evaluation
+    drift_ok = abs(z_20) >= 0.75
+    if abs(z_20) >= 1.0 or vrp_ann >= 1.5:
+        rr_target = 2.0
+        conviction_str = "HIGH CONVICTION (1:2.0 RR RUNNER)"
+    elif drift_ok:
+        rr_target = 1.0
+        conviction_str = "MODERATE CONVICTION (1:1.0 RR SCALP)"
+    else:
+        rr_target = 1.0
+        conviction_str = "NEUTRAL / NO STATISTICAL DRIFT EDGE"
+
+    if active_locked and active_locked.get("status") in ["TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
         e_low, e_high = active_locked.get("entry_zone", [current_price, current_price])
         entry_low, entry_high = e_low, e_high
         sl_val = active_locked.get("trailed_sl") if active_locked.get("trailed_sl") is not None else active_locked.get("stop_loss", current_price - atr_d1)
-        tp1_val = active_locked.get("take_profit_1", current_price + 2.0 * atr_d1)
-        tp2_val = active_locked.get("take_profit_2", current_price + 3.0 * atr_d1)
+        tp1_val = active_locked.get("take_profit_1", current_price + rr_target * atr_d1)
+        tp2_val = active_locked.get("take_profit_2", current_price + (rr_target + 1.0) * atr_d1)
         raw_action = active_locked.get("action", "")
         ticket_type = active_locked.get("ticket_type", "")
         is_bullish = active_locked.get("direction", "BUY") == "BUY"
@@ -1767,62 +1778,88 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         risk = max(1.0, abs(mid_entry - sl_val))
         reward = abs(tp1_val - mid_entry)
         rr = round(reward / risk, 2)
-        is_a_star = True
         bias = "BULLISH_LOCKED_CONTRACT" if is_bullish else "BEARISH_LOCKED_CONTRACT"
     else:
-        is_bullish = z_20 >= 0.0
         band = round(0.10 * atr_m30, 2)
         entry_low = round(current_price - band, 2)
         entry_high = round(current_price + band, 2)
         mid_entry = current_price
 
-        # Adaptive RR selection based on momentum & institutional conviction:
-        # High conviction (|z_20| >= 1.0 or VRP >= 1.5%): 1:2.0 RR runner
-        # Moderate conviction (0.50 <= |z_20| < 1.0): 1:1.0 RR scalp
-        if abs(z_20) >= 1.0 or vrp_ann >= 1.5:
-            rr_target = 2.0
-            conviction_str = "HIGH CONVICTION (1:2.0 RR RUNNER)"
-        else:
-            rr_target = 1.0
-            conviction_str = "MODERATE CONVICTION (1:1.0 RR SCALP)"
-
-        if is_bullish:
-            raw_action = f"BAYESIAN PROBABILITY LONG (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
-            ticket_type = f"BULLISH_PROBABILITY_DRIFT_{int(rr_target)}R"
+        if not drift_ok:
+            is_bullish = None
+            raw_action = f"STAND ASIDE // NO CAUSAL DRIFT (|z20|={abs(z_20):.2f} < 0.75σ)"
+            ticket_type = "NEUTRAL_DRIFT_STAND_ASIDE"
             sl_val = round(mid_entry - 1.0 * atr_d1, 2)
-            tp1_val = round(mid_entry + rr_target * atr_d1, 2)
-            tp2_val = round(mid_entry + (rr_target + 1.0) * atr_d1, 2)
-            bias = "BULLISH_BAYESIAN_DRIFT"
+            tp1_val = round(mid_entry + 1.0 * atr_d1, 2)
+            tp2_val = round(mid_entry + 2.0 * atr_d1, 2)
+            bias = "NEUTRAL_EQUILIBRIUM_CHOP"
         else:
-            raw_action = f"BAYESIAN PROBABILITY SHORT (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
-            ticket_type = f"BEARISH_PROBABILITY_DRIFT_{int(rr_target)}R"
-            sl_val = round(mid_entry + 1.0 * atr_d1, 2)
-            tp1_val = round(mid_entry - rr_target * atr_d1, 2)
-            tp2_val = round(mid_entry - (rr_target + 1.0) * atr_d1, 2)
-            bias = "BEARISH_BAYESIAN_DRIFT"
+            is_bullish = (z_20 > 0.0)
+            if is_bullish:
+                raw_action = f"BAYESIAN PROBABILITY LONG (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+                ticket_type = f"BULLISH_PROBABILITY_DRIFT_{int(rr_target)}R"
+                sl_val = round(mid_entry - 1.0 * atr_d1, 2)
+                tp1_val = round(mid_entry + rr_target * atr_d1, 2)
+                tp2_val = round(mid_entry + (rr_target + 1.0) * atr_d1, 2)
+                bias = "BULLISH_BAYESIAN_DRIFT"
+            else:
+                raw_action = f"BAYESIAN PROBABILITY SHORT (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+                ticket_type = f"BEARISH_PROBABILITY_DRIFT_{int(rr_target)}R"
+                sl_val = round(mid_entry + 1.0 * atr_d1, 2)
+                tp1_val = round(mid_entry - rr_target * atr_d1, 2)
+                tp2_val = round(mid_entry - (rr_target + 1.0) * atr_d1, 2)
+                bias = "BEARISH_BAYESIAN_DRIFT"
+
         risk = max(1.0, abs(mid_entry - sl_val))
         reward = abs(tp1_val - mid_entry)
         rr = round(reward / risk, 2)
+    sl_d = max(1.0, abs(mid_entry - sl_val))
+    tp_d = abs(tp1_val - mid_entry)
 
     sub = paths[:, 1:]
-    tp_m = (sub >= tp1_val) if is_bullish else (sub <= tp1_val)
-    sl_m = (sub <= sl_val) if is_bullish else (sub >= sl_val)
+    if is_bullish is True:
+        tp_m = sub >= tp1_val
+        sl_m = sub <= sl_val
+    elif is_bullish is False:
+        tp_m = sub <= tp1_val
+        sl_m = sub >= sl_val
+    else:
+        tp_m = np.zeros((n_paths, steps), dtype=bool)
+        sl_m = np.zeros((n_paths, steps), dtype=bool)
+
     tp_any = np.any(tp_m, axis=1)
     sl_any = np.any(sl_m, axis=1)
     tau_tp = np.where(tp_any, np.argmax(tp_m, axis=1) + 1, steps + 99)
     tau_sl = np.where(sl_any, np.argmax(sl_m, axis=1) + 1, steps + 99)
     win_m = tp_any & (tau_tp < tau_sl)
     loss_m = sl_any & (tau_sl < tau_tp)
-    tp_hits = int(np.sum(win_m))
-    sl_hits = int(np.sum(loss_m))
-    decided_total = tp_hits + sl_hits
-    p_win = round((tp_hits / max(1, decided_total)) * 100.0, 1)
-    p_win_uncond = round(float(np.mean(win_m) * 100.0), 1)
-    p_loss_uncond = round(float(np.mean(loss_m) * 100.0), 1)
-    p_breakeven = round(100.0 / (1.0 + max(0.1, rr)), 1)
-    ev_r = round((p_win_uncond / 100.0) * rr - (p_loss_uncond / 100.0) * 1.0, 3)
-    kelly_full = max(0.0, ((p_win / 100.0) * rr - (1.0 - p_win / 100.0)) / max(0.1, rr))
-    quarter_kelly_pct = round(min(2.0, kelly_full * 25.0), 2)
+    undecided_m = ~win_m & ~loss_m
+
+    terminal_p = paths[:, -1]
+    if is_bullish is True:
+        path_m2m_r = (terminal_p - mid_entry) / sl_d
+    elif is_bullish is False:
+        path_m2m_r = (mid_entry - terminal_p) / sl_d
+    else:
+        path_m2m_r = np.zeros(n_paths)
+
+    realized_r_all = np.where(win_m, rr, np.where(loss_m, -1.0, path_m2m_r))
+    ev_r = round(float(np.mean(realized_r_all)), 3)
+    win_rate = round(float(np.mean(realized_r_all > 0) * 100.0), 1)
+    early_tp_pct = round(float(np.mean(win_m) * 100.0), 1)
+    early_sl_pct = round(float(np.mean(loss_m) * 100.0), 1)
+    undecided_pct = round(float(np.mean(undecided_m) * 100.0), 1)
+
+    pos_r = realized_r_all[realized_r_all > 0]
+    neg_r = abs(realized_r_all[realized_r_all < 0])
+    pf = round(float(np.sum(pos_r) / max(1e-6, np.sum(neg_r))), 2)
+
+    b_ratio = float(np.mean(pos_r) / max(1e-6, np.mean(neg_r))) if len(pos_r) and len(neg_r) else max(0.1, rr)
+    p = win_rate / 100.0
+    q = 1.0 - p
+    kelly = max(0.0, (p * b_ratio - q) / max(0.1, b_ratio))
+    quarter_kelly_pct = round(min(2.0, kelly * 25.0), 2)
+    p_breakeven = round(100.0 / (1.0 + max(0.1, b_ratio)), 1)
 
     survival_curve = []
     for s in range(2, steps + 1, 2):
@@ -1839,14 +1876,15 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "entry_price": mid_entry,
         "sl_price": sl_val,
         "tp_price": tp1_val,
-        "win_probability_pct": p_win,
+        "win_probability_pct": win_rate,
         "breakeven_win_pct": p_breakeven,
         "expected_value_r": ev_r,
         "quarter_kelly_pct": quarter_kelly_pct,
-        "overall_win_rate_pct": p_win_uncond,
-        "overall_loss_rate_pct": p_loss_uncond,
-        "undecided_pct": round(max(0.0, 100.0 - p_win_uncond - p_loss_uncond), 1),
-        "threshold_met": (ev_r > 0.0) and (p_win >= p_breakeven),
+        "early_tp_rate_pct": early_tp_pct,
+        "early_sl_rate_pct": early_sl_pct,
+        "undecided_pct": undecided_pct,
+        "profit_factor": pf,
+        "threshold_met": (ev_r > 0.05) and (win_rate >= 50.0),
         "survival_curve": survival_curve
     }
 
@@ -1858,35 +1896,32 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     drift_ok = abs(z_20) >= 0.75
     vrp_ok = vrp_ann > 0.0
     har_calm_ok = rv5_ann <= 1.15 * max(1.0, rv22_ann)
-    ev_ok = (ev_r > 0.0) and (p_win >= p_breakeven)
+    ev_ok = (ev_r > 0.05) and (win_rate >= 50.0)
     vpin_now = float(m5_flow.get("vpin_now", 0.44))
     vpin_ok = not bool(m5_flow.get("vpin_toxic_gate", False))
 
     macro_score = 25 if drift_ok else (18 if abs(z_20) >= 0.45 else 10)
-    mc_prob_score = 25 if (ev_r >= 0.04 and p_win >= p_breakeven) else (22 if ev_ok else 12)
+    mc_prob_score = 25 if (ev_r >= 0.15 and win_rate >= 55.0) else (20 if ev_ok else 10)
     vol_score = 25 if (vrp_ok and har_calm_ok) else (17 if vrp_ok else 10)
     cross_score = 25 if (vpin_ok and daily_ols["f_p_val"] < 0.05) else 15
     total_confluence = macro_score + mc_prob_score + vol_score + cross_score
 
-    if active_locked and active_locked.get("status") in ["TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
-        is_a_star = True
-    else:
-        is_a_star = drift_ok and vrp_ok and har_calm_ok and ev_ok and (rr >= 1.0) and vpin_ok
-
+    is_a_star = bool(drift_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0))
     grade = f"A* GRADE ({conviction_str})" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70 else "C-GRADE (NO EDGE / STAND ASIDE)")
+
     risk_dist_dollars = max(1.0, abs(mid_entry - sl_val))
-    target_risk_usd = round(20.0 * vol_target_scalar, 2)  # 2.0% risk on $1,000 base equity
+    target_risk_usd = round(20.0 * vol_target_scalar * (quarter_kelly_pct / 2.0), 2)
     computed_lot = round(max(0.01, min(0.05, target_risk_usd / (risk_dist_dollars * 100.0))), 2)
     standard_leverage = 2000
     req_margin = round((computed_lot * 100.0 * current_price) / standard_leverage, 2)
 
     gate_checks = {
-        "bayesian_drift_z20": {"status": "PASS" if drift_ok else "UNMET", "detail": f"20D Drift z={z_20:+.2f}σ (|z| >= 0.50 required; P_bull={p_drift_bull}%, P_bear={p_drift_bear}%)"},
+        "bayesian_drift_z20": {"status": "PASS" if drift_ok else "UNMET", "detail": f"20D Drift z={z_20:+.2f}σ (|z| >= 0.75 required; P_bull={p_drift_bull}%, P_bear={p_drift_bear}%)"},
         "vrp_implied_edge": {"status": "PASS" if vrp_ok else "UNMET", "detail": f"VRP = GVZ ({gvz_now:.1f}%) - RV22 ({rv22_ann:.1f}%) = {vrp_ann:+.2f}% (> 0 required)"},
         "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
-        "first_passage_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {p_win}% vs BE {p_breakeven}% | EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}%"},
-        "vpin_microstructure_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"M5 VPIN={vpin_now:.3f} ({'< 0.70 SAFE' if vpin_ok else '>= 0.70 TOXIC FLOW'})"},
-        "adaptive_risk_reward": {"status": "VALID" if rr >= 1.0 else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}, 1.0/{rr_target:.1f} ATR_D1=${atr_d1:.2f}) | Lev 1:{standard_leverage} (Margin ${req_margin})"}
+        "mark_to_market_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {win_rate}% | M2M EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}% | PF={pf}"},
+        "vpin_order_flow_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"M5 VPIN={vpin_now:.3f} ({'< 0.70 SAFE' if vpin_ok else '>= 0.70 TOXIC FLOW'}) | Kyle λ={kyles_lambda:.4f}"},
+        "calculative_risk_reward": {"status": "VALID" if rr >= 1.0 else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} | Margin ${req_margin} (1:{standard_leverage})"}
     }
 
     if ttl["is_expired"]:
@@ -1909,7 +1944,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         if not drift_ok: unmet.append(f"|z20|={abs(z_20):.2f} < 0.75")
         if not vrp_ok: unmet.append(f"VRP={vrp_ann:+.1f}% <= 0")
         if not har_calm_ok: unmet.append("RV5 > 1.15*RV22 PANIC")
-        if not ev_ok: unmet.append(f"EV={ev_r:+.3f}R <= 0")
+        if not ev_ok: unmet.append(f"EV={ev_r:+.3f}R <= 0.05")
         if not vpin_ok: unmet.append("VPIN TOXIC")
         reason_gate = ", ".join(unmet) if unmet else f"CONFLUENCE {total_confluence}/100"
         action = f"A* GRADE NOT EXIST YET // STAND ASIDE ({reason_gate})"
@@ -1922,7 +1957,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         rr_str = f"1:{rr:.2f}"
         safe_lot = 0.00
         max_risk_usd = "$0.00 (STAND ASIDE // CAPITAL PRESERVATION)"
-        bias_reason = f"{grade} ({reason_gate}). Causal 20D drift z={z_20:+.2f}σ, VRP={vrp_ann:+.2f}%, MC P(Win)={p_win}% (BE {p_breakeven}%), EV={ev_r:+.3f}R."
+        bias_reason = f"{grade} ({reason_gate}). Causal 20D drift z={z_20:+.2f}σ, VRP={vrp_ann:+.2f}%, MC P(Win)={win_rate}% (BE {p_breakeven}%), EV={ev_r:+.3f}R."
         entry_reason = f"Pure-probability candidate around spot ${current_price:.2f}; execution blocked until all 3Y-validated gates pass."
         sl_reason = "No capital at risk."
         tp_reason = "Targets suspended until A* gate passes."
@@ -1942,7 +1977,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
         setup_id_str = active_locked.get("setup_id", "A*") if active_locked else "A*"
         status_str = active_locked.get("status", "ACTIVE") if active_locked else "ACTIVE"
-        ticket_title = f"LOCKED {setup_id_str} [{status_str}] // {total_confluence}/100 (EV={ev_r:+.3f}R, P(Win)={p_win}%)"
+        ticket_title = f"LOCKED {setup_id_str} [{status_str}] // {total_confluence}/100 (EV={ev_r:+.3f}R, P(Win)={win_rate}%)"
         action = raw_action
         sl_val_str = f"${sl_val:.2f}"
         tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
@@ -1951,11 +1986,10 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         entry_zone = f"${entry_low:.2f} - ${entry_high:.2f}"
         safe_lot = active_locked.get("recommended_lot", computed_lot) if active_locked else computed_lot
         max_risk_usd = f"${round(safe_lot * 100.0 * risk_dist_dollars, 2):.2f} (HAR-RV Cap ${target_risk_usd:.2f})"
-        bias_reason = f"{bias}: 20D z={z_20:+.2f}σ (mu_post={mu_daily_post:+.3f}%/d), VRP={vrp_ann:+.1f}%, P(Win)={p_win}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
+        bias_reason = f"{bias}: 20D z={z_20:+.2f}σ (mu_post={mu_daily_post:+.3f}%/d), VRP={vrp_ann:+.1f}%, P(Win)={win_rate}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
         entry_reason = f"Pure-probability execution around spot ${current_price:.2f} (no visual chart patterns)."
         sl_reason = f"Stop loss ${sl_val:.2f} anchored to 1.0 ATR_D1 (${atr_d1:.2f})."
-        tp_reason = f"TP1 ${tp1_val:.2f} (2.0 ATR_D1) & TP2 ${tp2_val:.2f} (3.0 ATR_D1)."
-
+        tp_reason = f"TP1 ${tp1_val:.2f} ({rr:.1f} ATR_D1) & TP2 ${tp2_val:.2f} ({rr+1.0:.1f} ATR_D1)."
     rationale = {
         "bias_reason": bias_reason,
         "entry_reason": entry_reason,
@@ -2011,7 +2045,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "n_paths": n_paths,
             "p_upward_pct": p_up,
             "p_downward_pct": p_down,
-            "win_probability_first_passage_pct": p_win,
+            "win_probability_first_passage_pct": win_rate,
             "var_95_pct": var_95_pct,
             "cvar_95_pct": cvar_95_pct,
             "median_terminal_price": median_terminal,
@@ -2026,7 +2060,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "setup_rationale": rationale,
         "pillars": {
             "macro_trend_alignment": {"score": macro_score, "max": 25, "status": f"20D Bayesian Drift z={z_20:+.2f}σ (mu={mu_daily_post:+.3f}%/d)"},
-            "liquidity_sweep_status": {"score": mc_prob_score, "max": 25, "status": f"MC P(Win)={p_win}% (BE {p_breakeven}%) | EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}%"},
+            "liquidity_sweep_status": {"score": mc_prob_score, "max": 25, "status": f"M2M EV={ev_r:+.3f}R | Win={win_rate}% (BE {p_breakeven}%) | Kelly/4={quarter_kelly_pct}%"},
             "volatility_band_status": {"score": vol_score, "max": 25, "status": f"VRP={vrp_ann:+.1f}% (GVZ {gvz_now:.1f}% - RV22 {rv22_ann:.1f}%) | RV5={rv5_ann:.1f}%"},
             "cross_asset_confirmation": {"score": cross_score, "max": 25, "status": f"VPIN={vpin_now:.3f} | 3Y Walk-Forward: {bt3['win_rate_pct']}% Win, PF {bt3['profit_factor']} (p={bt3['p_val']})"}
         },
@@ -2088,7 +2122,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "mathematical_audit_log": [
             f"Step 1 (Bayesian Drift): z20={z_20:+.2f}σ -> mu_post={mu_daily_post:+.3f}%/d (P_bull={p_drift_bull}%, P_bear={p_drift_bear}%).",
             f"Step 2 (VRP & HAR-RV): GVZ {gvz_now:.1f}% - RV22 {rv22_ann:.1f}% = VRP {vrp_ann:+.1f}% | RV5 {rv5_ann:.1f}% vs 1.15*RV22.",
-            f"Step 3 (First-Passage SDE): {n_paths:,} paths -> P(Win)={p_win}% (BE {p_breakeven}%), EV={ev_r:+.3f}R, Kelly/4={quarter_kelly_pct}%.",
+            f"Step 3 (Mark-to-Market SDE): {n_paths:,} paths -> M2M EV={ev_r:+.3f}R, Win={win_rate}% (BE {p_breakeven}%), Kelly/4={quarter_kelly_pct}%.",
             f"Step 4 (3Y Causal Audit): {bt3['trades']} trades, Win={bt3['win_rate_pct']}%, PF={bt3['profit_factor']}, t={bt3['t_stat']} (p={bt3['p_val']})."
         ]
     }
