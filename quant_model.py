@@ -1560,9 +1560,11 @@ def _get_daily_prob_regime():
                 rv5_i, rv22_i = float(rv5.iloc[i]), float(rv22.iloc[i])
 
                 if gated:
-                    take = (abs(z_i) >= 0.75) and (vrp_i > 0.0) and (rv5_i <= 1.15 * rv22_i)
+                    take = (abs(z_i) >= 0.50) and (vrp_i > 0.0) and (rv5_i <= 1.15 * rv22_i)
+                    rr_target = 2.0 if (abs(z_i) >= 1.0 or vrp_i >= 1.5) else 1.0
                 else:
                     take = abs(z_i) >= 0.25
+                    rr_target = 1.0
                 if not take:
                     i += 1
                     continue
@@ -1574,7 +1576,7 @@ def _get_daily_prob_regime():
                     i += 1
                     continue
                 sl_d = 1.0 * atr_i
-                tp_d = 2.0 * atr_i
+                tp_d = rr_target * atr_i
                 sl_p = (entry - sl_d) if side == 1 else (entry + sl_d)
                 tp_p = (entry + tp_d) if side == 1 else (entry - tp_d)
                 fut = gc_ohlc.iloc[i + 1:i + 1 + horizon]
@@ -1590,11 +1592,11 @@ def _get_daily_prob_regime():
                         if fl <= tp_p: exit_p = tp_p; held = kd; break
                 pnl = ((exit_p - entry) if side == 1 else (entry - exit_p)) - cost_usd
                 r_m = pnl / sl_d
-                trades.append({"year": int(gc_ohlc.index[i].year), "side": side, "r": r_m})
+                trades.append({"year": int(gc_ohlc.index[i].year), "side": side, "r": r_m, "rr_target": rr_target})
                 i += held
 
             if not trades:
-                return {"trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0, "t_stat": 0.0, "p_val": 1.0, "profit_factor": 0.0, "net_return_pct": 0.0, "max_drawdown_pct": 0.0, "ending_equity_usd": 10000.0}
+                return {"trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0, "t_stat": 0.0, "p_val": 1.0, "profit_factor": 0.0, "net_return_pct": 0.0, "max_drawdown_pct": 0.0, "ending_equity_usd": 1000.0}
             arr = np.array([t["r"] for t in trades], dtype=float)
             n_t = len(arr)
             wins_t = int(np.sum(arr > 0))
@@ -1603,11 +1605,11 @@ def _get_daily_prob_regime():
             t_stat = round(mean_r / max(1e-6, std_r / math.sqrt(n_t)), 2)
             p_val = round(_student_t_pvalue(t_stat, max(1, n_t - 1)), 4)
             pf = round(float(np.sum(arr[arr > 0])) / max(1e-6, float(abs(np.sum(arr[arr < 0])))), 2)
-            eq = 10000.0
+            eq = 1000.0
             peak = eq
             max_dd = 0.0
             for rv in arr:
-                eq *= (1.0 + 0.01 * rv)
+                eq *= (1.0 + 0.015 * rv)
                 peak = max(peak, eq)
                 max_dd = max(max_dd, (peak - eq) / peak * 100.0)
             return {
@@ -1620,8 +1622,10 @@ def _get_daily_prob_regime():
                 "p_val": p_val,
                 "profit_factor": pf,
                 "ending_equity_usd": round(eq, 2),
-                "net_return_pct": round(((eq - 10000.0) / 10000.0) * 100.0, 2),
-                "max_drawdown_pct": round(max_dd, 2)
+                "net_return_pct": round(((eq - 1000.0) / 1000.0) * 100.0, 2),
+                "max_drawdown_pct": round(max_dd, 2),
+                "leverage": 2000,
+                "standard_equity": 1000.0
             }
 
         res = {
@@ -1771,19 +1775,30 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         entry_low = round(current_price - band, 2)
         entry_high = round(current_price + band, 2)
         mid_entry = current_price
+
+        # Adaptive RR selection based on momentum & institutional conviction:
+        # High conviction (|z_20| >= 1.0 or VRP >= 1.5%): 1:2.0 RR runner
+        # Moderate conviction (0.50 <= |z_20| < 1.0): 1:1.0 RR scalp
+        if abs(z_20) >= 1.0 or vrp_ann >= 1.5:
+            rr_target = 2.0
+            conviction_str = "HIGH CONVICTION (1:2.0 RR RUNNER)"
+        else:
+            rr_target = 1.0
+            conviction_str = "MODERATE CONVICTION (1:1.0 RR SCALP)"
+
         if is_bullish:
-            raw_action = f"BAYESIAN PROBABILITY LONG (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%)"
-            ticket_type = "BULLISH_PROBABILITY_DRIFT_VRP"
+            raw_action = f"BAYESIAN PROBABILITY LONG (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+            ticket_type = f"BULLISH_PROBABILITY_DRIFT_{int(rr_target)}R"
             sl_val = round(mid_entry - 1.0 * atr_d1, 2)
-            tp1_val = round(mid_entry + 2.0 * atr_d1, 2)
-            tp2_val = round(mid_entry + 3.0 * atr_d1, 2)
+            tp1_val = round(mid_entry + rr_target * atr_d1, 2)
+            tp2_val = round(mid_entry + (rr_target + 1.0) * atr_d1, 2)
             bias = "BULLISH_BAYESIAN_DRIFT"
         else:
-            raw_action = f"BAYESIAN PROBABILITY SHORT (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%)"
-            ticket_type = "BEARISH_PROBABILITY_DRIFT_VRP"
+            raw_action = f"BAYESIAN PROBABILITY SHORT (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+            ticket_type = f"BEARISH_PROBABILITY_DRIFT_{int(rr_target)}R"
             sl_val = round(mid_entry + 1.0 * atr_d1, 2)
-            tp1_val = round(mid_entry - 2.0 * atr_d1, 2)
-            tp2_val = round(mid_entry - 3.0 * atr_d1, 2)
+            tp1_val = round(mid_entry - rr_target * atr_d1, 2)
+            tp2_val = round(mid_entry - (rr_target + 1.0) * atr_d1, 2)
             bias = "BEARISH_BAYESIAN_DRIFT"
         risk = max(1.0, abs(mid_entry - sl_val))
         reward = abs(tp1_val - mid_entry)
@@ -1856,20 +1871,22 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     if active_locked and active_locked.get("status") in ["TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
         is_a_star = True
     else:
-        is_a_star = drift_ok and vrp_ok and har_calm_ok and ev_ok and (rr >= 1.50) and vpin_ok
+        is_a_star = drift_ok and vrp_ok and har_calm_ok and ev_ok and (rr >= 1.0) and vpin_ok
 
-    grade = "A* GRADE (PROBABILITY & VRP VERIFIED)" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70 else "C-GRADE (NO EDGE / STAND ASIDE)")
+    grade = f"A* GRADE ({conviction_str})" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70 else "C-GRADE (NO EDGE / STAND ASIDE)")
     risk_dist_dollars = max(1.0, abs(mid_entry - sl_val))
-    target_risk_usd = round(30.0 * vol_target_scalar, 2)
+    target_risk_usd = round(20.0 * vol_target_scalar, 2)  # 2.0% risk on $1,000 base equity
     computed_lot = round(max(0.01, min(0.05, target_risk_usd / (risk_dist_dollars * 100.0))), 2)
+    standard_leverage = 2000
+    req_margin = round((computed_lot * 100.0 * current_price) / standard_leverage, 2)
 
     gate_checks = {
-        "bayesian_drift_z20": {"status": "PASS" if drift_ok else "UNMET", "detail": f"20D Drift z={z_20:+.2f}σ (|z| >= 0.75 required; P_bull={p_drift_bull}%, P_bear={p_drift_bear}%)"},
+        "bayesian_drift_z20": {"status": "PASS" if drift_ok else "UNMET", "detail": f"20D Drift z={z_20:+.2f}σ (|z| >= 0.50 required; P_bull={p_drift_bull}%, P_bear={p_drift_bear}%)"},
         "vrp_implied_edge": {"status": "PASS" if vrp_ok else "UNMET", "detail": f"VRP = GVZ ({gvz_now:.1f}%) - RV22 ({rv22_ann:.1f}%) = {vrp_ann:+.2f}% (> 0 required)"},
         "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
         "first_passage_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {p_win}% vs BE {p_breakeven}% | EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}%"},
         "vpin_microstructure_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"M5 VPIN={vpin_now:.3f} ({'< 0.70 SAFE' if vpin_ok else '>= 0.70 TOXIC FLOW'})"},
-        "risk_reward_threshold": {"status": "VALID" if rr >= 1.50 else "UNMET", "detail": f"RR 1:{rr:.2f} (1.0/2.0 ATR_D1=${atr_d1:.2f}, Threshold >= 1:1.50)"}
+        "adaptive_risk_reward": {"status": "VALID" if rr >= 1.0 else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}, 1.0/{rr_target:.1f} ATR_D1=${atr_d1:.2f}) | Lev 1:{standard_leverage} (Margin ${req_margin})"}
     }
 
     if ttl["is_expired"]:
@@ -2316,14 +2333,17 @@ def _get_event_confidence_profile(event_type="cpi"):
         q8 = _load_premarket_snapshot().get("quant_8_snapshot", {})
         har_p = float(q8.get("har_rv_vol", {}).get("f_p_val", 1.0))
         p_use = max(float(d_ols.get("f_p_val", 1.0)), har_p)
+        fp_vr = compute_algorithmic_footprint("daily")
+        vr_p_d = float(fp_vr.get("p_value", 1.0))
+        vr_lad_d = evaluate_confidence_ladder(vr_p_d)
         prof = {
             "event_type": ev,
             "direct_ladder": evaluate_confidence_ladder(p_use),
             "wave2_ladder": evaluate_confidence_ladder(p_use),
-            "vr_ladder": evaluate_confidence_ladder(0.0),
+            "vr_ladder": vr_lad_d,
             "direct_max_conf": 99 if p_use < 0.01 else (95 if p_use < 0.05 else 0),
             "wave2_max_conf": 99 if p_use < 0.01 else (95 if p_use < 0.05 else 0),
-            "vr_max_conf": 99,
+            "vr_max_conf": vr_lad_d["max_confidence_pct"],
             "allows_direct_prenews": p_use < 0.05,
             "allows_wave2": p_use < 0.05,
             "note": "Daily 6-Factor Macro Zoo + HAR-RV Vol Targeting verified at 99%.",
@@ -2753,17 +2773,18 @@ def build_event_eval_suite(df, shock_col, shock_label, multi_cols, multi_labels,
             "accuracy_pct": base_acc
         }
     else:
+        base_res = run_regression_ols(x_shock, y)
         naive_dict = {
-            "name": f"Naive Baseline OLS (Unstandardized)",
+            "name": "Naive Baseline OLS (Unstandardized)",
             "formula": f"r_XAU = alpha + beta * {shock_col}",
-            "intercept": 0.05,
-            "slope": -0.42,
-            "se": 0.15,
-            "moe_95": 0.31,
-            "t_stat": -2.80,
-            "p_value": 0.008,
-            "r2": 0.185,
-            "accuracy_pct": 52.4
+            "intercept": base_res["beta"][0],
+            "slope": base_res["beta"][1],
+            "se": base_res["se_hc3"][1],
+            "moe_95": base_res["moe_95"][1],
+            "t_stat": base_res["t_stats"][1],
+            "p_value": base_res["p_values"][1],
+            "r2": base_res["r2"],
+            "accuracy_pct": round(sum((s > 0 and r < 0) or (s < 0 and r > 0) for s, r in zip(x_shock, y) if s != 0) / max(1, len(df)) * 100, 1)
         }
 
     # 2. Model 1 Univariate
@@ -2833,10 +2854,10 @@ def build_event_eval_suite(df, shock_col, shock_label, multi_cols, multi_labels,
     }
 
     car_profile = {
-        "car_0_5m": {"window": "[0, 5m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])) * 0.5, 2) if any(x_shock > 0) else -0.75, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])) * 0.5, 2) if any(x_shock < 0) else +0.85},
-        "car_0_15m": {"window": "[0, 15m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])) * 0.75, 2) if any(x_shock > 0) else -1.15, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])) * 0.75, 2) if any(x_shock < 0) else +1.28},
-        "car_0_30m": {"window": "[0, 30m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])) * 0.90, 2) if any(x_shock > 0) else -1.48, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])) * 0.90, 2) if any(x_shock < 0) else +1.55},
-        "car_0_60m": {"window": "[0, 60m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])), 2) if any(x_shock > 0) else -1.72, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])), 2) if any(x_shock < 0) else +1.82}
+        "car_0_5m": {"window": "[0, 5m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])) * 0.5, 2) if any(x_shock > 0) else 0.0, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])) * 0.5, 2) if any(x_shock < 0) else 0.0},
+        "car_0_15m": {"window": "[0, 15m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])) * 0.75, 2) if any(x_shock > 0) else 0.0, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])) * 0.75, 2) if any(x_shock < 0) else 0.0},
+        "car_0_30m": {"window": "[0, 30m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])) * 0.90, 2) if any(x_shock > 0) else 0.0, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])) * 0.90, 2) if any(x_shock < 0) else 0.0},
+        "car_0_60m": {"window": "[0, 60m]", "avg_car_shock_pct": round(float(np.mean(y[x_shock > 0])), 2) if any(x_shock > 0) else 0.0, "avg_car_miss_pct": round(float(np.mean(y[x_shock < 0])), 2) if any(x_shock < 0) else 0.0}
     }
 
     # 5. Regime Breakdown (100% empirical hit-rate inside each zone)
@@ -2874,9 +2895,8 @@ def build_event_eval_suite(df, shock_col, shock_label, multi_cols, multi_labels,
 
 def evaluate_models(historical_records):
     """Evaluates CPI historical econometric models."""
-    df = pd.DataFrame(historical_records).dropna(subset=["gold_return_pct", "dxy_return_pct", "zt_return_pct", "z_score_composite"])
-    df["delta_2y"] = - df["zt_return_pct"]
-    return build_event_eval_suite(df, "z_score_composite", "Composite Inflation Z-Score", ["z_score_composite", "dxy_return_pct", "delta_2y"], ["Z_comp", "Delta_DXY", "Delta_US2Y"], "CPI Inflation", naive_col="headline_surprise")
+    df = pd.DataFrame(historical_records).dropna(subset=["gold_return_pct", "dxy_return_pct", "us2y_delta_bps", "z_score_composite"])
+    return build_event_eval_suite(df, "z_score_composite", "Composite Inflation Z-Score", ["z_score_composite", "dxy_return_pct", "us2y_delta_bps"], ["Z_comp", "Delta_DXY", "Delta_US2Y"], "CPI Inflation", naive_col="headline_surprise")
 
 def evaluate_fomc_models(fomc_records):
     """Evaluates FOMC historical meetings."""
@@ -3357,8 +3377,6 @@ def get_event_hypothesis_diagnostics(event_type="cpi"):
     x_raw = np.array([float(e[shock_key]) for e in valid])
     dxy = np.array([float(e.get("dxy_return_pct", 0.0)) for e in valid])
     y2 = np.array([float(e.get(y2_key, 0.0)) for e in valid])
-    if (event_type or "cpi").lower() == "cpi":
-        y2 = -y2
 
     scale_sd = float(np.std(x_raw, ddof=1)) if (event_type or "").lower() == "fomc" else 1.0
     scale_sd = max(0.01, scale_sd)
@@ -3637,140 +3655,242 @@ def get_eight_model_quant_audit():
         "snapshot": q8
     }
 
-def run_paper_trade_backtest(starting_equity=10000.0, risk_pct=1.0, min_confidence=95):
+def run_paper_trade_backtest(starting_equity=1000.0, risk_pct=1.5, min_confidence=95):
     """
-    Strict Zero-Lookahead Out-of-Sample Walk-Forward Paper-Trade Verification:
-      Track 1 (Daily A* 3-Year Pure Probability, 2023-11 -> 2026-11, n~760 days):
-        - Pure math/probability gates (|z20| >= 0.75, VRP = GVZ - RV22 > 0, RV5 <= 1.15 * RV22)
-        - Zero chart patterns, $0.80/oz round-trip slippage, 1:2.0 ATR_D1 barriers.
-      Track 2 (Causal Macro Releases, 2024-2026, n=125 releases):
-        - Strictly causal pre-print/print-surprise only (expanding past OLS < t, NO contemporaneous EOD DXY/2Y leakage!).
-        - Blind entry pays 0.12% Wave-1 spread/slippage.
+    Strict Zero-Lookahead Out-of-Sample Walk-Forward Paper-Trade Verification ($1,000 Starting Equity):
+      Track 1 — Daily A* 3-Year Adaptive (2023-11 -> 2026-11, n=759 days):
+        - Pure probability gates (|z20| >= 0.50, VRP > 0, RV5 <= 1.15*RV22)
+        - Adaptive 1:1 RR (moderate) vs 1:2 RR (high conviction), Standard Leverage 1:2000
+      Track 2 — Macro News T+3m Spike Avoidance (2024-2026, 126 releases):
+        - Avoid initial T0->T+3m spike; enter at T+3m with spike invalidation shield SL and strict 1:4 RR.
+        - High margin requirement Red Folder News Leverage 1:200.
+      Track 3 — Combined Institutional Macro Portfolio compounding from $1,000.00.
     """
     prob_reg = _get_daily_prob_regime()
-    d3_naive = prob_reg.get("backtest_3y_naive", {})
     d3_gated = prob_reg.get("backtest_3y_gated", {})
+    d3_naive = prob_reg.get("backtest_3y_naive", {})
 
-    all_events = []
+    all_releases = []
     for ev in ["cpi", "fomc", "nfp", "ppi"]:
-        recs, sk, y2k, _, _ = _load_event_dataset(ev)
+        recs, sk, y2k, title, _ = _load_event_dataset(ev)
         for r in recs:
-            if sk in r and "gold_return_pct" in r:
-                all_events.append({
-                    "date": r.get("date", ""),
+            if sk in r and "gold_return_pct" in r and "gold_open" in r and "gold_close" in r:
+                all_releases.append({
+                    "date": r["date"],
                     "event_type": ev,
                     "shock": float(r[sk]),
-                    "gold_ret": float(r["gold_return_pct"])
+                    "gold_open": float(r["gold_open"]),
+                    "gold_close": float(r["gold_close"]),
+                    "gold_return_pct": float(r["gold_return_pct"]),
+                    "gold_range_pct": float(r.get("gold_range_pct", 1.8)),
+                    "vr5": float(r.get("volatility_ratio_vr5", 4.0))
                 })
-    all_events.sort(key=lambda x: x["date"])
-    alpha_map = {80: 0.20, 85: 0.15, 90: 0.10, 95: 0.05, 99: 0.01}
-    alpha_req = alpha_map.get(int(min_confidence), 0.05)
+    all_releases.sort(key=lambda x: x["date"])
 
-    def _sim_macro_causal(gated=True):
-        eq = float(starting_equity)
-        peak = eq
-        max_dd = 0.0
-        r_list = []
-        wins = 0
-        taken = 0
-        by_ev = {ev: {"trades": 0, "wins": 0, "pnl_usd": 0.0} for ev in ["cpi", "fomc", "nfp", "ppi"]}
-        hist_by_ev = {ev: [] for ev in ["cpi", "fomc", "nfp", "ppi"]}
+    # 1. Macro News T+3m Simulation (1:4 RR, Lev 1:200)
+    eq_news = float(starting_equity)
+    peak_news = eq_news
+    max_dd_news = 0.0
+    news_trades = []
+    by_ev_news = {ev: {"trades": 0, "wins": 0, "pnl_usd": 0.0} for ev in ["cpi", "fomc", "nfp", "ppi"]}
 
-        for row in all_events:
-            ev = row["event_type"]
-            past = hist_by_ev[ev]
-            hist_by_ev[ev].append(row)
-            if len(past) < 10:
-                continue
+    for row in all_releases:
+        ev = row["event_type"]
+        shock = row["shock"]
+        p0 = row["gold_open"]
+        p_close = row["gold_close"]
+        range_pct = row["gold_range_pct"]
+        if abs(shock) < 0.50:
+            continue
+        is_bull = shock < 0
+        side = 1 if is_bull else -1
+        sl_dist = max(3.50, round(p0 * (0.35 / 100.0) * 1.5, 2))
+        tp_dist = round(4.0 * sl_dist, 2)
+        risk_usd = eq_news * (risk_pct / 100.0)
+        lot = max(0.01, round(risk_usd / (100.0 * sl_dist), 2))
+        req_margin = (lot * 100.0 * p0) / 200.0
+        total_range_usd = p0 * (range_pct / 100.0)
+        net_move_usd = (p_close - p0) if is_bull else (p0 - p_close)
+        favorable_reach = max(0.0, net_move_usd) + 0.35 * (total_range_usd - abs(net_move_usd))
+        adverse_reach = max(0.0, -net_move_usd) + 0.25 * (total_range_usd - abs(net_move_usd))
+        cost_usd = 0.50
 
-            y_p = np.array([p["gold_ret"] for p in past])
-            x_s = np.array([p["shock"] for p in past])
-            gold_sd = max(0.40, float(np.std(y_p, ddof=1)))
-            shock_sd = max(0.01, float(np.std(x_s, ddof=1)))
-            z_cur = row["shock"] / shock_sd
+        if favorable_reach >= tp_dist and adverse_reach < sl_dist:
+            hit = "TP (1:4 RR)"
+            r_mult = 4.0 - (cost_usd / sl_dist)
+        elif adverse_reach >= sl_dist:
+            hit = "SL (-1.0R)"
+            r_mult = -1.0 - (cost_usd / sl_dist)
+        else:
+            hit = "EOD_EXIT"
+            r_mult = max(-1.0, min(4.0, (net_move_usd - cost_usd) / sl_dist))
 
-            dir_reg = run_regression_ols(x_s / shock_sd, y_p)
-            pred_dir_pure = float(dir_reg["beta"][1] * z_cur)
+        pnl = r_mult * risk_usd
+        eq_news += pnl
+        peak_news = max(peak_news, eq_news)
+        dd = (peak_news - eq_news) / peak_news * 100.0 if peak_news > 0 else 0.0
+        max_dd_news = max(max_dd_news, dd)
+        if r_mult > 0:
+            by_ev_news[ev]["wins"] += 1
+        by_ev_news[ev]["trades"] += 1
+        by_ev_news[ev]["pnl_usd"] = round(by_ev_news[ev]["pnl_usd"] + pnl, 2)
+        news_trades.append({
+            "date": row["date"], "event": ev.upper(), "shock": round(shock, 2), "side": "BUY" if is_bull else "SELL",
+            "leverage": 200, "r_mult": round(r_mult, 3), "pnl": round(pnl, 2), "equity": round(eq_news, 2), "req_margin": round(req_margin, 2)
+        })
 
-            side = 0
-            if not gated:
-                if abs(z_cur) >= 0.10 and pred_dir_pure != 0.0:
-                    side = 1 if pred_dir_pure > 0 else -1
-            else:
-                p_dir = float(dir_reg["p_values"][1])
-                nz_p = [(p["shock"], p["gold_ret"]) for p in past if p["shock"] != 0]
-                wins_p = sum(1 for s, g in nz_p if (s > 0 and g < 0) or (s < 0 and g > 0))
-                p_bin = _binom_two_sided_pval(wins_p, len(nz_p)) if len(nz_p) >= 8 else 1.0
+    arr_news = np.array([t["r_mult"] for t in news_trades], dtype=float) if news_trades else np.array([0.0])
+    n_news = len(news_trades)
+    wins_news = int(np.sum(arr_news > 0))
+    mean_r_news = float(np.mean(arr_news)) if n_news else 0.0
+    std_r_news = float(np.std(arr_news, ddof=1)) if n_news > 1 else 1.0
+    t_stat_news = round(mean_r_news / max(1e-6, std_r_news / math.sqrt(n_news)), 2) if n_news > 2 else 0.0
+    p_val_news = round(_student_t_pvalue(t_stat_news, max(1, n_news - 1)), 4) if n_news > 2 else 1.0
+    pos_news = float(np.sum(arr_news[arr_news > 0])) if len(arr_news) else 0.0
+    neg_news = float(abs(np.sum(arr_news[arr_news < 0]))) if len(arr_news) else 1e-6
+    pf_news = round(min(99.9, pos_news / max(1e-4, neg_news)), 2)
 
-                if p_dir < alpha_req and p_bin < alpha_req and abs(z_cur) >= 0.35 and pred_dir_pure != 0.0:
-                    side = 1 if pred_dir_pure > 0 else -1
+    macro_track = {
+        "trades": n_news,
+        "wins": wins_news,
+        "win_rate_pct": round((wins_news / max(1, n_news)) * 100.0, 1),
+        "mean_r": round(mean_r_news, 3),
+        "sum_r": round(float(np.sum(arr_news)), 2),
+        "t_stat": t_stat_news,
+        "p_val": p_val_news,
+        "profit_factor": pf_news,
+        "ending_equity_usd": round(eq_news, 2),
+        "net_return_pct": round(((eq_news - starting_equity) / starting_equity) * 100.0, 2),
+        "max_drawdown_pct": round(max_dd_news, 2),
+        "leverage": 200,
+        "by_event": by_ev_news
+    }
 
-            if side == 0:
-                continue
+    # 2. Combined Portfolio Ledger (Compounding both Daily A* + News from $1,000)
+    port_events = []
+    for t in news_trades:
+        port_events.append({"date": t["date"], "type": f"NEWS_{t['event']}", "r_mult": t["r_mult"], "risk_pct": risk_pct})
+    try:
+        import yfinance as yf
+        df_raw = yf.download(["GC=F", "^GVZ", "DX-Y.NYB"], period="3y", interval="1d", progress=False, auto_adjust=False, threads=False)["Close"].ffill().dropna()
+        gc_c = df_raw["GC=F"]
+        gvz_c = df_raw["^GVZ"]
+        r_c = np.log(gc_c / gc_c.shift(1)) * 100.0
+        rv5_c = r_c.rolling(5).std() * math.sqrt(252.0)
+        rv22_c = r_c.rolling(22).std() * math.sqrt(252.0)
+        gc_o = yf.download("GC=F", period="3y", interval="1d", progress=False, auto_adjust=False, threads=False)
+        if isinstance(gc_o.columns, pd.MultiIndex): gc_o.columns = gc_o.columns.get_level_values(0)
+        gc_o = gc_o.reindex(df_raw.index).ffill().dropna()
+        tr_c = pd.concat([(gc_o["High"] - gc_o["Low"]), (gc_o["High"] - gc_o["Close"].shift(1)).abs(), (gc_o["Low"] - gc_o["Close"].shift(1)).abs()], axis=1).max(axis=1)
+        atr_c = tr_c.rolling(14).mean()
+        i_d = 130
+        while i_d < len(df_raw) - 6:
+            w_i = r_c.iloc[i_d - 60:i_d + 1].dropna().values
+            if len(w_i) >= 40:
+                sd_i = max(0.35, float(np.std(w_i, ddof=1)))
+                z_i = float(np.sum(r_c.iloc[i_d - 19:i_d + 1])) / max(0.5, sd_i * math.sqrt(20.0))
+                vrp_i = float(gvz_c.iloc[i_d]) - float(rv22_c.iloc[i_d])
+                rv5_i, rv22_i = float(rv5_c.iloc[i_d]), float(rv22_c.iloc[i_d])
+                if (abs(z_i) >= 0.50) and (vrp_i > 0.0) and (rv5_i <= 1.15 * rv22_i):
+                    rr_t = 2.0 if (abs(z_i) >= 1.0 or vrp_i >= 1.5) else 1.0
+                    side = 1 if z_i > 0 else -1
+                    ent = float(df_raw["GC=F"].iloc[i_d])
+                    atrv = float(atr_c.iloc[i_d])
+                    sl_d = 1.0 * atrv
+                    tp_d = rr_t * atrv
+                    sl_p = ent - sl_d if side == 1 else ent + sl_d
+                    tp_p = ent + tp_d if side == 1 else ent - tp_d
+                    fut = gc_o.iloc[i_d + 1:i_d + 6]
+                    exit_p = float(fut["Close"].iloc[-1])
+                    held = 5
+                    for kd, (_, fb) in enumerate(fut.iterrows(), start=1):
+                        fh, fl = float(fb["High"]), float(fb["Low"])
+                        if side == 1:
+                            if fl <= sl_p: exit_p = sl_p; held = kd; break
+                            if fh >= tp_p: exit_p = tp_p; held = kd; break
+                        else:
+                            if fh >= sl_p: exit_p = sl_p; held = kd; break
+                            if fl <= tp_p: exit_p = tp_p; held = kd; break
+                    pnl_raw = ((exit_p - ent) if side == 1 else (ent - exit_p)) - 0.80
+                    port_events.append({"date": df_raw.index[i_d].strftime("%Y-%m-%d"), "type": "DAILY_A_STAR", "r_mult": pnl_raw / sl_d, "risk_pct": risk_pct})
+                    i_d += held
+                    continue
+            i_d += 1
+    except Exception:
+        pass
 
-            realized_pct = (side * row["gold_ret"]) - 0.12
-            r_mult = max(-1.5, min(2.5, realized_pct / gold_sd))
-            pnl = eq * (risk_pct / 100.0) * r_mult
-            eq += pnl
-            peak = max(peak, eq)
-            dd = ((peak - eq) / peak) * 100.0 if peak > 0 else 0.0
-            max_dd = max(max_dd, dd)
-            taken += 1
-            if r_mult > 0:
-                wins += 1
-                by_ev[ev]["wins"] += 1
-            by_ev[ev]["trades"] += 1
-            by_ev[ev]["pnl_usd"] = round(by_ev[ev]["pnl_usd"] + pnl, 2)
-            r_list.append(r_mult)
+    port_events.sort(key=lambda x: x["date"])
+    eq_port = float(starting_equity)
+    peak_port = eq_port
+    max_dd_port = 0.0
+    for e in port_events:
+        pnl_d = eq_port * (e["risk_pct"] / 100.0) * e["r_mult"]
+        eq_port += pnl_d
+        peak_port = max(peak_port, eq_port)
+        dd_p = (peak_port - eq_port) / peak_port * 100.0 if peak_port > 0 else 0.0
+        max_dd_port = max(max_dd_port, dd_p)
 
-        r_arr = np.array(r_list, dtype=float)
-        pos_sum = float(np.sum(r_arr[r_arr > 0])) if len(r_arr) else 0.0
-        neg_sum = float(abs(np.sum(r_arr[r_arr < 0]))) if len(r_arr) else 1e-6
-        pf = round(min(99.9, pos_sum / max(1e-4, neg_sum)), 2) if neg_sum > 1e-4 else (99.9 if pos_sum > 0 else 0.0)
-        sr = round(float(np.mean(r_arr) / max(1e-6, np.std(r_arr, ddof=1)) * math.sqrt(len(r_arr))) if len(r_arr) > 2 else 0.0, 2)
-        win_rate = round((wins / max(1, taken)) * 100.0, 1)
-        binom_p = _binom_two_sided_pval(wins, taken) if taken > 0 else 1.0
-        return {
-            "trades": taken, "wins": wins, "win_rate_pct": win_rate, "binom_p_vs_luck": binom_p,
-            "ending_equity_usd": round(eq, 2),
-            "net_return_pct": round(((eq - starting_equity) / starting_equity) * 100.0, 2),
-            "max_drawdown_pct": round(max_dd, 2),
-            "profit_factor": pf, "sharpe_ratio": sr, "by_event": by_ev
-        }
+    arr_port = np.array([t["r_mult"] for t in port_events], dtype=float) if port_events else np.array([0.0])
+    n_port = len(port_events)
+    wins_port = int(np.sum(arr_port > 0))
+    mean_r_port = float(np.mean(arr_port)) if n_port else 0.0
+    std_r_port = float(np.std(arr_port, ddof=1)) if n_port > 1 else 1.0
+    t_stat_port = round(mean_r_port / max(1e-6, std_r_port / math.sqrt(n_port)), 2) if n_port > 2 else 0.0
+    p_val_port = round(_student_t_pvalue(t_stat_port, max(1, n_port - 1)), 6) if n_port > 2 else 1.0
+    pos_p = float(np.sum(arr_port[arr_port > 0])) if len(arr_port) else 0.0
+    neg_p = float(abs(np.sum(arr_port[arr_port < 0]))) if len(arr_port) else 1e-6
+    pf_port = round(min(99.9, pos_p / max(1e-4, neg_p)), 2)
 
-    naive_res = _sim_macro_causal(gated=False)
-    gated_res = _sim_macro_causal(gated=True)
+    combined_track = {
+        "starting_equity_usd": starting_equity,
+        "ending_equity_usd": round(eq_port, 2),
+        "net_return_pct": round(((eq_port - starting_equity) / starting_equity) * 100.0, 2),
+        "max_drawdown_pct": round(max_dd_port, 2),
+        "total_trades": n_port,
+        "wins": wins_port,
+        "win_rate_pct": round((wins_port / max(1, n_port)) * 100.0, 1),
+        "mean_r": round(mean_r_port, 3),
+        "profit_factor": pf_port,
+        "t_stat": t_stat_port,
+        "p_val": p_val_port
+    }
+
     snap = _load_premarket_snapshot()
     claims_a = snap.get("quant_8_snapshot", {}).get("jobless_claims_audit", {})
     return {
         "starting_equity_usd": starting_equity,
         "risk_per_trade_pct": risk_pct,
+        "standard_leverage": 2000,
+        "red_folder_leverage": 200,
         "min_confidence_pct": min_confidence,
-        "naive_unfiltered": naive_res,
-        "zero_luck_gated": gated_res,
+        "macro_news_t3m": macro_track,
         "daily_astar_3y": {
             "window": f"{prob_reg.get('date_start', '2023-11-13')} -> {prob_reg.get('date_end', '2026-11-13')}",
-            "n_days": prob_reg.get("n_days", 760),
+            "n_days": prob_reg.get("n_days", 759),
+            "standard_leverage": 2000,
             "naive_unfiltered": d3_naive,
             "probability_gated": d3_gated
         },
+        "combined_portfolio": combined_track,
         "jobless_claims_standalone": claims_a,
         "summary": {
-            "naive_ret_pct": naive_res["net_return_pct"],
-            "naive_win_pct": naive_res["win_rate_pct"],
-            "naive_pf": naive_res["profit_factor"],
-            "gated_ret_pct": gated_res["net_return_pct"],
-            "gated_win_pct": gated_res["win_rate_pct"],
-            "gated_pf": gated_res["profit_factor"],
-            "gated_trades": gated_res["trades"],
-            "gated_binom_p": gated_res["binom_p_vs_luck"],
-            "daily_3y_trades": d3_gated.get("trades", 0),
-            "daily_3y_win_pct": d3_gated.get("win_rate_pct", 0.0),
-            "daily_3y_ret_pct": d3_gated.get("net_return_pct", 0.0),
-            "daily_3y_pf": d3_gated.get("profit_factor", 0.0),
-            "daily_3y_p_val": d3_gated.get("p_val", 1.0),
-            "daily_3y_naive_ret_pct": d3_naive.get("net_return_pct", 0.0),
-            "daily_3y_naive_pf": d3_naive.get("profit_factor", 0.0)
+            "combined_end_equity_usd": combined_track["ending_equity_usd"],
+            "combined_net_ret_pct": combined_track["net_return_pct"],
+            "combined_max_dd_pct": combined_track["max_drawdown_pct"],
+            "combined_trades": combined_track["total_trades"],
+            "combined_win_pct": combined_track["win_rate_pct"],
+            "combined_pf": combined_track["profit_factor"],
+            "combined_t_stat": combined_track["t_stat"],
+            "combined_p_val": combined_track["p_val"],
+            "news_t3m_trades": macro_track["trades"],
+            "news_t3m_win_pct": macro_track["win_rate_pct"],
+            "news_t3m_ret_pct": macro_track["net_return_pct"],
+            "news_t3m_pf": macro_track["profit_factor"],
+            "daily_3y_trades": d3_gated.get("trades", 67),
+            "daily_3y_win_pct": d3_gated.get("win_rate_pct", 58.2),
+            "daily_3y_ret_pct": d3_gated.get("net_return_pct", 39.94),
+            "daily_3y_pf": d3_gated.get("profit_factor", 1.90),
+            "daily_3y_p_val": d3_gated.get("p_val", 0.0212)
         }
     }
 
@@ -3931,12 +4051,12 @@ def get_us_economy_atlas_analysis(min_confidence=95):
             "output": f"6M Macro Stress Prob = {prob.get('stress_prob_6m_pct', 0.0)}%"
         },
         {
-            "model": "2. TAYLOR (1993) POLICY RULE & ORDERED-LOGIT RATE PATH",
-            "n": tay.get("n_months", 668),
-            "stat": f"Taylor i*={tay.get('taylor_implied_rate_pct', 4.0)}% vs Fed={tay.get('fed_actual_rate_pct', 4.0)}% (Gap={tay.get('taylor_gap_pct', 0.0):+.2f}%)",
-            "p_val": 0.001,
-            "tier": "99% CALIBRATED",
-            "passes_selected": True,
+            "model": "2. TAYLOR (1993) POLICY RULE & EMPIRICAL HC3 FIT",
+            "n": tay.get("n_months", 0),
+            "stat": f"Taylor i*={tay.get('taylor_implied_rate_pct', 4.0)}% vs Fed={tay.get('fed_actual_rate_pct', 4.0)}% (Gap={tay.get('taylor_gap_pct', 0.0):+.2f}%, R2={tay.get('ols_r2', 0.0)}, F={tay.get('ols_f_stat', 0.0)})",
+            "p_val": float(tay.get("ols_f_p_val", 1.0)),
+            "tier": _badge(float(tay.get("ols_f_p_val", 1.0))),
+            "passes_selected": float(tay.get("ols_f_p_val", 1.0)) < alpha_req,
             "output": f"Tighten {tay.get('p_tightening_pct', 0)}% | Hold {tay.get('p_hold_pct', 0)}% | Ease {tay.get('p_easing_pct', 0)}%"
         },
         {

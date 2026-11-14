@@ -861,7 +861,7 @@ def get_quant_models_audit():
 def get_confidence_ladder():
     return quant_model.get_eight_model_quant_audit().get("confidence_80_99_news", {})
 @app.get("/api/paper-trade-backtest")
-def get_paper_trade_backtest(min_confidence: int = 95, starting_equity: float = 10000.0):
+def get_paper_trade_backtest(min_confidence: int = 95, starting_equity: float = 1000.0):
     return quant_model.run_paper_trade_backtest(starting_equity=starting_equity, min_confidence=min_confidence)
 @app.get("/api/us-economy-atlas")
 def get_us_economy_atlas(min_confidence: int = 95):

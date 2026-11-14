@@ -28,6 +28,28 @@ import data_pipeline
 
 DATA_DIR = os.path.join(PARENT_DIR, "data")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+SETUP_EPOCHS_FILE = os.path.join(DATA_DIR, "setup_epochs.json")
+
+def get_or_create_setup_epoch(event_type="daily", ttl_seconds=5400):
+    import time
+    now_ts = int(time.time())
+    epochs = {}
+    if os.path.exists(SETUP_EPOCHS_FILE):
+        try:
+            with open(SETUP_EPOCHS_FILE) as f:
+                epochs = json.load(f)
+        except Exception:
+            epochs = {}
+    rec = epochs.get(event_type)
+    if not rec:
+        rec = {"created_at": now_ts, "expires_at": now_ts + ttl_seconds}
+        epochs[event_type] = rec
+        try:
+            with open(SETUP_EPOCHS_FILE, "w") as f:
+                json.dump(epochs, f, indent=2)
+        except Exception as e:
+            print("Error writing setup_epochs.json:", e)
+    return rec.get("created_at", rec.get("created_at_epoch", now_ts)), rec.get("expires_at", rec.get("expires_at_epoch", now_ts + ttl_seconds))
 
 app = FastAPI(title="NEWSLYSER // Bloomberg Professional Terminal", version="6.0.0")
 
@@ -121,9 +143,10 @@ def get_state():
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
 
+    created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
     dyn = quant_model.calculate_dynamic_levels(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
-    astar = quant_model.calculate_daily_a_star_setup(current_price=gold_price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
-    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=gold_price, atr_m30=atr_val)
+    astar = quant_model.calculate_daily_a_star_setup(current_price=gold_price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc)
+    pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=gold_price, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
@@ -177,7 +200,7 @@ def get_quant_models_audit():
 def get_confidence_ladder():
     return quant_model.get_eight_model_quant_audit().get("confidence_80_99_news", {})
 @app.get("/api/paper-trade-backtest")
-def get_paper_trade_backtest(min_confidence: int = 95, starting_equity: float = 10000.0):
+def get_paper_trade_backtest(min_confidence: int = 95, starting_equity: float = 1000.0):
     return quant_model.run_paper_trade_backtest(starting_equity=starting_equity, min_confidence=min_confidence)
 @app.get("/api/us-economy-atlas")
 def get_us_economy_atlas(min_confidence: int = 95):
@@ -269,7 +292,7 @@ def get_ppi_historical():
 @app.get("/api/tomorrow")
 def get_tomorrow():
     _, tomorrow, macro = load_data()
-    return {"tomorrow_meta": tomorrow, "macro_summary": macro}
+    return {"event": tomorrow, "macro_snapshots": macro, "tomorrow_meta": tomorrow, "macro_summary": macro}
 
 @app.get("/api/premarket-snapshot")
 def get_premarket_snapshot():
@@ -305,7 +328,8 @@ def get_live_ticks(include_astar: bool = False):
         dxy = prices.get("DX-Y.NYB", 102.28)
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
-        res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
+        created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
+        res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc)
     return res
 
 @app.get("/api/pre-news-model")
@@ -392,7 +416,8 @@ def get_daily_a_star(price: float = None):
     dxy = prices.get("DX-Y.NYB", 102.28)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
-    return quant_model.calculate_daily_a_star_setup(current_price=gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
+    created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
+    return quant_model.calculate_daily_a_star_setup(current_price=gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, setup_created_epoch=created_epoch, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
 
 @app.get("/api/dynamic-levels")
 def get_dynamic_levels(price: float = None):
@@ -443,14 +468,25 @@ def refresh_all():
     dyn_levels = quant_model.calculate_dynamic_levels(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     mgr = quant_model.SetupLifecycleManager()
     mgr.evaluate_live_tick(current_gold, live_high=sh, live_low=sl)
-    a_star = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, session_h=sh, session_l=sl, session_c=sc)
+    created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
+    a_star = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc)
     pre_news = quant_model.calculate_pre_news_bayesian_model(tomorrow, current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     fomc_pre = quant_model.calculate_fomc_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     nfp_pre = quant_model.calculate_nfp_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     ppi_pre = quant_model.calculate_ppi_prenew_model(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
-    fomc = quant_model.calculate_fomc_model(4.00, 4.00, 0.0, current_price=current_gold, atr_m30=atr_val)
-    nfp = quant_model.calculate_nfp_model(135.0, 135.0, 4.1, 4.1, 0.3, 0.3, current_price=current_gold, atr_m30=atr_val)
-    ppi = quant_model.calculate_ppi_retail_model(0.4, 0.4, 0.4, 0.4, current_price=current_gold, atr_m30=atr_val)
+    up_cons = quant_model._load_premarket_snapshot().get("upcoming_consensus", {})
+    f_up = up_cons.get("fomc", {})
+    n_up = up_cons.get("nfp", {})
+    p_up = up_cons.get("ppi", {})
+    f_r = float(f_up.get("current_target", 4.00))
+    fomc = quant_model.calculate_fomc_model(f_r, f_r, 0.0, current_price=current_gold, atr_m30=atr_val)
+    n_k = float(n_up.get("forecast_nfp_k", 135.0))
+    n_u = float(n_up.get("forecast_unemp", 4.1))
+    n_a = float(n_up.get("forecast_ahe", 0.3))
+    nfp = quant_model.calculate_nfp_model(n_k, n_k, n_u, n_u, n_a, n_a, current_price=current_gold, atr_m30=atr_val)
+    p_m = float(p_up.get("forecast_ppi_mom", 0.4))
+    p_rm = float(p_up.get("forecast_retail_mom", 0.4))
+    ppi = quant_model.calculate_ppi_retail_model(p_m, p_m, p_rm, p_rm, current_price=current_gold, atr_m30=atr_val)
     return {
         "status": "SUCCESS",
         "prices": prices,

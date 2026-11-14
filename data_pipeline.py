@@ -32,7 +32,7 @@ def _today_str():
 
 def fetch_fred_series(series_id):
     print(f"[FRED] Fetching {series_id}...")
-    cmd = ["curl", "-s", "-m", "15", f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"]
+    cmd = ["curl", "-sf", "-m", "15", f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode == 0 and res.stdout.startswith("observation_date"):
         df = pd.read_csv(io.StringIO(res.stdout))
@@ -43,6 +43,56 @@ def fetch_fred_series(series_id):
     print(f"[FRED] Error fetching {series_id}")
     return None
 
+
+BLS_SERIES_TO_FRED = {
+    "WPSFD4": "PPIFIS",             # PPI Final Demand SA
+    "WPSFD49104": "PPI_CORE_SA",    # Core PPI (ex food & energy) SA
+    "CUSR0000SA0": "CPIAUCSL",      # CPI Headline SA
+    "CUSR0000SA0L1E": "CPILFESL",   # Core CPI SA
+    "CES0000000001": "PAYEMS",      # Total Nonfarm Payrolls
+    "LNS14000000": "UNRATE",        # Unemployment Rate
+    "CES0500000003": "CES0500000003", # Avg Hourly Earnings
+}
+
+
+def fetch_bls_latest_series(series_ids=None, start_year="2025"):
+    """
+    Official BLS Public API v1 client: fetches newly published monthly prints
+    immediately upon 08:30 EST release (hours/days before FRED mirrors them).
+    """
+    sids = series_ids or list(BLS_SERIES_TO_FRED.keys())
+    end_year = str(datetime.datetime.utcnow().year)
+    payload = json.dumps({"seriesid": sids, "startyear": str(start_year), "endyear": end_year}).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.bls.gov/publicAPI/v1/timeseries/data/",
+        data=payload,
+        headers={"Content-Type": "application/json", "User-Agent": "NEWSLYSER/6.0"}
+    )
+    out = {}
+    try:
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        if raw.get("status") != "REQUEST_SUCCEEDED":
+            return out
+        for s_obj in raw.get("Results", {}).get("series", []):
+            bls_id = s_obj.get("seriesID")
+            rows = []
+            for item in s_obj.get("data", []):
+                p = str(item.get("period", ""))
+                if not p.startswith("M") or p == "M13":
+                    continue
+                dt_str = f"{item['year']}-{p[1:].zfill(2)}-01"
+                try:
+                    val = float(item["value"])
+                    rows.append((pd.Timestamp(dt_str), val))
+                except (ValueError, TypeError):
+                    continue
+            if rows:
+                rows.sort(key=lambda x: x[0])
+                out[bls_id] = pd.Series([v for _, v in rows], index=[d for d, _ in rows])
+    except Exception as e:
+        print(f"[BLS] API v1 warn: {e}")
+    return out
 
 # =========================================================================
 # 1. OFFICIAL VERIFIED BLS & FOMC RELEASE CALENDARS (2024 - LATE 2026)
@@ -96,10 +146,10 @@ CPI_EVENTS = [
 FOMC_MEETING_DATES = [
     "2024-01-31", "2024-03-20", "2024-05-01", "2024-06-12", "2024-07-31", "2024-09-18", "2024-11-07", "2024-12-18",
     "2025-01-29", "2025-03-19", "2025-05-07", "2025-06-18", "2025-07-30", "2025-09-17", "2025-10-29", "2025-12-10",
-    "2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29", "2026-09-16", "2026-10-28",
+    "2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-09",
 ]
 
-# 34 Official BLS Employment Situation (NFP) Release Dates (2024-01-05 -> 2026-11-06)
+# 35 Official BLS Employment Situation (NFP) Release Dates (2024-01-05 -> 2026-12-04)
 # Format: (release_date, fred_ref_month_date, verified_nfp_fcst_k_or_None)
 NFP_SCHEDULE = [
     ("2024-01-05", "2023-12-01", None), ("2024-02-02", "2024-01-01", None), ("2024-03-08", "2024-02-01", None),
@@ -113,10 +163,10 @@ NFP_SCHEDULE = [
     ("2026-01-09", "2025-12-01", None), ("2026-02-11", "2026-01-01", None), ("2026-03-06", "2026-02-01", None),
     ("2026-04-03", "2026-03-01", None), ("2026-05-08", "2026-04-01", None), ("2026-06-05", "2026-05-01", None),
     ("2026-07-02", "2026-06-01", None), ("2026-08-07", "2026-07-01", None), ("2026-09-04", "2026-08-01", None),
-    ("2026-10-02", "2026-09-01", None), ("2026-11-06", "2026-10-01", 65.0),
+    ("2026-10-02", "2026-09-01", None), ("2026-11-06", "2026-10-01", 65.0), ("2026-12-04", "2026-11-01", 135.0),
 ]
 
-# 33 Official BLS Producer Price Index (PPI) Release Dates (2024-01-12 -> 2026-10-15; Oct 2026 releases 2026-11-13)
+# 35 Official BLS Producer Price Index (PPI) Release Dates (2024-01-12 -> 2026-12-15)
 PPI_SCHEDULE = [
     ("2024-01-12", "2023-12-01"), ("2024-02-16", "2024-01-01"), ("2024-03-14", "2024-02-01"),
     ("2024-04-11", "2024-03-01"), ("2024-05-14", "2024-04-01"), ("2024-06-13", "2024-05-01"),
@@ -129,7 +179,8 @@ PPI_SCHEDULE = [
     ("2026-01-14", "2025-11-01"), ("2026-01-30", "2025-12-01"), ("2026-02-27", "2026-01-01"),
     ("2026-03-18", "2026-02-01"), ("2026-04-14", "2026-03-01"), ("2026-05-13", "2026-04-01"),
     ("2026-06-11", "2026-05-01"), ("2026-07-15", "2026-06-01"), ("2026-08-13", "2026-07-01"),
-    ("2026-09-10", "2026-08-01"), ("2026-10-15", "2026-09-01"),
+    ("2026-09-10", "2026-08-01"), ("2026-10-15", "2026-09-01"), ("2026-11-13", "2026-10-01"),
+    ("2026-12-15", "2026-11-01"),
 ]
 
 # Upcoming Macro Calendar Template (filtered & auto-updated dynamically)
@@ -148,11 +199,14 @@ UPCOMING_CALENDAR = [
 
 
 def _extract_mkt_day(mkt, dt_str, dgs2_series=None):
-    """Extracts authentic OHLCV reaction on dt_str (falling forward cleanly on market holidays like Good Friday)."""
+    """Extracts authentic OHLCV reaction on dt_str (falling forward on holidays, clamping future dates to latest bar)."""
     ts = pd.Timestamp(dt_str)
     gc_open_s = mkt["Open"]["GC=F"].dropna()
-    pos = int(gc_open_s.index.get_indexer([ts], method="bfill")[0])
-    pos = max(0, min(len(gc_open_s) - 1, pos))
+    if ts > gc_open_s.index[-1]:
+        pos = len(gc_open_s) - 1
+    else:
+        raw_pos = int(gc_open_s.index.get_indexer([ts], method="bfill")[0])
+        pos = (len(gc_open_s) - 1) if raw_pos < 0 else max(0, min(len(gc_open_s) - 1, raw_pos))
     t_idx = gc_open_s.index[pos]
     prev_idx = gc_open_s.index[max(0, pos - 1)]
 
@@ -174,16 +228,25 @@ def _extract_mkt_day(mkt, dt_str, dgs2_series=None):
         base_rng = 1.15
     vr5 = round(max(1.2, min(9.5, (g_range / base_rng) * 3.1)), 2)
 
-    d_open = float(mkt["Close"]["DX-Y.NYB"].loc[prev_idx]) if is_holiday_shift else float(mkt["Open"]["DX-Y.NYB"].loc[t_idx])
-    d_close = float(mkt["Close"]["DX-Y.NYB"].loc[t_idx])
-    d_ret = (d_close - d_open) / d_open * 100.0
+    def _safe_oc(sym, default_px):
+        o_s = mkt["Open"][sym].loc[:t_idx].dropna()
+        c_s = mkt["Close"][sym].loc[:t_idx].dropna()
+        if c_s.empty:
+            return default_px, default_px, 0.0
+        c_val = float(c_s.iloc[-1])
+        if is_holiday_shift and len(c_s) >= 2:
+            o_val = float(c_s.iloc[-2])
+        elif not o_s.empty:
+            o_val = float(o_s.iloc[-1])
+        else:
+            o_val = c_val
+        ret = (c_val - o_val) / max(1e-6, o_val) * 100.0
+        return o_val, c_val, ret
 
-    zt_open = float(mkt["Close"]["ZT=F"].loc[prev_idx]) if is_holiday_shift else float(mkt["Open"]["ZT=F"].loc[t_idx])
-    zt_close = float(mkt["Close"]["ZT=F"].loc[t_idx])
-    zt_ret = (zt_close - zt_open) / zt_open * 100.0
-
-    tnx_close = float(mkt["Close"]["^TNX"].loc[t_idx]) if t_idx in mkt["Close"]["^TNX"].index and pd.notna(mkt["Close"]["^TNX"].loc[t_idx]) else 4.5
-
+    d_open, d_close, d_ret = _safe_oc("DX-Y.NYB", 102.0)
+    zt_open, zt_close, zt_ret = _safe_oc("ZT=F", 102.0)
+    tnx_s = mkt["Close"]["^TNX"].loc[:t_idx].dropna()
+    tnx_close = float(tnx_s.iloc[-1]) if not tnx_s.empty else 4.5
     dy2_bps = 0.0
     if dgs2_series is not None and not dgs2_series.empty:
         s_t = dgs2_series.loc[:t_idx]
@@ -232,7 +295,7 @@ def _bs_delta_gamma(spot, strike, t_yr, r_rf, sigma, is_call=True):
     return delta, gamma
 
 
-def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy, icsa_series=None):
+def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy, icsa_series=None, r_rf_pct=4.0):
     """
     Computes empirical calibration + formal hypothesis tests across ALL 8 Quantitative Pillars:
     2: HAR-RV + GVZ Volatility Targeting (Corsi 2009 / Moreira & Muir 2017)
@@ -446,7 +509,7 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy, icsa_ser
             chosen_exp = exps[1] if len(exps) > 1 and exps[0] == str(today_d) else exps[0]
             dte = max(1, (datetime.date.fromisoformat(chosen_exp) - today_d).days)
             T = dte / 365.0
-            r_rf = 0.045
+            r_rf = max(0.005, float(r_rf_pct) / 100.0)
             ch = gld.option_chain(chosen_exp)
             calls = ch.calls[(ch.calls["openInterest"].fillna(0) > 0) & (ch.calls["impliedVolatility"] > 0.05) & (ch.calls["impliedVolatility"] < 1.20)].copy()
             puts = ch.puts[(ch.puts["openInterest"].fillna(0) > 0) & (ch.puts["impliedVolatility"] > 0.05) & (ch.puts["impliedVolatility"] < 1.20)].copy()
@@ -481,9 +544,24 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy, icsa_ser
             net_gex_m = round(sum(gex_map.values()) / 1e6, 2)
             call_wall_gld = max(call_oi_by_k, key=call_oi_by_k.get) if call_oi_by_k else gld_spot
             put_wall_gld = max(put_oi_by_k, key=put_oi_by_k.get) if put_oi_by_k else gld_spot
-            # Gamma flip strike nearest zero cumulative GEX sign change
-            near_ks = [k for k in gex_map.keys() if abs(k - gld_spot) / max(1.0, gld_spot) <= 0.15]
-            flip_gld = min(near_ks, key=lambda kk: abs(gex_map[kk])) if near_ks else gld_spot
+            # Gamma flip strike: zero-crossing of cumulative strike GEX (fallback to min |GEX| near spot)
+            near_ks = sorted(k for k in gex_map.keys() if abs(k - gld_spot) / max(1.0, gld_spot) <= 0.15)
+            flip_gld = gld_spot
+            if near_ks:
+                cum_gex = 0.0
+                prev_cum = None
+                prev_k = None
+                found_cross = False
+                for kk in near_ks:
+                    cum_gex += gex_map[kk]
+                    if prev_cum is not None and ((prev_cum < 0 <= cum_gex) or (prev_cum > 0 >= cum_gex)):
+                        flip_gld = 0.5 * (prev_k + kk)
+                        found_cross = True
+                        break
+                    prev_cum = cum_gex
+                    prev_k = kk
+                if not found_cross:
+                    flip_gld = min(near_ks, key=lambda kk: abs(gex_map[kk]))
             u_crr = math.exp(iv_atm * math.sqrt(T / 50.0))
             d_crr = 1.0 / u_crr
             p_q = round((math.exp(r_rf * (T / 50.0)) - d_crr) / max(1e-9, u_crr - d_crr), 4)
@@ -563,8 +641,15 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy, icsa_ser
             dx_oc = (np.log(mkt["Close"]["DX-Y.NYB"] / mkt["Open"]["DX-Y.NYB"]) * 100.0).dropna()
             c_rows = []
             for dt_sat, sk_v in ic_surp.items():
-                r_dt = dt_sat + pd.Timedelta(days=5)
-                if r_dt in gc_oc.index and r_dt in dx_oc.index and dt_sat >= pd.Timestamp("2024-01-01"):
+                if dt_sat < pd.Timestamp("2024-01-01"):
+                    continue
+                r_dt = None
+                for d_off in (5, 4, 6):
+                    cand = dt_sat + pd.Timedelta(days=d_off)
+                    if cand in gc_oc.index and cand in dx_oc.index:
+                        r_dt = cand
+                        break
+                if r_dt is not None:
                     c_rows.append((float(sk_v), float(gc_oc.loc[r_dt]), float(dx_oc.loc[r_dt])))
             if len(c_rows) >= 20:
                 arr = np.array(c_rows)
@@ -736,7 +821,7 @@ def _build_us_economy_atlas(fred, mkt, qm, taru_last, zq_implied, core_cpi_est_y
             p_now = round(float(_ncdf(np.array([float(x_cur @ bp)]))[0]) * 100.0, 2)
             models["probit_stress"] = {
                 "n_weeks": len(yp), "base_rate_pct": round(p_bar * 100.0, 1),
-                "lr_chi2": round(lr_chi2, 1), "p_val": 0.0 if lr_chi2 > 40 else 0.05,
+                "lr_chi2": round(lr_chi2, 1), "p_val": round(float(min(1.0, (1.0 + 0.5 * lr_chi2) * math.exp(-0.5 * lr_chi2))), 6),
                 "mcfadden_r2": pseudo_r2, "brier_score": brier,
                 "z_stats": {"t10y3m": round(float(z_p[1]), 2), "nfci": round(float(z_p[2]), 2), "stlfsi4": round(float(z_p[3]), 2), "sahm": round(float(z_p[4]), 2)},
                 "stress_prob_6m_pct": p_now
@@ -751,12 +836,15 @@ def _build_us_economy_atlas(fred, mkt, qm, taru_last, zq_implied, core_cpi_est_y
         ind_s = fred["INDPRO"]["INDPRO"].dropna()
         ind_yoy_s = ((ind_s / ind_s.shift(12)) - 1.0) * 100.0
         nfci_m = fred["NFCI"]["NFCI"].dropna().resample("MS").last().ffill()
-        mdf = pd.DataFrame({"ind_yoy": ind_yoy_s, "pce_yoy": pce_yoy_s, "unemp": un_s, "nfci": nfci_m}).dropna()
+        ff_m = fred["FEDFUNDS"]["FEDFUNDS"].dropna().resample("MS").last().ffill()
+        mdf = pd.DataFrame({"ind_yoy": ind_yoy_s, "pce_yoy": pce_yoy_s, "unemp": un_s, "nfci": nfci_m, "ff": ff_m}).dropna()
         if len(mdf) >= 60:
             taylor_star = round(float(0.5 + core_pce_yoy + 0.5 * (core_pce_yoy - 2.0) + 1.0 * (4.0 - unrate_now)), 2)
             t_gap = round(taru_last - taylor_star, 2)
             zq_bps = (zq_implied - taru_last) * 100.0
-            # Bayesian Ordered-Logit Policy Probabilities (Tightening vs Hold vs Easing)
+            tay_ols = qm.run_regression_ols(mdf[["pce_yoy", "unemp"]].values, mdf["ff"].values)
+            tay_fp = qm._f_pvalue(tay_ols["f_stat"], 2, max(1, len(mdf) - 3))
+            # Ordered-Logit Policy Probabilities (Tightening vs Hold vs Easing)
             u_tight = -0.60 - 0.85 * t_gap + 0.045 * zq_bps - 0.80 * domains["financial_conditions_micro"]["chicago_nfci"]
             u_hold = 0.70 - 0.35 * abs(t_gap) - 0.015 * abs(zq_bps)
             u_ease = -0.60 + 0.85 * t_gap - 0.045 * zq_bps + 0.90 * max(0.0, domains["financial_conditions_micro"]["chicago_nfci"])
@@ -767,13 +855,18 @@ def _build_us_economy_atlas(fred, mkt, qm, taru_last, zq_implied, core_cpi_est_y
                 "taylor_implied_rate_pct": taylor_star,
                 "fed_actual_rate_pct": taru_last,
                 "taylor_gap_pct": t_gap,
+                "ols_r2": tay_ols["r2"],
+                "ols_f_stat": tay_ols["f_stat"],
+                "ols_f_p_val": tay_fp,
+                "beta_core_pce": tay_ols["beta"][1],
+                "beta_unemp": tay_ols["beta"][2],
                 "p_tightening_pct": round(ex[0] / s_ex * 100.0, 1),
                 "p_hold_pct": round(ex[1] / s_ex * 100.0, 1),
                 "p_easing_pct": round(max(0.0, 100.0 - round(ex[0] / s_ex * 100.0, 1) - round(ex[1] / s_ex * 100.0, 1)), 1)
             }
 
             # 4x4 Empirical Covariance Mahalanobis Distance & 4-Regime Likelihood
-            Z_m = mdf.values
+            Z_m = mdf[["ind_yoy", "pce_yoy", "unemp", "nfci"]].values
             mu_m = np.mean(Z_m, axis=0)
             cov_m = np.cov(Z_m, rowvar=False) + 1e-4 * np.eye(4)
             inv_cov_m = np.linalg.pinv(cov_m)
@@ -884,6 +977,25 @@ def build_all_datasets():
             if df_f is not None:
                 fred[sid] = df_f
 
+    # Overlay latest official BLS Public API v1 prints whenever BLS is ahead of FRED
+    bls_live = fetch_bls_latest_series()
+    for bls_id, b_ser in bls_live.items():
+        f_id = BLS_SERIES_TO_FRED.get(bls_id)
+        if not f_id:
+            continue
+        if f_id in fred and not fred[f_id].empty:
+            cur_df = fred[f_id].copy()
+            for dt_b, val_b in b_ser.items():
+                if dt_b not in cur_df.index or pd.isna(cur_df.loc[dt_b, f_id]):
+                    cur_df.loc[dt_b, f_id] = val_b
+            fred[f_id] = cur_df.sort_index()
+        else:
+            fred[f_id] = pd.DataFrame({f_id: b_ser})
+
+    required_core = ["CPIAUCSL", "CPILFESL", "CUSR0000SASLE", "CUSR0000SEHC", "PAYEMS", "UNRATE", "CES0500000003", "PPIFIS", "RSAFS", "DFEDTARU", "FEDFUNDS"]
+    missing_core = [s for s in required_core if s not in fred or fred[s].dropna().empty]
+    if missing_core:
+        raise RuntimeError(f"Core FRED/BLS series unavailable: {missing_core}")
     # Download Yahoo Finance daily market history strictly through today + 1 (since yfinance end is exclusive)
     end_dt = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"[YFINANCE] Downloading market history 2023-12-15 -> {end_dt}...")
@@ -1146,18 +1258,26 @@ def build_all_datasets():
     # E. AUTHENTIC PPI & RETAIL RELEASES (33 BLS RELEASES <= today)
     # ------------------------------------------------------------------
     ppi_records = []
+    ppi_fcst_map = {"2026-11-13": 0.40}
     for r_dt, ref_dt in [x for x in PPI_SCHEDULE if x[0] <= today_str]:
         ref_ts = pd.Timestamp(ref_dt)
-        if ref_ts not in ppifis.index or ref_ts not in rsafs.index:
+        if ref_ts not in ppifis.index:
             continue
         p_act = round(float(ppi_mom.loc[ref_ts]), 2)
-        p_fcst = round(float(ppi_mom.loc[:ref_ts].dropna().iloc[-4:-1].mean()), 2)
-        r_act = round(float(retail_mom.loc[ref_ts]), 2)
-        r_fcst = round(float(retail_mom.loc[:ref_ts].dropna().iloc[-4:-1].mean()), 2)
+        p_fcst = ppi_fcst_map.get(r_dt, round(float(ppi_mom.loc[:ref_ts].dropna().iloc[-4:-1].mean()), 2))
+        has_retail = ref_ts in rsafs.index and pd.notna(retail_mom.loc[ref_ts])
+        if has_retail:
+            r_act = round(float(retail_mom.loc[ref_ts]), 2)
+            r_fcst = round(float(retail_mom.loc[:ref_ts].dropna().iloc[-4:-1].mean()), 2)
+            c_src = "SURVEY_PPI_FRED_RETAIL" if r_dt in ppi_fcst_map else "FRED_3M_ADAPTIVE"
+        else:
+            r_fcst = round(float(retail_mom.dropna().iloc[-3:].mean()), 2)
+            r_act = None
+            c_src = "BLS_LIVE_PPI_PENDING_RETAIL"
 
         z_ppi = round((p_act - p_fcst) / 0.20, 2)
-        z_ret = round((r_act - r_fcst) / 0.35, 2)
-        z_comp = round(0.55 * z_ppi + 0.45 * z_ret, 2)
+        z_ret = round((r_act - r_fcst) / 0.35, 2) if has_retail else 0.0
+        z_comp = round(0.55 * z_ppi + 0.45 * z_ret, 2) if has_retail else round(z_ppi, 2)
         regime = "COST_PUSH_DEMAND" if z_comp >= 1.0 else ("DISINFLATION_COOL" if z_comp <= -1.0 else "IN_LINE_NOISE")
         mkt_day = _extract_mkt_day(mkt, r_dt, dgs2_df)
 
@@ -1168,7 +1288,7 @@ def build_all_datasets():
             "ppi_forecast": p_fcst,
             "retail_actual": r_act,
             "retail_forecast": r_fcst,
-            "consensus_source": "FRED_3M_ADAPTIVE",
+            "consensus_source": c_src,
             "z_score_ppi": z_ppi,
             "z_score_retail": z_ret,
             "z_score_composite": z_comp,
@@ -1210,6 +1330,22 @@ def build_all_datasets():
         json.dump(tomorrow_event, f, indent=2)
 
     cal_rows = [dict(r) for r in UPCOMING_CALENDAR]
+    # Hydrate calendar actuals directly from BLS/FRED official observations
+    icsa_clean = fred["ICSA"]["ICSA"].dropna() if "ICSA" in fred else pd.Series(dtype=float)
+    if not icsa_clean.empty and icsa_clean.index[-1] >= pd.Timestamp("2026-11-07"):
+        ic_val_k = int(round(float(icsa_clean.loc[pd.Timestamp("2026-11-07")]) / 1000.0))
+        for row_c in cal_rows:
+            if row_c.get("event_id") == "claims_nov12_26" and not row_c.get("actual"):
+                row_c["actual"] = f"{ic_val_k}K"
+    if ppi_records and ppi_records[-1]["date"] == "2026-11-13":
+        last_ppi = ppi_records[-1]
+        for row_c in cal_rows:
+            if row_c.get("event_id") == "ppi_oct26" and not row_c.get("actual"):
+                row_c["actual"] = f"{last_ppi['ppi_actual']:.2f}%"
+                row_c["effect_xauusd"] = f"OFFICIAL BLS PRINT {last_ppi['ppi_actual']:+.2f}% vs {last_ppi['ppi_forecast']:.2f}% FCST // GOLD {last_ppi['gold_return_pct']:+.2f}%"
+            elif row_c.get("event_id") == "ppi_nov26" and not row_c.get("previous"):
+                row_c["previous"] = f"{last_ppi['ppi_actual']:.2f}%"
+
     try:
         req_ff = urllib.request.Request("https://nfs.faireconomy.media/ff_calendar_thisweek.json", headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req_ff, timeout=4.0) as r_ff:
@@ -1231,7 +1367,9 @@ def build_all_datasets():
                     ("unemployment" in rc_l and "unemployment claims" in title_l) or
                     ("core cpi" in rc_l and "core cpi" in title_l) or
                     ("cpi" in rc_l and "core" not in rc_l and "cpi m/m" in title_l and "core" not in title_l) or
-                    ("ppi" in rc_l and "core" not in rc_l and "ppi m/m" in title_l and "core" not in title_l)
+                    ("ppi" in rc_l and "core" not in rc_l and "ppi m/m" in title_l and "core" not in title_l) or
+                    ("retail sales" in rc_l and "retail sales m/m" in title_l and "core" not in title_l) or
+                    ("non-farm" in rc_l and "non-farm" in title_l)
                 ):
                     if it.get("forecast"): row_c["forecast"] = it["forecast"]
                     if it.get("previous"): row_c["previous"] = it["previous"]
@@ -1240,9 +1378,15 @@ def build_all_datasets():
                     matched = True
                     break
             if not matched:
-                hr = int(dt_full[11:13]) if len(dt_full) >= 13 and dt_full[11:13].isdigit() else 8
-                mn = dt_full[14:16] if len(dt_full) >= 16 else "30"
-                wib_hr = (hr + 12) % 24
+                try:
+                    dt_parsed = datetime.datetime.fromisoformat(dt_full)
+                    hr, mn = dt_parsed.hour, f"{dt_parsed.minute:02d}"
+                    utc_dt = dt_parsed.astimezone(datetime.timezone.utc) if dt_parsed.tzinfo else dt_parsed
+                    wib_hr = (utc_dt.hour + 7) % 24
+                except Exception:
+                    hr = int(dt_full[11:13]) if len(dt_full) >= 13 and dt_full[11:13].isdigit() else 8
+                    mn = dt_full[14:16] if len(dt_full) >= 16 else "30"
+                    wib_hr = (hr + 12) % 24
                 sess = "LONDON/EARLY NY" if hr < 8 else ("NY PRE-MARKET / US OPEN" if hr == 8 else ("NY CASH SESSION" if hr < 13 else "NY AFTERNOON"))
                 cal_rows.append({
                     "event_id": f"ff_{dt_day}_{abs(hash(title_ff)) % 10000}",
@@ -1257,6 +1401,12 @@ def build_all_datasets():
                     "category": "FED_SPEAK" if "fomc" in title_l or "speaks" in title_l else "MACRO_WEEKLY",
                     "effect_xauusd": f"{imp}-IMPACT USD RELEASE ({sess})"
                 })
+        core_ppi_s = fred["PPI_CORE_SA"]["PPI_CORE_SA"].dropna() if "PPI_CORE_SA" in fred else pd.Series(dtype=float)
+        if len(core_ppi_s) >= 2 and pd.Timestamp("2026-10-01") in core_ppi_s.index:
+            c_ppi_mom = round(((float(core_ppi_s.iloc[-1]) / float(core_ppi_s.iloc[-2])) - 1.0) * 100.0, 2)
+            for row_c in cal_rows:
+                if row_c.get("date") == "2026-11-13" and "core ppi" in row_c.get("title", "").lower() and not row_c.get("actual"):
+                    row_c["actual"] = f"{c_ppi_mom:.2f}%"
         cal_rows.sort(key=lambda r: (r.get("date", ""), r.get("time", "")))
     except Exception:
         pass
@@ -1337,12 +1487,17 @@ def build_all_datasets():
             g7_cpi_avg = round(float(np.mean([float(s.get("headline_cpi_yoy", 2.0)) for s in non_us])), 2)
             g7_rate_avg = round(float(np.mean([float(s.get("policy_rate", s.get("pboc_1y_lpr", 2.5))) for s in non_us])), 2)
 
-    # Core CPI YoY estimate (handle Oct 2025 shutdown interpolation cleanly)
-    c_idx_now = float(cpi_core.dropna().iloc[-1])
-    c_idx_sep25 = float(cpi_core.loc[pd.Timestamp("2025-09-01")])
-    c_idx_nov25 = float(cpi_core.loc[pd.Timestamp("2025-11-01")])
-    core_cpi_est_yoy = round(((c_idx_now / (0.5 * (c_idx_sep25 + c_idx_nov25))) - 1.0) * 100.0, 2)
-
+    # Core CPI YoY estimate (interpolate Oct 2025 shutdown gap ONLY when latest index is Oct 2026)
+    c_clean = cpi_core.dropna()
+    c_idx_now = float(c_clean.iloc[-1])
+    c_last_dt = c_clean.index[-1]
+    t_12_ago = c_last_dt - pd.DateOffset(months=12)
+    if t_12_ago in c_clean.index and pd.notna(c_clean.loc[t_12_ago]):
+        core_cpi_est_yoy = round(((c_idx_now / float(c_clean.loc[t_12_ago])) - 1.0) * 100.0, 2)
+    else:
+        c_idx_sep25 = float(c_clean.loc[pd.Timestamp("2025-09-01")])
+        c_idx_nov25 = float(c_clean.loc[pd.Timestamp("2025-11-01")])
+        core_cpi_est_yoy = round(((c_idx_now / (0.5 * (c_idx_sep25 + c_idx_nov25))) - 1.0) * 100.0, 2)
     ppi_3m_avg = round(float(ppi_mom.dropna().iloc[-3:].mean()), 2)
     retail_3m_avg = round(float(retail_mom.dropna().iloc[-3:].mean()), 2)
 
@@ -1386,9 +1541,33 @@ def build_all_datasets():
         "hg_daily_sd_pct": round(float(np.std(ca_rets["HG=F"].values, ddof=1)), 4),
         "gold_daily_sd_pct": round(float(np.std(ca_rets["GC=F"].values, ddof=1)), 4)
     }
-    quant_8_snap = _build_quant_8_snapshot(mkt, _qm, daily_ca_block, float(ca_df["GC=F"].iloc[-1]), float(ca_df["DX-Y.NYB"].iloc[-1]), icsa_series=icsa_s)
+    quant_8_snap = _build_quant_8_snapshot(mkt, _qm, daily_ca_block, float(ca_df["GC=F"].iloc[-1]), float(ca_df["DX-Y.NYB"].iloc[-1]), icsa_series=icsa_s, r_rf_pct=taru_last)
     us_atlas = _build_us_economy_atlas(fred, mkt, _qm, taru_last, zq_implied, core_cpi_est_yoy, ppi_3m_avg, retail_3m_avg)
-
+    if os.path.exists(gm_path):
+        try:
+            with open(gm_path) as f:
+                gm_upd = json.load(f)
+            gm_upd["timestamp"] = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+            hl_latest_yoy = float(hl_yoy.dropna().iloc[-1]) if not hl_yoy.dropna().empty else 3.72
+            tips_latest = round(float(fred["DFII10"]["DFII10"].dropna().iloc[-1]), 2) if "DFII10" in fred else 2.78
+            if "USD" in (gm_upd.get("sovereigns") or {}):
+                gm_upd["sovereigns"]["USD"]["headline_cpi_yoy"] = round(hl_latest_yoy, 2)
+                gm_upd["sovereigns"]["USD"]["core_cpi_yoy"] = round(core_cpi_est_yoy, 2)
+                gm_upd["sovereigns"]["USD"]["policy_rate"] = round(taru_last, 2)
+                gm_upd["sovereigns"]["USD"]["real_policy_rate"] = round(taru_last - core_cpi_est_yoy, 2)
+                gm_upd["sovereigns"]["USD"]["tips_10y_real_yield"] = tips_latest
+            gm_upd["transmission_model"] = {
+                "formula": "r_XAU = beta_0 + beta_DXY*dDXY + beta_TIP*dTIP + beta_ZT*dZT + beta_CL*dCL + beta_VIX*dVIX + beta_HG*dHG",
+                "r2_6factor_hc3": daily_ca_block["r2"],
+                "f_stat": daily_ca_block["f_stat"],
+                "f_p_val": daily_ca_block["f_p_val"],
+                "n_days": daily_ca_block["n"],
+                "white_hc3_verified": True
+            }
+            with open(gm_path, "w") as f:
+                json.dump(gm_upd, f, indent=2)
+        except Exception as e:
+            print(f"[GLOBAL MACRO SYNC WARN] {e}")
     premarket_snapshot = {
         "generated_at_utc": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "snapshot_policy": "FROZEN_MACRO_CONDITION (UPDATES ONLY ON STARTUP / SYNC LIVE / OFFICIAL RELEASE)",
@@ -1434,10 +1613,14 @@ def build_all_datasets():
             "retail_3m_avg_mom": retail_3m_avg
         },
         "upcoming_consensus": {
-            "cpi": {"date": tomorrow_event["date"], "forecast_mom": tomorrow_event["forecast_mom"], "nowcast_mom": tomorrow_event["cleveland_fed_nowcast_mom"], "survey_sd": tomorrow_event["survey_dispersion_sd"]},
+            "cpi": {"date": tomorrow_event["date"], "forecast_mom": tomorrow_event["forecast_mom"], "forecast_core_yoy": tomorrow_event["forecast_core_yoy"], "nowcast_mom": tomorrow_event["cleveland_fed_nowcast_mom"], "survey_sd": tomorrow_event["survey_dispersion_sd"]},
             "fomc": {"date": "2026-12-09", "current_target": taru_last, "consensus_rate": taru_last, "zq_implied": zq_implied},
             "nfp": {"date": "2026-12-04", "forecast_nfp_k": 135.0, "forecast_unemp": 4.1, "forecast_ahe": 0.3, "dispersion_sd_k": 45.0},
-            "ppi": {"date": "2026-11-13", "forecast_ppi_mom": 0.4, "prev_ppi_mom": 1.34, "forecast_retail_mom": 0.4, "dispersion_sd_pp": 0.20}
+            "ppi": (
+                {"date": "2026-12-15", "forecast_ppi_mom": 0.3, "prev_ppi_mom": ppi_records[-1]["ppi_actual"], "forecast_retail_mom": 0.4, "dispersion_sd_pp": 0.20, "last_released_date": "2026-11-13", "last_actual_ppi_mom": ppi_records[-1]["ppi_actual"]}
+                if (ppi_records and ppi_records[-1]["date"] >= "2026-11-13")
+                else {"date": "2026-11-13", "forecast_ppi_mom": 0.4, "prev_ppi_mom": ppi_records[-1]["ppi_actual"] if ppi_records else 1.34, "forecast_retail_mom": 0.4, "dispersion_sd_pp": 0.20}
+            )
         }
     }
     with open(os.path.join(DATA_DIR, "premarket_snapshot.json"), "w") as f:
@@ -1450,18 +1633,18 @@ _SYNC_STATE = {"last_ts": 0.0}
 
 def sync_live_releases_if_stale(force=False):
     """
-    Checks BLS Public API v1 + ForexFactory calendar + FRED + Yahoo Finance for any newly released
-    macro prints on/before today (e.g., 2026-11-13 PPI, 2026-12-04 NFP, 2026-12-09 FOMC, 2026-12-10 CPI)
-    and persists them automatically to JSON without future-date leakage.
+    Checks BLS Public API v1 + ForexFactory calendar + FRED for newly released
+    macro prints on/before today and persists them cleanly without wiping FF actuals.
     """
     import time, re
     now = time.time()
-    if not force and (now - _SYNC_STATE["last_ts"] < 900.0):
-        return {"synced": False, "reason": "throttled_15m_cache"}
+    if not force and (now - _SYNC_STATE["last_ts"] < 120.0):
+        return {"synced": False, "reason": "throttled_2m_cache"}
     _SYNC_STATE["last_ts"] = now
 
     today_str = _today_str()
     updated_events = []
+    ff_actuals_cache = {}
 
     # 1. Check ForexFactory live calendar for any released USD events this week
     try:
@@ -1474,18 +1657,10 @@ def sync_live_releases_if_stale(force=False):
     except Exception:
         ff_events = []
 
-    def _parse_num(s):
-        if not s:
-            return None
-        m = re.search(r"([\-+]?\d+\.?\d*)", str(s).replace(",", ""))
-        return float(m.group(1)) if m else None
-
-    # Update high_impact_calendar.json actuals if FF has an official print on/before today
     cal_path = os.path.join(DATA_DIR, "high_impact_calendar.json")
     if os.path.exists(cal_path) and ff_events:
         with open(cal_path) as f:
             cal = json.load(f)
-        cal_changed = False
         for ev in cal:
             ev_dt = ev.get("date", "")
             if ev_dt > today_str or ev.get("actual"):
@@ -1501,41 +1676,75 @@ def sync_live_releases_if_stale(force=False):
                 if ("ppi" in ev_title_l and "ppi m/m" in title_l and "core" not in title_l) or \
                    ("non-farm" in ev_title_l and "non-farm" in title_l) or \
                    ("retail sales" in ev_title_l and "retail sales m/m" in title_l and "core" not in title_l) or \
-                   ("cpi" in ev_title_l and "cpi m/m" in title_l and "core" not in title_l) or \
+                   ("core cpi" in ev_title_l and "core cpi" in title_l) or \
+                   ("cpi" in ev_title_l and "core" not in ev_title_l and "cpi m/m" in title_l and "core" not in title_l) or \
                    ("jobless" in ev_title_l and "unemployment claims" in title_l) or \
                    ("fomc" in ev_title_l and "federal funds" in title_l):
-                    ev["actual"] = act_str
-                    cal_changed = True
+                    ff_actuals_cache[ev["event_id"]] = act_str
                     updated_events.append(f"{ev['event_id']}:{act_str}")
-        if cal_changed:
-            with open(cal_path, "w") as f:
-                json.dump(cal, f, indent=2)
 
-    # 2. Check FRED latest dates vs stored JSONs to detect newly published monthly points
+    # 2. Check BLS Public API v1 & FRED per-series staleness against stored JSONs
     try:
-        cpi_f = fetch_fred_series("CPIAUCSL")
+        bls_live = fetch_bls_latest_series(["WPSFD4", "CUSR0000SA0", "CES0000000001"])
         ppi_f = fetch_fred_series("PPIFIS")
+        cpi_f = fetch_fred_series("CPIAUCSL")
         pay_f = fetch_fred_series("PAYEMS")
-        taru_f = fetch_fred_series("DFEDTARU")
-        latest_yoy_dt = None
+        icsa_f = fetch_fred_series("ICSA")
+
+        def _max_ym(df_s, col_s, bls_key=None):
+            dates = []
+            if df_s is not None and not df_s[col_s].dropna().empty:
+                dates.append(df_s[col_s].dropna().index.max().strftime("%Y-%m"))
+            if bls_key and bls_key in bls_live and not bls_live[bls_key].empty:
+                dates.append(bls_live[bls_key].index.max().strftime("%Y-%m"))
+            return max(dates) if dates else ""
+
+        live_ppi_ym = _max_ym(ppi_f, "PPIFIS", "WPSFD4")
+        live_cpi_ym = _max_ym(cpi_f, "CPIAUCSL", "CUSR0000SA0")
+        live_nfp_ym = _max_ym(pay_f, "PAYEMS", "CES0000000001")
+        live_icsa_dt = icsa_f["ICSA"].dropna().index.max().strftime("%Y-%m-%d") if (icsa_f is not None and not icsa_f["ICSA"].dropna().empty) else ""
+
+        stored_ppi_ym, stored_cpi_ym, stored_nfp_ym, stored_icsa_k = "", "", "", None
         yoy_path = os.path.join(DATA_DIR, "cpi_yoy_timeline.json")
         if os.path.exists(yoy_path):
             with open(yoy_path) as f:
                 yoy_cur = json.load(f)
-            latest_yoy_dt = yoy_cur[-1]["date"] if yoy_cur else None
-        fred_max = max(
-            s.dropna().index.max().strftime("%Y-%m")
-            for s in [cpi_f, ppi_f, pay_f] if s is not None and not s.dropna().empty
+            for row in yoy_cur:
+                if row.get("ppi_mom") is not None: stored_ppi_ym = row["date"]
+                if row.get("headline_mom") is not None: stored_cpi_ym = row["date"]
+                if row.get("nfp_mom_k") is not None: stored_nfp_ym = row["date"]
+        snap_path = os.path.join(DATA_DIR, "premarket_snapshot.json")
+        if os.path.exists(snap_path):
+            with open(snap_path) as f:
+                stored_icsa_k = json.load(f).get("leading_indicators", {}).get("icsa_last_k")
+        live_icsa_k = round(float(icsa_f["ICSA"].dropna().iloc[-1]) / 1000.0, 1) if (icsa_f is not None and not icsa_f["ICSA"].dropna().empty) else None
+
+        needs_rebuild = (
+            force
+            or (live_ppi_ym > stored_ppi_ym)
+            or (live_cpi_ym > stored_cpi_ym)
+            or (live_nfp_ym > stored_nfp_ym)
+            or (live_icsa_k is not None and live_icsa_k != stored_icsa_k)
+            or bool(updated_events)
         )
-        # If FRED advanced a month or a scheduled release date passed with live FF actuals, rebuild datasets
-        if force or (latest_yoy_dt and fred_max > latest_yoy_dt) or updated_events:
+        if needs_rebuild:
             build_all_datasets()
-            return {"synced": True, "rebuilt": True, "updated_events": updated_events, "fred_latest": fred_max}
+            if ff_actuals_cache and os.path.exists(cal_path):
+                with open(cal_path) as f:
+                    rebuilt_cal = json.load(f)
+                for ev in rebuilt_cal:
+                    if ev.get("event_id") in ff_actuals_cache and not ev.get("actual"):
+                        ev["actual"] = ff_actuals_cache[ev["event_id"]]
+                with open(cal_path, "w") as f:
+                    json.dump(rebuilt_cal, f, indent=2)
+            return {
+                "synced": True, "rebuilt": True, "updated_events": updated_events,
+                "live_dates": {"ppi": live_ppi_ym, "cpi": live_cpi_ym, "nfp": live_nfp_ym, "icsa": live_icsa_dt}
+            }
     except Exception as e:
         return {"synced": False, "error": str(e)}
 
     return {"synced": True, "rebuilt": False, "updated_events": updated_events}
-
 
 if __name__ == "__main__":
     build_all_datasets()

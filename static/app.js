@@ -186,7 +186,7 @@ function getEventConsensus() {
   const up = PREMARKET_CACHE?.snapshot?.upcoming_consensus || {};
   return {
     cpiHl: Number(up.cpi?.forecast_mom ?? 0.3),
-    cpiCore: Number(PREMARKET_CACHE?.models?.cpi?.forecast_core_yoy ?? 2.9),
+    cpiCore: Number(up.cpi?.forecast_core_yoy ?? PREMARKET_CACHE?.models?.cpi?.forecast_core_yoy ?? 2.9),
     fomcTarget: Number(up.fomc?.current_target ?? 4.0),
     nfpK: Number(up.nfp?.forecast_nfp_k ?? 135),
     nfpUnemp: Number(up.nfp?.forecast_unemp ?? 4.1),
@@ -1026,6 +1026,7 @@ async function renderEventMcPane(ev) {
   const w = container.clientWidth || 380;
   const h = container.clientHeight || 215;
   const padL = 42, padR = 46, padT = 18, padB = 24;
+  if (!mc || !mc.percentiles) return;
   const steps = mc.steps || 24;
   const { p5, p25, p50, p75, p95 } = mc.percentiles;
   const allVals = [...p5, ...p95];
@@ -1308,6 +1309,10 @@ async function renderEventFreqPane(ev) {
   if (hud && freq.n) {
     hud.innerText = `HOVER HISTOGRAM BARS // N = ${freq.n} EMPIRICAL ${ev.toUpperCase()} RELEASES`;
   }
+  const freqTitleEl = document.getElementById(`${ev}-freq-title`);
+  if (freqTitleEl && freq.n) {
+    freqTitleEl.innerText = `${freq.n}-RELEASE SHOCK FREQUENCY & POST-NEWS MOVE`;
+  }
   const w = container.clientWidth || 380;
   const h = container.clientHeight || 215;
   const padL = 32, padR = 32, padT = 26, padB = 24;
@@ -1401,11 +1406,12 @@ async function renderEventTransPane(ev) {
   const modelObj = asset === "dxy" ? trans.models.dxy : (asset === "2y" ? trans.models.zt_note : trans.models.gold);
   const unitTag = (ev === "cpi" || ev === "nfp" || ev === "ppi") ? "σ" : "SD";
 
+  const respUnit = asset === "2y" ? "bps" : "%";
   if (document.getElementById(slopeId) && modelObj) {
-    document.getElementById(slopeId).innerText = `β = ${modelObj.beta[1].toFixed(3)}%/${unitTag} (R² = ${modelObj.r2.toFixed(3)}, t = ${modelObj.t_stat}, p = ${modelObj.p_value})`;
+    document.getElementById(slopeId).innerText = `β = ${modelObj.beta[1].toFixed(3)}${respUnit}/${unitTag} (R² = ${modelObj.r2.toFixed(3)}, t = ${modelObj.t_stat}, p = ${modelObj.p_value})`;
   }
   if (document.getElementById(vrId)) {
-    document.getElementById(vrId).innerText = `VR(5m) = ${trans.avg_vr5}x | β_DXY=${trans.models.dxy.beta[1].toFixed(2)}% | β_2Y=${trans.models.zt_note.beta[1].toFixed(2)}`;
+    document.getElementById(vrId).innerText = `VR(5m) = ${trans.avg_vr5}x | β_DXY=${trans.models.dxy.beta[1].toFixed(2)}% | β_2Y=${trans.models.zt_note.beta[1].toFixed(2)}bps`;
   }
 
   const curves = trans.response_curves || [];
@@ -1417,7 +1423,7 @@ async function renderEventTransPane(ev) {
 
   let yKey = "gold_return", pKey = "gold_ret", assetLabel = "GOLD";
   if (asset === "dxy") { yKey = "dxy_return"; pKey = "dxy_ret"; assetLabel = "DXY"; }
-  else if (asset === "2y") { yKey = "zt_return"; pKey = "zt_ret"; assetLabel = "2Y NOTE"; }
+  else if (asset === "2y") { yKey = "zt_return"; pKey = "zt_ret"; assetLabel = "2Y YIELD"; }
 
   const allY = [...curves.map(c => c[yKey]), ...pts.map(p => p[pKey])];
   const minY = Math.min(-1.5, ...allY) * 1.1;
@@ -1448,7 +1454,7 @@ async function renderEventTransPane(ev) {
       <path d="${pathReg}" fill="none" stroke="#ffffff" stroke-width="2"/>
       <text x="${w - padR}" y="${getY(0) - 4}" text-anchor="end">+Z (HAWKISH)</text>
       <text x="${padL}" y="${getY(0) - 4}" text-anchor="start">-Z (DOVISH)</text>
-      <text x="${getX(0) + 4}" y="${padT + 10}">${assetLabel} %</text>
+      <text x="${getX(0) + 4}" y="${padT + 10}">${assetLabel} ${respUnit}</text>
       <line id="needle-${ev}-trans" x1="0" y1="0" x2="0" y2="0" class="crosshair" style="display:none; pointer-events:none;"/>
       <circle id="snap-${ev}-trans" cx="0" cy="0" r="5.5" fill="none" stroke="#ffb000" stroke-width="1.5" style="display:none; pointer-events:none;"/>
     </svg>
@@ -1477,7 +1483,7 @@ async function renderEventTransPane(ev) {
         const dx = getX(nearestDot.z), dy = getY(nearestDot[pKey]);
         if (needle) { needle.style.display = "block"; needle.setAttribute("x1", dx); needle.setAttribute("x2", dx); needle.setAttribute("y1", padT); needle.setAttribute("y2", h - padB); }
         if (snap) { snap.style.display = "block"; snap.setAttribute("cx", dx); snap.setAttribute("cy", dy); }
-        if (hud) hud.innerHTML = `EVENT <span class="highlight">${nearestDot.date}</span> | Shock: ${nearestDot.raw_shock} (${nearestDot.z >= 0 ? "+" : ""}${nearestDot.z}σ) | ${assetLabel}: <span class="highlight">${nearestDot[pKey] >= 0 ? "+" : ""}${nearestDot[pKey]}%</span> | Dist Mean: ${nearestDot.dist_from_mean_sd >= 0 ? "+" : ""}${nearestDot.dist_from_mean_sd}σ`;
+        if (hud) hud.innerHTML = `EVENT <span class="highlight">${nearestDot.date}</span> | Shock: ${nearestDot.raw_shock} (${nearestDot.z >= 0 ? "+" : ""}${nearestDot.z}σ) | ${assetLabel}: <span class="highlight">${nearestDot[pKey] >= 0 ? "+" : ""}${nearestDot[pKey]}${respUnit}</span> | Dist Mean: ${nearestDot.dist_from_mean_sd >= 0 ? "+" : ""}${nearestDot.dist_from_mean_sd}σ`;
         positionTooltip(tt, container, mouseEv.clientX, mouseEv.clientY, `
           <div style="color:var(--amber-cmd); font-weight:800;">RELEASE: ${nearestDot.date}</div>
           <div>Shock: <strong>${nearestDot.raw_shock}</strong> (${nearestDot.z >= 0 ? "+" : ""}${nearestDot.z}σ)</div>
@@ -1489,10 +1495,10 @@ async function renderEventTransPane(ev) {
         let closest = curves[0], minD = Infinity;
         curves.forEach(c => { const d = Math.abs(c.z - zVal); if (d < minD) { minD = d; closest = c; } });
         if (needle) { needle.style.display = "block"; needle.setAttribute("x1", clampedX); needle.setAttribute("x2", clampedX); needle.setAttribute("y1", padT); needle.setAttribute("y2", h - padB); }
-        if (hud) hud.innerHTML = `Shock Z = <span class="highlight">${closest.z >= 0 ? "+" : ""}${closest.z.toFixed(2)}σ</span> | Expected ${assetLabel} = <span class="highlight">${closest[yKey] >= 0 ? "+" : ""}${closest[yKey].toFixed(2)}%</span>`;
+        if (hud) hud.innerHTML = `Shock Z = <span class="highlight">${closest.z >= 0 ? "+" : ""}${closest.z.toFixed(2)}σ</span> | Expected ${assetLabel} = <span class="highlight">${closest[yKey] >= 0 ? "+" : ""}${closest[yKey].toFixed(2)}${respUnit}</span>`;
         positionTooltip(tt, container, mouseEv.clientX, mouseEv.clientY, `
           <div style="color:var(--amber-cmd); font-weight:800;">HC3 FRONTIER (Z = ${closest.z >= 0 ? "+" : ""}${closest.z.toFixed(2)}σ)</div>
-          <div>Expected ${assetLabel}: <strong>${closest[yKey] >= 0 ? "+" : ""}${closest[yKey].toFixed(2)}%</strong></div>
+          <div>Expected ${assetLabel}: <strong>${closest[yKey] >= 0 ? "+" : ""}${closest[yKey].toFixed(2)}${respUnit}</strong></div>
           ${asset === "gold" ? `<div>95% Band: ${closest.gold_lower_95.toFixed(2)}% to ${closest.gold_upper_95.toFixed(2)}%</div>` : ""}
         `);
       }
@@ -1945,11 +1951,14 @@ async function fetchQuant8AuditTable() {
       if (jc && jc.n) {
         extra.push(`<strong style="color:#ff4444;">JOBLESS CLAIMS (n=${jc.n})</strong>: Gold t=${jc.gold_t} (p=${jc.gold_p}), Hit=${jc.hit_pct}% -> <strong style="color:#ff4444;">REJECTED STANDALONE</strong>`);
       }
-      if (pt && pt.gated_trades) {
-        extra.push(`<strong style="color:#00e5ff;">CAUSAL NEWS WALK-FWD (${pt.gated_trades}t)</strong>: Naive=${pt.naive_win_pct}% (${pt.naive_ret_pct >= 0 ? "+" : ""}${pt.naive_ret_pct}%, PF ${pt.naive_pf}) vs Gated=<strong style="color:#ffffff;">${pt.gated_win_pct}% (${pt.gated_ret_pct >= 0 ? "+" : ""}${pt.gated_ret_pct}%, PF ${pt.gated_pf}, p=${pt.gated_binom_p})</strong>`);
+      if (pt && pt.combined_trades) {
+        extra.push(`<strong style="color:#00e5ff;">3Y COMBINED PORTFOLIO ($1,000 -> $${pt.combined_end_equity_usd.toLocaleString("en-US", {minimumFractionDigits:2})}, +${pt.combined_net_ret_pct}%, DD ${pt.combined_max_dd_pct}%)</strong>: ${pt.combined_trades}t, Win=<strong style="color:#ffffff;">${pt.combined_win_pct}%</strong>, PF <strong style="color:#ffffff;">${pt.combined_pf}</strong>, t=+${pt.combined_t_stat} (<strong style="color:#00e5ff;">p=${pt.combined_p_val}</strong>)`);
       }
       if (pt && pt.daily_3y_trades) {
-        extra.push(`<strong style="color:var(--amber-cmd);">DAILY A* 3Y CAUSAL (${pt.daily_3y_trades}t)</strong>: Naive=${pt.daily_3y_naive_ret_pct >= 0 ? "+" : ""}${pt.daily_3y_naive_ret_pct}% (PF ${pt.daily_3y_naive_pf}) vs Prob-Gated=<strong style="color:#ffffff;">${pt.daily_3y_win_pct}% (${pt.daily_3y_ret_pct >= 0 ? "+" : ""}${pt.daily_3y_ret_pct}%, PF ${pt.daily_3y_pf}, p=${pt.daily_3y_p_val})</strong>`);
+        extra.push(`<strong style="color:var(--amber-cmd);">DAILY A* ADAPTIVE 1:1/1:2 (Lev 1:2000)</strong>: ${pt.daily_3y_trades}t, Win=${pt.daily_3y_win_pct}%, +${pt.daily_3y_ret_pct}%, PF ${pt.daily_3y_pf} (p=${pt.daily_3y_p_val})`);
+      }
+      if (pt && pt.news_t3m_trades) {
+        extra.push(`<strong style="color:#ffffff;">MACRO NEWS T+3m 1:4 RR (Lev 1:200)</strong>: ${pt.news_t3m_trades}t, Win=${pt.news_t3m_win_pct}% (BE 20%), +${pt.news_t3m_ret_pct}%, PF ${pt.news_t3m_pf}`);
       }
       if (extra.length) {
         strip.innerHTML += `<div style="margin-top:5px; border-top:1px dashed #222; padding-top:4px;">${extra.join(" &nbsp;|&nbsp; ")}</div>`;
@@ -2096,7 +2105,7 @@ const YOY_DOMAINS = {
       { key: "retail_yoy", label: "RETAIL SALES YoY (%)", short: "RETAIL YoY", color: "#00e5ff", width: 1.9, dash: "" },
       { key: "ppi_mom", label: "PPI MoM (%)", short: "PPI MoM", color: "#ffb000", width: 1.4, dash: "3,3" }
     ],
-    note: "FRED PPIFIS & RSAFS through Sep 2026 (+1.34% PPI jump); Oct 2026 PPI releases Nov 13."
+    note: "FRED + BLS WPSFD4/RSAFS through Oct 2026 PPI (+0.35% MoM); Oct Retail Sales releases Nov 17."
   },
   fomc: {
     subtitle: "46-MONTH MULTI-MACRO TIMELINE // FOMC TARGET RATE, REAL RATE & 10Y-2Y CURVE",
@@ -2511,7 +2520,7 @@ async function fetchPpiData() {
           <td><strong>${e.date}</strong></td>
           <td>${Number(e.ppi_actual).toFixed(2)}%</td>
           <td>${Number(e.ppi_forecast).toFixed(2)}%</td>
-          <td>${Number(e.retail_actual).toFixed(2)}%</td>
+          <td>${e.retail_actual == null ? '<span style="color:var(--amber-cmd);">PENDING</span>' : `${Number(e.retail_actual).toFixed(2)}%`}</td>
           <td>${Number(e.retail_forecast).toFixed(2)}%</td>
           <td style="color:${e.z_score_composite > 0 ? '#ff4444' : (e.z_score_composite < 0 ? '#ffffff' : '#888')}; font-weight:700;">${e.z_score_composite > 0 ? '+' : ''}${Number(e.z_score_composite).toFixed(2)}σ</td>
           <td>$${Number(e.gold_open).toFixed(1)} → $${Number(e.gold_close).toFixed(1)}</td>
