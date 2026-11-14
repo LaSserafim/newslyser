@@ -285,7 +285,7 @@ def sync_live():
         "target_time": tomorrow["time"],
         "sync_releases": sync_res
     }
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def get_index():
     res = FileResponse(os.path.join(STATIC_DIR, "index.html"))
     res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
