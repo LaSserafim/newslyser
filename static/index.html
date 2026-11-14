@@ -949,18 +949,18 @@
 
         <section class="bbg-pane" id="pane-ast-pivots">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">01 // PIVOT &lt;GO&gt;</span><span>CAMARILLA &amp; CENTRAL PIVOT GEOMETRY</span></div>
+            <div class="bbg-pane-title"><span class="tag">01 // PROB &lt;GO&gt;</span><span>QUANTITATIVE CAUSAL DRIFT &amp; RISK REGIME</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ast-pivots">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
             <table class="bbg-mini-table">
-              <tr><td class="label">R3 (EXHAUSTION HIGH):</td><td class="val" id="ast-r3">--</td></tr>
-              <tr><td class="label">R2 (CAMARILLA SUPPLY):</td><td class="val" id="ast-r2">--</td></tr>
-              <tr><td class="label">R1 (VALUE AREA HIGH):</td><td class="val" id="ast-r1">--</td></tr>
-              <tr><td class="label">PP (CENTRAL PIVOT):</td><td class="val" id="ast-pp" style="color:var(--amber-cmd); font-weight:900;">--</td></tr>
-              <tr><td class="label">S1 (VALUE AREA LOW):</td><td class="val" id="ast-s1">--</td></tr>
-              <tr><td class="label">S2 (CAMARILLA DEMAND):</td><td class="val" id="ast-s2">--</td></tr>
-              <tr><td class="label">S3 (STRUCTURAL FLOOR):</td><td class="val" id="ast-s3">--</td></tr>
+              <tr><td class="label">20D BAYESIAN DRIFT (Z_20):</td><td class="val" id="ast-z20" style="color:var(--amber-cmd); font-weight:900;">--</td></tr>
+              <tr><td class="label">POSTERIOR DAILY DRIFT (μ):</td><td class="val" id="ast-mu-post">--</td></tr>
+              <tr><td class="label">DIRECTIONAL PROBABILITY:</td><td class="val" id="ast-drift-prob">--</td></tr>
+              <tr><td class="label">VARIANCE RISK PREMIUM (VRP):</td><td class="val" id="ast-vrp" style="color:#00e5ff; font-weight:800;">--</td></tr>
+              <tr><td class="label">HAR-RV PANIC RATIO (RV5/RV22):</td><td class="val" id="ast-har-ratio">--</td></tr>
+              <tr><td class="label">14D DAILY TRUE RANGE (ATR_D1):</td><td class="val" id="ast-atr-d1">--</td></tr>
+              <tr><td class="label">3Y WALK-FORWARD EVIDENCE:</td><td class="val" id="ast-bt-summary" style="color:var(--fg-bright); font-weight:700;">--</td></tr>
             </table>
           </div>
         </section>
@@ -988,17 +988,16 @@
 
         <section class="bbg-pane" id="pane-ast-gate">
           <div class="bbg-pane-header">
-            <div class="bbg-pane-title"><span class="tag">03 // GATE &lt;GO&gt;</span><span>4 CONFLUENCE PILLARS &amp; RANDOM WALK TEST</span></div>
+            <div class="bbg-pane-title"><span class="tag">03 // GATE &lt;GO&gt;</span><span>6-STAGE DATA GATES &amp; QUANTITATIVE CONFLUENCE</span></div>
             <div class="bbg-pane-actions"><button class="bbg-btn-mini btn-maximize" data-pane="pane-ast-gate">[+]</button></div>
           </div>
           <div class="bbg-pane-body">
             <table class="bbg-mini-table">
               <tr><td class="label">CONFLUENCE SCORE:</td><td class="val" id="ast-score" style="color:var(--amber-cmd); font-weight:900;">--</td></tr>
-              <tr><td class="label">1. MACRO TREND (25 pts):</td><td class="val" id="ast-p1">--</td></tr>
-              <tr><td class="label">2. STRUCTURAL SWEEP (25 pts):</td><td class="val" id="ast-p2">--</td></tr>
-              <tr><td class="label">3. VOLATILITY EXTENSION (25 pts):</td><td class="val" id="ast-p3">--</td></tr>
-              <tr><td class="label">4. CROSS-ASSET MATRIX (25 pts):</td><td class="val" id="ast-p4">--</td></tr>
-              <tr><td class="label">LO-MACKINLAY VR(5m) TEST:</td><td class="val" id="ast-vr5">--</td></tr>
+              <tr><td class="label">1. BAYESIAN DRIFT (25 pts):</td><td class="val" id="ast-p1">--</td></tr>
+              <tr><td class="label">2. M2M FIRST-PASSAGE EV (25 pts):</td><td class="val" id="ast-p2">--</td></tr>
+              <tr><td class="label">3. VRP &amp; VOL STABILITY (25 pts):</td><td class="val" id="ast-p3">--</td></tr>
+              <tr><td class="label">4. ORDER FLOW &amp; HC3 (25 pts):</td><td class="val" id="ast-p4">--</td></tr>
               <tr><td class="label">KYLE'S LAMBDA (λ):</td><td class="val" id="ast-lambda">--</td></tr>
               <tr><td class="label">HAR-RV VOL TARGETING:</td><td class="val" id="ast-har-vol" style="color:#00e5ff;">--</td></tr>
               <tr><td class="label">GLD GEX / O-U / VPIN:</td><td class="val" id="ast-q8-live">--</td></tr>

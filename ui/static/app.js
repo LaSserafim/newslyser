@@ -1732,15 +1732,35 @@ async function fetchAstarData() {
     const dyn = await dRes.json();
     if (!aStar) return;
 
-    if (dyn) {
-      const res = dyn.resistance || {}, sup = dyn.support || {};
-      if (document.getElementById("ast-r3")) document.getElementById("ast-r3").innerText = `$${(res.r3 || 0).toFixed(2)}`;
-      if (document.getElementById("ast-r2")) document.getElementById("ast-r2").innerText = `$${(res.r2 || 0).toFixed(2)}`;
-      if (document.getElementById("ast-r1")) document.getElementById("ast-r1").innerText = `$${(res.r1 || 0).toFixed(2)}`;
-      if (document.getElementById("ast-pp")) document.getElementById("ast-pp").innerText = `$${(dyn.pivot_point || 0).toFixed(2)}`;
-      if (document.getElementById("ast-s1")) document.getElementById("ast-s1").innerText = `$${(sup.s1 || 0).toFixed(2)}`;
-      if (document.getElementById("ast-s2")) document.getElementById("ast-s2").innerText = `$${(sup.s2 || 0).toFixed(2)}`;
-      if (document.getElementById("ast-s3")) document.getElementById("ast-s3").innerText = `$${(sup.s3 || 0).toFixed(2)}`;
+    const pe = aStar.probability_engine || {};
+    const bt3 = pe.backtest_3y_summary || {};
+    if (document.getElementById("ast-z20")) {
+      const zVal = Number(pe.z_20_drift || 0);
+      document.getElementById("ast-z20").innerText = `${zVal >= 0 ? "+" : ""}${zVal.toFixed(2)}σ (${Math.abs(zVal) >= 0.75 ? "CAUSAL DRIFT PASS" : "NEUTRAL CHOP"})`;
+      document.getElementById("ast-z20").style.color = Math.abs(zVal) >= 0.75 ? (zVal > 0 ? "#00e5ff" : "#ff4444") : "var(--amber-cmd)";
+    }
+    if (document.getElementById("ast-mu-post")) {
+      const muVal = Number(pe.mu_daily_post_pct || 0);
+      document.getElementById("ast-mu-post").innerText = `${muVal >= 0 ? "+" : ""}${muVal.toFixed(3)}%/day (5D Drift: ${(muVal * 5.0).toFixed(2)}%)`;
+    }
+    if (document.getElementById("ast-drift-prob")) {
+      document.getElementById("ast-drift-prob").innerText = `Bullish ${pe.p_drift_bull_pct || 50}% / Bearish ${pe.p_drift_bear_pct || 50}%`;
+    }
+    if (document.getElementById("ast-vrp")) {
+      const vrpVal = Number(pe.vrp_ann_pct || 0);
+      document.getElementById("ast-vrp").innerText = `${vrpVal >= 0 ? "+" : ""}${vrpVal.toFixed(1)}% (GVZ ${pe.gvz_iv_pct}% - RV22 ${pe.rv22_ann_pct}%)`;
+      document.getElementById("ast-vrp").style.color = vrpVal > 0 ? "#00e5ff" : "#ff4444";
+    }
+    if (document.getElementById("ast-har-ratio")) {
+      const ratio = Number(pe.rv5_ann_pct || 0) / Math.max(1.0, Number(pe.rv22_ann_pct || 1.0));
+      document.getElementById("ast-har-ratio").innerText = `${ratio.toFixed(2)}x (Threshold <= 1.15x Calm)`;
+      document.getElementById("ast-har-ratio").style.color = ratio <= 1.15 ? "#00e5ff" : "#ff4444";
+    }
+    if (document.getElementById("ast-atr-d1")) {
+      document.getElementById("ast-atr-d1").innerText = `$${Number(pe.atr_d1_usd || 0).toFixed(2)} (SL: 1.0 ATR / TP: 2.0 ATR)`;
+    }
+    if (document.getElementById("ast-bt-summary") && bt3.trades) {
+      document.getElementById("ast-bt-summary").innerText = `${bt3.trades} Trades | ${bt3.win_rate_pct}% Win | PF ${bt3.profit_factor} (t=${bt3.t_stat}, p=${bt3.p_val})`;
     }
 
     // Pillars & Lo-MacKinlay VR
@@ -1763,7 +1783,7 @@ async function fetchAstarData() {
     if (document.getElementById("ast-q8-live")) {
       document.getElementById("ast-q8-live").innerText = `GEX $${q8p.net_gex_usd_m || 0}M (Flip $${q8p.gamma_flip_xau || 0}) | O-U s=${q8p.ou_fair_value_s_score >= 0 ? "+" : ""}${q8p.ou_fair_value_s_score || 0}σ | VPIN=${q8p.vpin_now || 0.44}`;
     }
-    if (document.getElementById("val-ast-pwin")) document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (P_up: ${mcq.p_upward_pct}% / P_down: ${mcq.p_downward_pct}%)`;
+    if (document.getElementById("val-ast-pwin")) document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (M2M EV: ${fpa.expected_value_r >= 0 ? "+" : ""}${fpa.expected_value_r}R / Kelly: ${fpa.quarter_kelly_pct}%)`;
     if (document.getElementById("val-ast-var")) document.getElementById("val-ast-var").innerText = `${mcq.var_95_pct}% (CVaR: ${mcq.cvar_95_pct}% | ${(mcq.n_paths || 10000).toLocaleString()} paths)`;
 
     const ticket = aStar.trade_ticket || {};
