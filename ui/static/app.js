@@ -415,6 +415,18 @@ function initAllControls() {
     });
   });
 
+  // A* Horizon Switcher: Scalping, Intraday, Daily, Swing
+  document.querySelectorAll(".astar-horizon-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const h = btn.getAttribute("data-horizon") || "daily";
+      if (!EVENT_STATE.astar) EVENT_STATE.astar = {};
+      EVENT_STATE.astar.horizon = h;
+      document.querySelectorAll(".astar-horizon-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      fetchAstarData();
+    });
+  });
+
   // Zero-Luck Confidence Level Selector (80% -> 99%)
   document.getElementById("conf-level-select")?.addEventListener("change", (e) => {
     window.SELECTED_CONFIDENCE = parseInt(e.target.value || "95", 10);
@@ -996,19 +1008,28 @@ async function renderEventMcPane(ev) {
   }
 
   // Update metrics table
-  const medId = ev === "cpi" ? "val-mc-median" : `val-${ev}-mc-median`;
-  const varId = ev === "cpi" ? "val-mc-var" : `val-${ev}-mc-var`;
+  const medId = ev === "cpi" ? "val-mc-median" : (ev === "astar" ? "val-ast-pwin" : `val-${ev}-mc-median`);
+  const varId = ev === "cpi" ? "val-mc-var" : (ev === "astar" ? "val-ast-var" : `val-${ev}-mc-var`);
   const tailId = ev === "cpi" ? "val-mc-tail" : `val-${ev}-mc-tail`;
   const stochId = ev === "cpi" ? "val-mc-stoch" : `val-${ev}-mc-stoch`;
   const m = mc.metrics || {};
   const ea = mc.entry_analysis || {};
   const sv = mc.bs_stoch_vol || {};
 
-  if (document.getElementById(medId)) {
-    document.getElementById(medId).innerText = `$${m.median_terminal_price.toFixed(2)} (${mc.n_paths.toLocaleString()} paths, ±$${mc.mc_moe_terminal_dollars} SE)`;
-  }
-  if (document.getElementById(varId)) {
-    document.getElementById(varId).innerText = `${m.var_95_pct > 0 ? "+" : ""}${m.var_95_pct.toFixed(2)}% / CVaR ${m.cvar_95_pct.toFixed(2)}% (P+: ${m.p_positive_return_pct}% | P-: ${m.p_negative_return_pct}%)`;
+  if (ev === "astar") {
+    if (document.getElementById("val-ast-pwin")) {
+      document.getElementById("val-ast-pwin").innerText = `${m.p_positive_return_pct}% win (${mc.n_paths.toLocaleString()} paths, ±$${mc.mc_moe_terminal_dollars} SE)`;
+    }
+    if (document.getElementById("val-ast-var")) {
+      document.getElementById("val-ast-var").innerText = `${m.var_95_pct > 0 ? "+" : ""}${m.var_95_pct.toFixed(2)}% / CVaR ${m.cvar_95_pct.toFixed(2)}% (P+: ${m.p_positive_return_pct}% | P-: ${m.p_negative_return_pct}%)`;
+    }
+  } else {
+    if (document.getElementById(medId)) {
+      document.getElementById(medId).innerText = `$${m.median_terminal_price.toFixed(2)} (${mc.n_paths.toLocaleString()} paths, ±$${mc.mc_moe_terminal_dollars} SE)`;
+    }
+    if (document.getElementById(varId)) {
+      document.getElementById(varId).innerText = `${m.var_95_pct > 0 ? "+" : ""}${m.var_95_pct.toFixed(2)}% / CVaR ${m.cvar_95_pct.toFixed(2)}% (P+: ${m.p_positive_return_pct}% | P-: ${m.p_negative_return_pct}%)`;
+    }
   }
   if (document.getElementById(tailId)) {
     document.getElementById(tailId).innerText = `|Move| >= 1σ: ${m.tail_beyond_1sd_pct}% | >= 2σ: ${m.tail_beyond_2sd_pct}% (σ=${m.terminal_dispersion_sd_pct}%)`;
@@ -1696,7 +1717,7 @@ async function renderEventDiagPane(ev) {
 // ==============================================================
 // 5. MODULE 05: DAILY A* SETUP, PROGRESS GAUGE & AUDIT LEDGER
 // ==============================================================
-function initTtlCountdown(serverExpiresAtEpoch) {
+function initTtlCountdown(serverExpiresAtEpoch, maxValSec = 5400) {
   if (!serverExpiresAtEpoch) return;
   const timerEl = document.getElementById("astar-ttl-timer");
   const decayEl = document.getElementById("astar-alpha-decay");
@@ -1713,8 +1734,10 @@ function initTtlCountdown(serverExpiresAtEpoch) {
       return;
     }
     const m = Math.floor(remaining / 60), s = remaining % 60;
-    if (timerEl) { timerEl.innerText = `${m}m ${s < 10 ? "0" : ""}${s}s`; timerEl.style.color = m < 15 ? "var(--amber-cmd)" : "var(--fg-bright)"; }
-    const maxValSec = 5400;
+    const h = Math.floor(m / 60);
+    const mRem = m % 60;
+    const timeStr = h > 0 ? `${h}h ${mRem}m ${s < 10 ? "0" : ""}${s}s` : `${m}m ${s < 10 ? "0" : ""}${s}s`;
+    if (timerEl) { timerEl.innerText = timeStr; timerEl.style.color = m < 15 ? "var(--amber-cmd)" : "var(--fg-bright)"; }
     const decayPct = Math.min(100, Math.max(0, (1.0 - Math.exp(-1.5 * (maxValSec - remaining) / maxValSec)) * 100));
     if (decayEl) decayEl.innerText = `${decayPct.toFixed(1)}%`;
     if (statusEl) statusEl.innerText = m < 15 ? "TTL EXPIRING SOON" : "ACTIVE VALID SETUP";
@@ -1727,7 +1750,8 @@ function initTtlCountdown(serverExpiresAtEpoch) {
 
 async function fetchAstarData() {
   try {
-    const [aRes, dRes] = await Promise.all([fetch("/api/daily-a-star"), fetch("/api/dynamic-levels")]);
+    const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
+    const [aRes, dRes] = await Promise.all([fetch(`/api/daily-a-star?horizon=${h}`), fetch("/api/dynamic-levels")]);
     const aStar = await aRes.json();
     const dyn = await dRes.json();
     if (!aStar) return;
@@ -1832,7 +1856,7 @@ async function fetchAstarData() {
     }
 
     if (aStar.time_to_live && aStar.time_to_live.expires_at_epoch) {
-      initTtlCountdown(aStar.time_to_live.expires_at_epoch);
+      initTtlCountdown(aStar.time_to_live.expires_at_epoch, aStar.time_to_live.max_validity_seconds || 5400);
     }
 
     renderEventMcPane("astar");

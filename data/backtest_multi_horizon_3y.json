@@ -1,0 +1,104 @@
+{
+  "generated_at": 1794758389.9250822,
+  "time_utc": "2026-11-15 15:59:49 UTC",
+  "tracks": {
+    "intraday_astar": {
+      "trades": 109,
+      "wins": 49,
+      "win_rate_pct": 45.0,
+      "mean_r": 0.128,
+      "sum_r": 13.99,
+      "t_stat": 1.0,
+      "p_val": 0.31955,
+      "profit_factor": 1.23,
+      "ending_equity_usd": 1069.83,
+      "net_return_pct": 6.98,
+      "max_drawdown_pct": 6.46
+    },
+    "daily_astar": {
+      "trades": 67,
+      "wins": 39,
+      "win_rate_pct": 58.2,
+      "mean_r": 0.345,
+      "sum_r": 23.14,
+      "t_stat": 2.36,
+      "p_val": 0.02124,
+      "profit_factor": 1.9,
+      "ending_equity_usd": 1253.88,
+      "net_return_pct": 25.39,
+      "max_drawdown_pct": 5.13
+    },
+    "swing_astar": {
+      "trades": 37,
+      "wins": 17,
+      "win_rate_pct": 45.9,
+      "mean_r": 0.237,
+      "sum_r": 8.77,
+      "t_stat": 1.06,
+      "p_val": 0.2962,
+      "profit_factor": 1.48,
+      "ending_equity_usd": 1087.89,
+      "net_return_pct": 8.79,
+      "max_drawdown_pct": 6.34
+    },
+    "macro_news": {
+      "trades": 87,
+      "wins": 48,
+      "win_rate_pct": 55.2,
+      "mean_r": 0.655,
+      "sum_r": 57.02,
+      "t_stat": 3.72,
+      "p_val": 0.00035,
+      "profit_factor": 2.77,
+      "ending_equity_usd": 2283.47,
+      "net_return_pct": 128.35,
+      "max_drawdown_pct": 5.72
+    },
+    "combined_portfolio": {
+      "trades": 458,
+      "wins": 225,
+      "win_rate_pct": 49.1,
+      "mean_r": 0.244,
+      "sum_r": 111.91,
+      "t_stat": 3.9,
+      "p_val": 0.000111,
+      "profit_factor": 1.51,
+      "ending_equity_usd": 3434.61,
+      "net_return_pct": 243.46,
+      "max_drawdown_pct": 14.48
+    }
+  },
+  "year_over_year": {
+    "2024": {
+      "trades": 119,
+      "wins": 59,
+      "win_rate_pct": 49.6,
+      "mean_r": 0.167,
+      "sum_r": 19.84,
+      "profit_factor": 1.34
+    },
+    "2025": {
+      "trades": 186,
+      "wins": 90,
+      "win_rate_pct": 48.4,
+      "mean_r": 0.222,
+      "sum_r": 41.31,
+      "profit_factor": 1.47
+    },
+    "2026": {
+      "trades": 153,
+      "wins": 76,
+      "win_rate_pct": 49.7,
+      "mean_r": 0.332,
+      "sum_r": 50.77,
+      "profit_factor": 1.71
+    }
+  },
+  "hypothesis_testing": {
+    "student_t_stat": 3.9,
+    "student_t_pval": 0.000111,
+    "rademacher_permutation_pval": 6e-05,
+    "deflated_sharpe_ratio": 1.0,
+    "ann_sharpe": 2.2515807993998487
+  }
+}

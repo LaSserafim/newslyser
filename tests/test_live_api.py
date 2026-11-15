@@ -29,6 +29,19 @@ class TestLiveApiEndpoints(unittest.TestCase):
         self.assertIn("first_passage_analysis", d)
         self.assertIn("data_validation_gate", d)
 
+        d_scalp = self._get("/api/daily-a-star?horizon=scalping")
+        self.assertEqual(d_scalp["horizon"], "scalping")
+
+        d_intra = self._get("/api/daily-a-star?horizon=intraday")
+        self.assertEqual(d_intra["horizon"], "intraday")
+
+        d_multi = self._get("/api/multi-horizon-a-star")
+        self.assertIn("horizons", d_multi)
+        self.assertIn("scalping", d_multi["horizons"])
+        self.assertIn("intraday", d_multi["horizons"])
+        self.assertIn("daily", d_multi["horizons"])
+        self.assertIn("swing", d_multi["horizons"])
+
     def test_prenew_endpoints(self):
         for path in ["/api/ppi-prenew-model", "/api/pre-news-model", "/api/fomc-prenew-model", "/api/nfp-prenew-model"]:
             d = self._get(path)

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-11-14 06:52:51 UTC",
+  "generated_at_utc": "2026-11-15 15:47:27 UTC",
   "total_fred_series_ingested": 41,
   "domains": {
     "labor_dol": {
@@ -43,7 +43,7 @@
       "title": "U.S. TREASURY CURVE, BOND & FED LIQUIDITY",
       "fed_target_upper_pct": 4.0,
       "effr_pct": 3.88,
-      "zq_futures_implied_pct": 3.878,
+      "zq_futures_implied_pct": 4.18,
       "dgs2_pct": 4.86,
       "dgs10_pct": 5.1,
       "dgs30_pct": 5.43,
@@ -93,9 +93,9 @@
       "ols_f_p_val": 0.0,
       "beta_core_pce": 1.3486,
       "beta_unemp": -0.2013,
-      "p_tightening_pct": 16.3,
-      "p_hold_pct": 54.2,
-      "p_easing_pct": 29.5
+      "p_tightening_pct": 52.6,
+      "p_hold_pct": 41.1,
+      "p_easing_pct": 6.3
     },
     "macro_regimes_copula": {
       "n_months": 668,

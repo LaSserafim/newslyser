@@ -1,6 +1,14 @@
 {
   "daily": {
-    "created_at": 1794639982,
-    "expires_at": 1794645382
+    "created_at": 1794757446,
+    "expires_at": 1794762846
+  },
+  "intraday": {
+    "created_at": 1794756963,
+    "expires_at": 1794771363
+  },
+  "scalping": {
+    "created_at": 1794758449,
+    "expires_at": 1794762049
   }
 }

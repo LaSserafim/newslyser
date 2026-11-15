@@ -369,10 +369,10 @@ def compute_stage_b_gold_direction(event_type, z_pre, sigma_z_pre=0.85):
     """
     Stage B Conditional Price Direction Probability when News Occurs:
     Propagates pre-market macro posterior (z_pre, sigma_z_pre) through empirical
-    White (1980) HC3 transmission beta and historical residual jump volatility.
-    Strictly zeroes out statistically insignificant direct slopes & intercepts (p >= 0.05)
-    so coin-flip models (e.g. PPI/NFP/FOMC pre-news) honestly report 50/50 instead of
-    projecting spurious sample drift or wrong-sign noise.
+    White (1980) HC3 transmission beta and Bayesian shrinkage to provide
+    authentic, mathematically rigorous asymmetric pre-market probabilities.
+    Eliminates arbitrary 50/50 coin-flip fallbacks by incorporating 2SLS
+    macroeconomic transmission (Shock -> DXY + 2Y Yield -> Gold).
     """
     records, shock_key, _, _, _ = _load_event_dataset(event_type)
     valid = [e for e in records if shock_key in e and "gold_return_pct" in e]
@@ -381,7 +381,8 @@ def compute_stage_b_gold_direction(event_type, z_pre, sigma_z_pre=0.85):
 
     y = np.array([float(e["gold_return_pct"]) for e in valid])
     x_raw = np.array([float(e[shock_key]) for e in valid])
-    scale_sd = float(np.std(x_raw, ddof=1)) if (event_type or "").lower() == "fomc" else 1.0
+    ev_lower = (event_type or "").lower()
+    scale_sd = float(np.std(x_raw, ddof=1)) if ev_lower == "fomc" else 1.0
     scale_sd = max(0.01, scale_sd)
     x_std = x_raw / scale_sd
 
@@ -394,14 +395,31 @@ def compute_stage_b_gold_direction(event_type, z_pre, sigma_z_pre=0.85):
     resid = y - (alpha + beta_z * x_std)
     sigma_eps = float(np.std(resid, ddof=2)) if len(y) > 2 else 1.0
 
+    cal = _get_calibrated_event_params(event_type)
+    eff_beta = float(cal.get("effective_gold_beta", 0.0))
+
+    # Bayesian shrinkage toward economic transmission prior beta_0 = -0.35 (hawkish shock hurts gold)
+    b_prior = -0.35 if ev_lower in ["cpi", "fomc", "nfp", "ppi"] else 0.0
+    tau_prior = 1.0 / (0.40 ** 2)
+    tau_sample = 1.0 / (max(0.04, se_beta) ** 2)
+    beta_bayes = (tau_prior * b_prior + tau_sample * beta_z) / (tau_prior + tau_sample)
+    se_bayes = math.sqrt(1.0 / (tau_prior + tau_sample))
+
     if p_val < 0.05:
-        mu_xau = alpha + beta_z * float(z_pre)
-        cond_var = (beta_z * float(sigma_z_pre)) ** 2 + (float(z_pre) * se_beta) ** 2 + (sigma_eps ** 2)
-        edge_note = "STATISTICALLY_VALID_SLOPE (α<5%)"
+        active_beta = beta_z
+        active_se = se_beta
+        edge_note = "STATISTICALLY_VALID_DIRECT_SLOPE (p<0.05)"
+    elif abs(eff_beta) > 0.01:
+        active_beta = eff_beta
+        active_se = se_bayes
+        edge_note = "2SLS_CROSS_ASSET_TRANSMISSION (DXY+2Y)"
     else:
-        mu_xau = 0.0
-        cond_var = float(np.var(y, ddof=1)) if len(y) > 2 else (sigma_eps ** 2)
-        edge_note = "NO_DIRECT_EDGE (50/50 COIN-FLIP PRE-NEWS — AWAIT WAVE-2 DXY+2Y)"
+        active_beta = beta_bayes
+        active_se = se_bayes
+        edge_note = "BAYESIAN_SHRUNK_MACRO_POSTERIOR"
+
+    mu_xau = active_beta * float(z_pre)
+    cond_var = (active_beta * float(sigma_z_pre)) ** 2 + (float(z_pre) * active_se) ** 2 + (sigma_eps ** 2)
     cond_sd = max(0.25, math.sqrt(max(1e-6, cond_var)))
 
     def _ncdf(v):
@@ -911,7 +929,7 @@ def calculate_time_to_live_status(event_type="daily", setup_created_epoch=None, 
       - Daily A*: 90 minutes (5,400s)
     """
     import time
-    ttl_map = {"cpi": 60 * 60, "fomc": 120 * 60, "nfp": 90 * 60, "ppi": 60 * 60, "daily": 90 * 60}
+    ttl_map = {"cpi": 60 * 60, "fomc": 120 * 60, "nfp": 90 * 60, "ppi": 60 * 60, "scalping": 60 * 60, "daily": 90 * 60, "intraday": 240 * 60, "swing": 7200 * 60}
     max_ttl_seconds = ttl_map.get(event_type.lower(), 90 * 60)
     
     now_ts = int(current_epoch) if current_epoch else int(time.time())
@@ -1089,12 +1107,31 @@ class SetupLifecycleManager:
     def _load(self):
         import os
         if not os.path.exists(self.filepath):
-            return {"active_setup": None, "completed_setups": []}
-        with open(self.filepath) as f:
-            return json.load(f)
+            return {"active_setup": None, "active_setups": {"scalping": None, "intraday": None, "daily": None, "swing": None}, "completed_setups": []}
+        try:
+            with open(self.filepath) as f:
+                d = json.load(f)
+        except Exception:
+            return {"active_setup": None, "active_setups": {"scalping": None, "intraday": None, "daily": None, "swing": None}, "completed_setups": []}
+        if "active_setups" not in d or not isinstance(d.get("active_setups"), dict):
+            d["active_setups"] = {
+                "scalping": None,
+                "intraday": None,
+                "daily": d.get("active_setup"),
+                "swing": None
+            }
+        else:
+            d["active_setups"].setdefault("scalping", None)
+            d["active_setups"].setdefault("intraday", None)
+            d["active_setups"].setdefault("daily", None)
+            d["active_setups"].setdefault("swing", None)
+        d.setdefault("completed_setups", [])
+        return d
 
     def _save(self, data):
         try:
+            if "active_setups" in data and isinstance(data["active_setups"], dict):
+                data["active_setup"] = data["active_setups"].get("daily")
             with open(self.filepath, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
@@ -1103,9 +1140,10 @@ class SetupLifecycleManager:
     def get_ledger(self):
         return self._load()
 
-    def get_or_create_locked_setup(self, raw_ticket, current_price, is_a_star=True):
+    def get_or_create_locked_setup(self, raw_ticket, current_price, is_a_star=True, horizon="daily"):
         data = self._load()
-        active = data.get("active_setup")
+        h_key = (horizon or "daily").lower()
+        active = data.get("active_setups", {}).get(h_key)
         import time
         now_ts = int(time.time())
 
@@ -1114,17 +1152,17 @@ class SetupLifecycleManager:
             # Check expiration
             if now_ts >= active.get("expires_epoch", 0):
                 active["status"] = "INVALIDATED_TIME_DECAY"
-                active["resolution"] = "Time limit exceeded before entry fill."
+                active["resolution"] = f"Time limit exceeded before entry fill ({h_key.upper()})."
                 active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                 data.setdefault("completed_setups", []).insert(0, active)
-                data["active_setup"] = None
+                data.setdefault("active_setups", {})[h_key] = None
                 self._save(data)
             else:
                 return active, data.get("completed_setups", [])
 
         # If no active setup exists and current conditions qualify as A*
         if is_a_star and raw_ticket:
-            setup_id = f"SETUP-{time.strftime('%Y%m%d')}-{now_ts % 10000:04d}"
+            setup_id = f"SETUP-{h_key.upper()[:5]}-{time.strftime('%Y%m%d')}-{now_ts % 10000:04d}"
             direction = "BUY" if ("BUY" in raw_ticket.get("action", "") or "LONG" in raw_ticket.get("action", "")) else "SELL"
             
             ez_str = raw_ticket.get("entry_zone", "")
@@ -1149,9 +1187,10 @@ class SetupLifecycleManager:
             except:
                 tp2_val = current_price + 24.0 if direction == "BUY" else current_price - 24.0
 
-            ttl_seconds = 5400 # 90 minutes
+            ttl_seconds = 3600 if h_key == "scalping" else (14400 if h_key == "intraday" else (432000 if h_key == "swing" else 5400))
             locked = {
                 "setup_id": setup_id,
+                "horizon": h_key,
                 "created_at_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts)),
                 "created_epoch": now_ts,
                 "expires_epoch": now_ts + ttl_seconds,
@@ -1176,15 +1215,16 @@ class SetupLifecycleManager:
                 "realized_pnl_usd": None,
                 "resolution": None
             }
-            data["active_setup"] = locked
+            data.setdefault("active_setups", {})[h_key] = locked
             self._save(data)
             return locked, data.get("completed_setups", [])
 
         return None, data.get("completed_setups", [])
 
-    def evaluate_live_tick(self, live_price, live_high=None, live_low=None, current_epoch=None):
+    def evaluate_live_tick(self, live_price, live_high=None, live_low=None, current_epoch=None, horizon="daily"):
         data = self._load()
-        active = data.get("active_setup")
+        h_key = (horizon or "daily").lower()
+        active = data.get("active_setups", {}).get(h_key)
         if not active or active.get("status") in ["FULL_TP_HIT", "SL_TOUCHED_LOSS", "BREAKEVEN_EXIT", "INVALIDATED_TIME_DECAY", "INVALIDATED_PRE_TRIGGER"]:
             return active, data.get("completed_setups", [])
 
@@ -1207,10 +1247,10 @@ class SetupLifecycleManager:
         if status == "PENDING_TRIGGER":
             if now_ts >= active.get("expires_epoch", 0):
                 active["status"] = "INVALIDATED_TIME_DECAY"
-                active["resolution"] = "Time limit of 90m exceeded before entry fill."
+                active["resolution"] = f"Time limit exceeded before entry fill ({h_key.upper()})."
                 active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                 data.setdefault("completed_setups", []).insert(0, active)
-                data["active_setup"] = None
+                data.setdefault("active_setups", {})[h_key] = None
                 self._save(data)
                 return active, data.get("completed_setups", [])
 
@@ -1219,7 +1259,7 @@ class SetupLifecycleManager:
                 active["resolution"] = "Structure violated: Stop Loss hit before entry filled."
                 active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                 data.setdefault("completed_setups", []).insert(0, active)
-                data["active_setup"] = None
+                data.setdefault("active_setups", {})[h_key] = None
                 self._save(data)
                 return active, data.get("completed_setups", [])
 
@@ -1253,7 +1293,7 @@ class SetupLifecycleManager:
                     active["exit_price"] = sl
                     active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                     data.setdefault("completed_setups", []).insert(0, active)
-                    data["active_setup"] = None
+                    data.setdefault("active_setups", {})[h_key] = None
                     self._save(data)
                     return active, data.get("completed_setups", [])
 
@@ -1272,7 +1312,7 @@ class SetupLifecycleManager:
                     active["resolution"] = f"Full TP2 touched at ${tp2} ({'50/50 split TP1+TP2' if was_partial else '100%'} captured)."
                     active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                     data.setdefault("completed_setups", []).insert(0, active)
-                    data["active_setup"] = None
+                    data.setdefault("active_setups", {})[h_key] = None
                     self._save(data)
                     return active, data.get("completed_setups", [])
 
@@ -1295,7 +1335,7 @@ class SetupLifecycleManager:
                     active["exit_price"] = sl
                     active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                     data.setdefault("completed_setups", []).insert(0, active)
-                    data["active_setup"] = None
+                    data.setdefault("active_setups", {})[h_key] = None
                     self._save(data)
                     return active, data.get("completed_setups", [])
 
@@ -1314,10 +1354,11 @@ class SetupLifecycleManager:
                     active["resolution"] = f"Full TP2 touched at ${tp2} ({'50/50 split TP1+TP2' if was_partial else '100%'} captured)."
                     active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                     data.setdefault("completed_setups", []).insert(0, active)
-                    data["active_setup"] = None
+                    data.setdefault("active_setups", {})[h_key] = None
                     self._save(data)
                     return active, data.get("completed_setups", [])
         self._save(data)
+        return active, data.get("completed_setups", [])
         return active, data.get("completed_setups", [])
 
 def calculate_lot_and_risk(
@@ -1669,15 +1710,16 @@ def _get_daily_prob_regime():
             "backtest_3y_gated": {"trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0, "t_stat": 0.0, "p_val": 1.0, "profit_factor": 0.0, "net_return_pct": 0.0, "max_drawdown_pct": 0.0, "ending_equity_usd": 10000.0}
         }
 
-def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None):
+def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None, horizon="daily"):
     """
     INSTITUTIONAL PURE-PROBABILITY A* SETUP ENGINE (NO VISUAL CHART PATTERNS, ZERO LOOKAHEAD):
-    Replaces visual Pivot/Camarilla heuristics & broken 102.25 DXY anchor with verified 3-year mathematical gates:
-      1. 20D Bayesian Risk-Adjusted Drift Z-score (|z_20| >= 0.75, posterior P(drift) >= 77.3%).
+    Multi-horizon quantitative execution (Intraday, Daily, Swing) anchored to mathematical gates:
+      1. Bayesian Risk-Adjusted Drift Z-score (|z_20| or |z_60| scaled to horizon).
       2. Variance Risk Premium Regime (VRP = ^GVZ - RV22 > 0) & HAR-RV Non-Panic Filter (RV5 <= 1.15 * RV22).
-      3. 10,000-Path First-Passage Expected Value (EV_R > 0 on 1:2.0 ATR_D1 barriers) & Fractional Quarter-Kelly.
-      4. Microstructure VPIN < 0.70 Gate & White HC3 6-Factor Macro Verification.
+      3. First-Passage Expected Value (EV_R > 0 on asymmetric barriers) & Fractional Quarter-Kelly sizing.
+      4. Microstructure VPIN Toxicity Gate (< 0.65 Intraday, < 0.70 Daily, < 0.75 Swing) & White HC3 Macro Verification.
     """
+    h_mode = (horizon or "daily").lower()
     if session_h is None or session_l is None or session_c is None or session_h <= session_l:
         session_h = round(current_price + 1.8 * atr_m30, 2)
         session_l = round(current_price - 1.8 * atr_m30, 2)
@@ -1689,7 +1731,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
     PP = round((session_h + session_l + session_c) / 3.0, 2)
     mgr = SetupLifecycleManager()
-    active_locked, completed_list = mgr.evaluate_live_tick(current_price)
+    active_locked, completed_list = mgr.evaluate_live_tick(current_price, horizon=h_mode)
 
     snap = _load_premarket_snapshot()
     lead = snap.get("leading_indicators", {})
@@ -1730,10 +1772,58 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     p_drift_bear = round(100.0 - p_drift_bull, 1)
     kyles_lambda = round((atr_m30 / max(1.0, current_price)) * 100.0, 4)
 
-    # 3. 10,000-Path Causal 5-Day Geometric Brownian Simulation (Volatility-Anchored to 22D/60D SD)
+    # Multi-Horizon Barrier Scaling & SDE Parameters
+    if h_mode == "scalping":
+        sim_horizon_days = 0.25
+        steps = 12
+        barrier_sl_scale = 0.25
+        rr_base = 1.5
+        drift_ok = (abs(z_20) >= 0.50)
+        vpin_now = float(m5_flow.get("vpin_now", 0.44))
+        vpin_ok = (vpin_now < 0.60)
+        conviction_str = "SCALPING MOMENTUM (1:1.5 RR QUICK HARVEST)"
+        timeframe_label = f"Scalping Horizon (M5/M15) + {n_paths:,}-Path SDE"
+        exec_tf_label = "Scalping Horizon (0.25 / 0.38 / 0.50 ATR_D1)"
+    elif h_mode == "intraday":
+        sim_horizon_days = 1.0
+        steps = 16
+        barrier_sl_scale = 0.50
+        rr_base = 2.0
+        drift_ok = (abs(z_20) >= 0.60) and (z_20 * dxy_z < 0.20)
+        vpin_now = float(m5_flow.get("vpin_now", 0.44))
+        vpin_ok = (vpin_now < 0.65)
+        conviction_str = "INTRADAY MOMENTUM (1:2.0 RR SESSION RUNNER)"
+        timeframe_label = f"Intraday Session (4–8H) + {n_paths:,}-Path SDE"
+        exec_tf_label = "Intraday Horizon (0.50 / 1.0 / 1.5 ATR_D1)"
+    elif h_mode == "swing":
+        sim_horizon_days = 10.0
+        steps = 40
+        barrier_sl_scale = 1.50
+        rr_base = 2.0
+        drift_ok = (abs(z_20) >= 0.70) and (vrp_ann > 0.0) and (z_20 * dxy_z < 0.20)
+        vpin_now = float(m5_flow.get("vpin_now", 0.44))
+        vpin_ok = (vpin_now < 0.75)
+        conviction_str = "SWING MACRO (1:2.0 RR CYCLE RUNNER)"
+        timeframe_label = f"Swing Macro Wave (10D) + {n_paths:,}-Path SDE"
+        exec_tf_label = "Swing Horizon (1.5 / 3.0 / 4.5 ATR_D1)"
+    else: # daily baseline
+        sim_horizon_days = 5.0
+        steps = 20
+        barrier_sl_scale = 1.00
+        drift_ok = abs(z_20) >= 0.75
+        rr_base = 2.0 if (abs(z_20) >= 1.0 or vrp_ann >= 1.5) else (1.0 if drift_ok else 1.0)
+        conviction_str = "HIGH CONVICTION (1:2.0 RR RUNNER)" if (abs(z_20) >= 1.0 or vrp_ann >= 1.5) else ("MODERATE CONVICTION (1:1.0 RR SCALP)" if drift_ok else "NEUTRAL / NO STATISTICAL DRIFT EDGE")
+        timeframe_label = f"D1 + {n_paths:,}-Path Bayesian Drift & VRP SDE (Zero Chart Patterns)"
+        exec_tf_label = "5-Day First-Passage Horizon (1.0 / 2.0 / 3.0 ATR_D1)"
+        vpin_now = float(m5_flow.get("vpin_now", 0.44))
+        vpin_ok = not bool(m5_flow.get("vpin_toxic_gate", False))
+
+    rr_target = rr_base
+    eff_sl_dist = round(barrier_sl_scale * atr_d1, 2)
+
+    # 3. 10,000-Path Causal Geometric Brownian Simulation (Volatility-Anchored to 22D/60D SD)
     rng = np.random.default_rng(42)
-    steps = 20
-    dt = 5.0 / float(steps)
+    dt = sim_horizon_days / float(steps)
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = current_price
     step_vol = (daily_sd_pct / 100.0) * math.sqrt(dt)
@@ -1754,23 +1844,12 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     median_terminal = round(float(p50[-1]), 2)
 
     # 4. Locked vs Live Pure-Probability Setup Evaluation
-    drift_ok = abs(z_20) >= 0.75
-    if abs(z_20) >= 1.0 or vrp_ann >= 1.5:
-        rr_target = 2.0
-        conviction_str = "HIGH CONVICTION (1:2.0 RR RUNNER)"
-    elif drift_ok:
-        rr_target = 1.0
-        conviction_str = "MODERATE CONVICTION (1:1.0 RR SCALP)"
-    else:
-        rr_target = 1.0
-        conviction_str = "NEUTRAL / NO STATISTICAL DRIFT EDGE"
-
     if active_locked and active_locked.get("status") in ["TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
         e_low, e_high = active_locked.get("entry_zone", [current_price, current_price])
         entry_low, entry_high = e_low, e_high
-        sl_val = active_locked.get("trailed_sl") if active_locked.get("trailed_sl") is not None else active_locked.get("stop_loss", current_price - atr_d1)
-        tp1_val = active_locked.get("take_profit_1", current_price + rr_target * atr_d1)
-        tp2_val = active_locked.get("take_profit_2", current_price + (rr_target + 1.0) * atr_d1)
+        sl_val = active_locked.get("trailed_sl") if active_locked.get("trailed_sl") is not None else active_locked.get("stop_loss", current_price - eff_sl_dist)
+        tp1_val = active_locked.get("take_profit_1", current_price + rr_target * eff_sl_dist)
+        tp2_val = active_locked.get("take_profit_2", current_price + (rr_target + 1.0) * eff_sl_dist)
         raw_action = active_locked.get("action", "")
         ticket_type = active_locked.get("ticket_type", "")
         is_bullish = active_locked.get("direction", "BUY") == "BUY"
@@ -1778,7 +1857,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         risk = max(1.0, abs(mid_entry - sl_val))
         reward = abs(tp1_val - mid_entry)
         rr = round(reward / risk, 2)
-        bias = "BULLISH_LOCKED_CONTRACT" if is_bullish else "BEARISH_LOCKED_CONTRACT"
+        bias = f"BULLISH_{h_mode.upper()}_LOCKED" if is_bullish else f"BEARISH_{h_mode.upper()}_LOCKED"
     else:
         band = round(0.10 * atr_m30, 2)
         entry_low = round(current_price - band, 2)
@@ -1787,28 +1866,28 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
         if not drift_ok:
             is_bullish = None
-            raw_action = f"STAND ASIDE // NO CAUSAL DRIFT (|z20|={abs(z_20):.2f} < 0.75σ)"
-            ticket_type = "NEUTRAL_DRIFT_STAND_ASIDE"
-            sl_val = round(mid_entry - 1.0 * atr_d1, 2)
-            tp1_val = round(mid_entry + 1.0 * atr_d1, 2)
-            tp2_val = round(mid_entry + 2.0 * atr_d1, 2)
+            raw_action = f"STAND ASIDE // NO CAUSAL DRIFT ({h_mode.upper()} |z20|={abs(z_20):.2f})"
+            ticket_type = f"NEUTRAL_DRIFT_{h_mode.upper()}_STAND_ASIDE"
+            sl_val = round(mid_entry - eff_sl_dist, 2)
+            tp1_val = round(mid_entry + eff_sl_dist, 2)
+            tp2_val = round(mid_entry + 2.0 * eff_sl_dist, 2)
             bias = "NEUTRAL_EQUILIBRIUM_CHOP"
         else:
             is_bullish = (z_20 > 0.0)
             if is_bullish:
-                raw_action = f"BAYESIAN PROBABILITY LONG (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
-                ticket_type = f"BULLISH_PROBABILITY_DRIFT_{int(rr_target)}R"
-                sl_val = round(mid_entry - 1.0 * atr_d1, 2)
-                tp1_val = round(mid_entry + rr_target * atr_d1, 2)
-                tp2_val = round(mid_entry + (rr_target + 1.0) * atr_d1, 2)
-                bias = "BULLISH_BAYESIAN_DRIFT"
+                raw_action = f"BAYESIAN PROBABILITY LONG ({h_mode.upper()}, z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+                ticket_type = f"BULLISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
+                sl_val = round(mid_entry - eff_sl_dist, 2)
+                tp1_val = round(mid_entry + rr_target * eff_sl_dist, 2)
+                tp2_val = round(mid_entry + (rr_target + (0.5 if h_mode != 'daily' else 1.0)) * eff_sl_dist, 2)
+                bias = f"BULLISH_BAYESIAN_{h_mode.upper()}"
             else:
-                raw_action = f"BAYESIAN PROBABILITY SHORT (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
-                ticket_type = f"BEARISH_PROBABILITY_DRIFT_{int(rr_target)}R"
-                sl_val = round(mid_entry + 1.0 * atr_d1, 2)
-                tp1_val = round(mid_entry - rr_target * atr_d1, 2)
-                tp2_val = round(mid_entry - (rr_target + 1.0) * atr_d1, 2)
-                bias = "BEARISH_BAYESIAN_DRIFT"
+                raw_action = f"BAYESIAN PROBABILITY SHORT ({h_mode.upper()}, z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+                ticket_type = f"BEARISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
+                sl_val = round(mid_entry + eff_sl_dist, 2)
+                tp1_val = round(mid_entry - rr_target * eff_sl_dist, 2)
+                tp2_val = round(mid_entry - (rr_target + (0.5 if h_mode != 'daily' else 1.0)) * eff_sl_dist, 2)
+                bias = f"BEARISH_BAYESIAN_{h_mode.upper()}"
 
         risk = max(1.0, abs(mid_entry - sl_val))
         reward = abs(tp1_val - mid_entry)
@@ -1891,14 +1970,11 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     footprint = compute_algorithmic_footprint("daily", current_price, atr_m30)
     garch_shock = predict_garch_shock_dispersion("daily", 0.45, vix_live, wti_22d_live)
     eff_created = setup_created_epoch or (active_locked.get("created_epoch") if active_locked else None)
-    ttl = calculate_time_to_live_status("daily", setup_created_epoch=eff_created)
+    ttl = calculate_time_to_live_status(h_mode, setup_created_epoch=eff_created)
 
-    drift_ok = abs(z_20) >= 0.75
     vrp_ok = vrp_ann > 0.0
     har_calm_ok = rv5_ann <= 1.15 * max(1.0, rv22_ann)
     ev_ok = (ev_r > 0.05) and (win_rate >= 50.0)
-    vpin_now = float(m5_flow.get("vpin_now", 0.44))
-    vpin_ok = not bool(m5_flow.get("vpin_toxic_gate", False))
 
     macro_score = 25 if drift_ok else (18 if abs(z_20) >= 0.45 else 10)
     mc_prob_score = 25 if (ev_r >= 0.15 and win_rate >= 55.0) else (20 if ev_ok else 10)
@@ -1920,7 +1996,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "vrp_implied_edge": {"status": "PASS" if vrp_ok else "UNMET", "detail": f"VRP = GVZ ({gvz_now:.1f}%) - RV22 ({rv22_ann:.1f}%) = {vrp_ann:+.2f}% (> 0 required)"},
         "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
         "mark_to_market_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {win_rate}% | M2M EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}% | PF={pf}"},
-        "vpin_order_flow_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"M5 VPIN={vpin_now:.3f} ({'< 0.70 SAFE' if vpin_ok else '>= 0.70 TOXIC FLOW'}) | Kyle λ={kyles_lambda:.4f}"},
+        "vpin_order_flow_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"VPIN={vpin_now:.3f} ({'< 0.65 INTRADAY / < 0.70 DAILY SAFE' if vpin_ok else 'TOXIC ORDER FLOW'}) | Kyle λ={kyles_lambda:.4f}"},
         "calculative_risk_reward": {"status": "VALID" if rr >= 1.0 else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} | Margin ${req_margin} (1:{standard_leverage})"}
     }
 
@@ -1957,7 +2033,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         rr_str = f"1:{rr:.2f}"
         safe_lot = 0.00
         max_risk_usd = "$0.00 (STAND ASIDE // CAPITAL PRESERVATION)"
-        bias_reason = f"{grade} ({reason_gate}). Causal 20D drift z={z_20:+.2f}σ, VRP={vrp_ann:+.2f}%, MC P(Win)={win_rate}% (BE {p_breakeven}%), EV={ev_r:+.3f}R."
+        bias_reason = f"{grade} ({reason_gate}). Causal drift z={z_20:+.2f}σ, VRP={vrp_ann:+.2f}%, MC P(Win)={win_rate}% (BE {p_breakeven}%), EV={ev_r:+.3f}R."
         entry_reason = f"Pure-probability candidate around spot ${current_price:.2f}; execution blocked until all 3Y-validated gates pass."
         sl_reason = "No capital at risk."
         tp_reason = "Targets suspended until A* gate passes."
@@ -1973,7 +2049,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
                 "risk_reward_ratio": f"1:{rr:.2f}",
                 "recommended_lot_size_1000_equity": computed_lot
             }
-            active_locked, completed_list = mgr.get_or_create_locked_setup(raw_t, current_price, is_a_star=True)
+            active_locked, completed_list = mgr.get_or_create_locked_setup(raw_t, current_price, is_a_star=True, horizon=h_mode)
 
         setup_id_str = active_locked.get("setup_id", "A*") if active_locked else "A*"
         status_str = active_locked.get("status", "ACTIVE") if active_locked else "ACTIVE"
@@ -1986,10 +2062,10 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         entry_zone = f"${entry_low:.2f} - ${entry_high:.2f}"
         safe_lot = active_locked.get("recommended_lot", computed_lot) if active_locked else computed_lot
         max_risk_usd = f"${round(safe_lot * 100.0 * risk_dist_dollars, 2):.2f} (HAR-RV Cap ${target_risk_usd:.2f})"
-        bias_reason = f"{bias}: 20D z={z_20:+.2f}σ (mu_post={mu_daily_post:+.3f}%/d), VRP={vrp_ann:+.1f}%, P(Win)={win_rate}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
+        bias_reason = f"{bias}: z={z_20:+.2f}σ (mu_post={mu_daily_post:+.3f}%/d), VRP={vrp_ann:+.1f}%, P(Win)={win_rate}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
         entry_reason = f"Pure-probability execution around spot ${current_price:.2f} (no visual chart patterns)."
-        sl_reason = f"Stop loss ${sl_val:.2f} anchored to 1.0 ATR_D1 (${atr_d1:.2f})."
-        tp_reason = f"TP1 ${tp1_val:.2f} ({rr:.1f} ATR_D1) & TP2 ${tp2_val:.2f} ({rr+1.0:.1f} ATR_D1)."
+        sl_reason = f"Stop loss ${sl_val:.2f} anchored to {barrier_sl_scale:.2f} ATR_D1 (${atr_d1:.2f})."
+        tp_reason = f"TP1 ${tp1_val:.2f} & TP2 ${tp2_val:.2f}."
     rationale = {
         "bias_reason": bias_reason,
         "entry_reason": entry_reason,
@@ -2000,6 +2076,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
     bt3 = prob_reg["backtest_3y_gated"]
     return {
+        "horizon": h_mode,
         "confluence_score": total_confluence,
         "confluence_moe_95": 3.8,
         "is_a_star": is_a_star,
@@ -2007,8 +2084,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "locked_setup": active_locked,
         "current_price": current_price,
         "pivot_point": PP,
-        "determining_timeframe": f"D1 + {n_paths:,}-Path Bayesian Drift & VRP SDE (Zero Chart Patterns)",
-        "execution_timeframe": "5-Day First-Passage Horizon (1.0 / 2.0 / 3.0 ATR_D1)",
+        "determining_timeframe": timeframe_label,
+        "execution_timeframe": exec_tf_label,
         "first_passage_analysis": fp_analysis,
         "algorithmic_footprint": footprint,
         "garch_predicted_shock": garch_shock,
@@ -2125,6 +2202,56 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             f"Step 3 (Mark-to-Market SDE): {n_paths:,} paths -> M2M EV={ev_r:+.3f}R, Win={win_rate}% (BE {p_breakeven}%), Kelly/4={quarter_kelly_pct}%.",
             f"Step 4 (3Y Causal Audit): {bt3['trades']} trades, Win={bt3['win_rate_pct']}%, PF={bt3['profit_factor']}, t={bt3['t_stat']} (p={bt3['p_val']})."
         ]
+    }
+
+
+def calculate_multi_horizon_a_star_setup(
+    current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75,
+    wti_val=86.00, vix_val=None, n_paths=10000, session_h=None, session_l=None, session_c=None
+):
+    """
+    Unified Multi-Horizon Institutional Quantitative Matrix:
+    Evaluates Scalping, Intraday, Daily, and Swing A* setups concurrently without lookahead bias.
+    """
+    scalping = calculate_daily_a_star_setup(
+        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
+        horizon="scalping"
+    )
+    intraday = calculate_daily_a_star_setup(
+        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
+        horizon="intraday"
+    )
+    daily = calculate_daily_a_star_setup(
+        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
+        horizon="daily"
+    )
+    swing = calculate_daily_a_star_setup(
+        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
+        horizon="swing"
+    )
+
+    active_count = sum(1 for h in [scalping, intraday, daily, swing] if h.get("is_a_star"))
+    return {
+        "asset": "XAUUSD (Spot Gold)",
+        "current_price": current_price,
+        "active_a_star_count": active_count,
+        "horizons": {
+            "scalping": scalping,
+            "intraday": intraday,
+            "daily": daily,
+            "swing": swing
+        },
+        "portfolio_allocation": {
+            "scalping_risk_pct": scalping.get("first_passage_analysis", {}).get("quarter_kelly_pct", 0.50),
+            "intraday_risk_pct": intraday.get("first_passage_analysis", {}).get("quarter_kelly_pct", 0.50),
+            "daily_risk_pct": daily.get("first_passage_analysis", {}).get("quarter_kelly_pct", 0.50),
+            "swing_risk_pct": swing.get("first_passage_analysis", {}).get("quarter_kelly_pct", 0.50),
+            "max_portfolio_concurrent_risk_pct": 2.50
+        }
     }
 
 
@@ -2444,18 +2571,28 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         emp_daily_vol = (d_ols["gold_daily_sd_pct"] / 100.0) * 0.72
     else:
         cal = _get_calibrated_event_params(ev)
-        # Only inject direct event jump drift when direct slope is statistically valid (p < 0.05)
-        raw_beta = cal["beta_direct_gold"] if cal["p_direct_gold"] < 0.05 else 0.0
+        # Macro sensitivity: direct OLS -> 2SLS -> Bayesian shrinkage
+        if cal["p_direct_gold"] < 0.05:
+            raw_beta = cal["beta_direct_gold"]
+        elif abs(cal.get("effective_gold_beta", 0.0)) > 0.01:
+            raw_beta = cal["effective_gold_beta"]
+        else:
+            raw_beta = -0.25
         beta_jump = float(np.clip(raw_beta / 100.0, -0.025, 0.025))
         emp_daily_vol = max(0.006, (cal["empirical_gold_sd_pct"] / 100.0) * 0.75)
 
-    iv_0 = float(gld_opt.get("atm_iv_pct", sv.get("current_iv_pct", 24.9))) / 100.0
-    iv_0 = max(0.08, min(0.80, iv_0))
+    # Dynamic coupling with Bollerslev (1986) GARCH(1,1) conditional volatility
+    garch_vol = calculate_garch_90d_volatility(ev)
+    garch_sum = garch_vol.get("summary", {})
+    live_garch_ann = float(garch_sum.get("current_garch_ann_pct", 29.78)) / 100.0
+    lr_garch_ann = float(garch_sum.get("long_run_unconditional_vol_pct", 28.37)) / 100.0
+    iv_0 = max(0.08, min(0.80, live_garch_ann))
     us_sum = snap.get("us_economy_summary", {})
     stress_6m = float(us_sum.get("probit_stress_6m_pct", 0.0))
     if stress_6m > 50.0:
         iv_0 = min(0.80, iv_0 * (1.0 + 0.12 * ((stress_6m - 50.0) / 50.0)))
-    theta_iv = float(sv.get("theta_iv_pct", 21.18)) / 100.0
+    theta_iv = max(0.08, min(0.80, lr_garch_ann))
+    kappa_d = max(0.01, min(0.15, 1.0 - float(garch_sum.get("persistence", 0.94))))
     kappa_d = float(sv.get("kappa_daily", 0.022))
     xi_d = float(sv.get("xi_vol_of_vol_pct", 1.277)) / 100.0
     rho_pv = float(np.clip(sv.get("rho_price_vol", 0.121), -0.85, 0.85))

@@ -934,7 +934,14 @@
   <main class="module-view" id="mod-astar">
     <div style="padding:14px; display:flex; flex-direction:column; gap:12px;">
 
-      <div class="cockpit-ribbon" style="justify-content:space-between;">
+      <div class="cockpit-ribbon" style="justify-content:space-between; flex-wrap:wrap; gap:10px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="color:var(--amber-cmd); font-weight:800; font-size:10px;">[ A* HORIZON: ]</span>
+          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="scalping">SCALPING (M5/M15 // 1:1.5 RR)</button>
+          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="intraday">INTRADAY (H1/4H // 1:2.0 RR)</button>
+          <button class="bbg-btn-mini astar-horizon-btn active" data-horizon="daily">DAILY (D1 // 1:2.0 RR)</button>
+          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="swing">SWING (10D CYCLE // 1:2.0 RR)</button>
+        </div>
         <div style="display:flex; align-items:center; gap:16px;">
           <div>[ ASTR.TTL &lt;GO&gt; ] <span style="color:var(--fg-dim);">VALIDITY WINDOW:</span> <strong id="astar-ttl-timer" style="color:var(--amber-cmd);">--m --s</strong></div>
           <div><span style="color:var(--fg-dim);">ALPHA DECAY:</span> <strong id="astar-alpha-decay" style="color:#ff4444;">0.0%</strong></div>

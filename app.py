@@ -506,7 +506,7 @@ def get_high_impact_calendar():
     return data
 
 @app.get("/api/daily-a-star")
-def get_daily_a_star(price: float = None):
+def get_daily_a_star(price: float = None, horizon: str = "daily"):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
     if price is None:
@@ -515,11 +515,31 @@ def get_daily_a_star(price: float = None):
     dxy = prices.get("DX-Y.NYB", 102.24)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
-    created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
+    h_key = (horizon or "daily").lower()
+    ttl_sec = 3600 if h_key == "scalping" else (14400 if h_key == "intraday" else (432000 if h_key == "swing" else 5400))
+    created_epoch, _ = get_or_create_setup_epoch(h_key, ttl_sec)
     return quant_model.calculate_daily_a_star_setup(
         current_price=price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
         wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
         n_paths=10000, setup_created_epoch=created_epoch,
+        session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"),
+        horizon=h_key
+    )
+
+@app.get("/api/multi-horizon-a-star")
+def get_multi_horizon_a_star(price: float = None):
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {})
+    if price is None:
+        price = prices.get("GC=F", 3975.0)
+    atr_val = prices.get("ATR_M30", 10.50)
+    dxy = prices.get("DX-Y.NYB", 102.24)
+    us10y = prices.get("^TNX", 5.00)
+    us2y = prices.get("ZT=F", 4.75)
+    return quant_model.calculate_multi_horizon_a_star_setup(
+        current_price=price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+        wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
+        n_paths=10000,
         session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
     )
 

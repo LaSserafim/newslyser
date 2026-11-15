@@ -343,6 +343,13 @@ input[type="range"].bbg-slider::-moz-range-thumb {
   border-color: var(--fg-bright);
 }
 
+.bbg-btn-mini.active {
+  background: var(--amber-cmd) !important;
+  color: #000000 !important;
+  border-color: var(--amber-cmd) !important;
+  font-weight: 800 !important;
+}
+
 .bbg-pane-body {
   flex: 1;
   padding: 8px;

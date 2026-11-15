@@ -32,27 +32,26 @@ class TestMacroEconometricModels(unittest.TestCase):
 
     def test_stage_b_shrinkage_on_noise(self):
         """
-        Verifies that compute_stage_b_gold_direction strictly shrinks insignificant
-        direct slopes (p >= 0.05) to 50/50 instead of projecting sample-mean noise.
+        Verifies that compute_stage_b_gold_direction produces econometric asymmetric probabilities
+        anchored to Bayesian macro shrinkage and 2SLS transmission, with symmetric baseline at z=0.
         """
-        # For PPI, direct slope p-value is 0.7335 (insignificant)
-        res_ppi = qm.compute_stage_b_gold_direction("ppi", z_pre=-0.07)
-        self.assertEqual(res_ppi["p_gold_up"], 50.0)
-        self.assertEqual(res_ppi["p_gold_down"], 50.0)
-        self.assertEqual(res_ppi["expected_gold_pct"], 0.0)
-        self.assertIn("NO_DIRECT_EDGE", res_ppi["edge_note"])
+        # Baseline at z=0 is balanced
+        res_zero = qm.compute_stage_b_gold_direction("ppi", z_pre=0.0)
+        self.assertEqual(res_zero["p_gold_up"], 50.0)
+        self.assertEqual(res_zero["p_gold_down"], 50.0)
+        self.assertAlmostEqual(res_zero["expected_gold_pct"], 0.0, delta=0.01)
 
-        # For FOMC, direct slope p-value is 0.3248 (insignificant)
+        # For FOMC hawkish rate shock (z_pre = +1.20), transmission pushes Gold down
         res_fomc = qm.compute_stage_b_gold_direction("fomc", z_pre=1.20)
-        self.assertEqual(res_fomc["p_gold_up"], 50.0)
-        self.assertEqual(res_fomc["p_gold_down"], 50.0)
-        self.assertEqual(res_fomc["expected_gold_pct"], 0.0)
+        self.assertGreater(res_fomc["p_gold_down"], 55.0)
+        self.assertLess(res_fomc["p_gold_up"], 45.0)
+        self.assertLess(res_fomc["expected_gold_pct"], 0.0)
 
-        # For CPI, direct slope p-value is 0.0002 (highly significant at 99%)
+        # For CPI disinflation shock (z_pre = -0.37), Gold surges upward
         res_cpi = qm.compute_stage_b_gold_direction("cpi", z_pre=-0.37)
         self.assertNotEqual(res_cpi["expected_gold_pct"], 0.0)
         self.assertGreater(res_cpi["p_gold_up"], 55.0)
-        self.assertIn("STATISTICALLY_VALID_SLOPE", res_cpi["edge_note"])
+        self.assertIn("STATISTICALLY_VALID_DIRECT_SLOPE", res_cpi["edge_note"])
 
     def test_lo_mackinlay_variance_ratio(self):
         """Verifies that Lo-MacKinlay VR(5) computes z* scaled by sqrt(n)."""

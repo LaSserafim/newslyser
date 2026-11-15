@@ -125,6 +125,34 @@ class TestAStarSetupEngine(unittest.TestCase):
         self.assertGreaterEqual(q_kelly, 0.0)
         self.assertLessEqual(q_kelly, 2.0)
 
+    def test_multi_horizon_intraday_and_swing_schema(self):
+        """Verifies that Scalping, Intraday, and Swing setups execute with scaled barriers and distinct TTLs."""
+        scalp = qm.calculate_daily_a_star_setup(horizon="scalping", n_paths=1000)
+        self.assertEqual(scalp["horizon"], "scalping")
+        self.assertEqual(scalp["time_to_live"]["max_validity_minutes"], 60)
+        self.assertIn("Scalping", scalp["execution_timeframe"])
+
+        intra = qm.calculate_daily_a_star_setup(horizon="intraday", n_paths=1000)
+        self.assertEqual(intra["horizon"], "intraday")
+        self.assertEqual(intra["time_to_live"]["max_validity_minutes"], 240)
+        self.assertIn("Intraday", intra["execution_timeframe"])
+
+        swing = qm.calculate_daily_a_star_setup(horizon="swing", n_paths=1000)
+        self.assertEqual(swing["horizon"], "swing")
+        self.assertEqual(swing["time_to_live"]["max_validity_minutes"], 7200)
+        self.assertIn("Swing", swing["execution_timeframe"])
+
+    def test_multi_horizon_matrix(self):
+        """Verifies that calculate_multi_horizon_a_star_setup returns unified matrix with all 4 horizons."""
+        mat = qm.calculate_multi_horizon_a_star_setup(n_paths=1000)
+        self.assertIn("horizons", mat)
+        self.assertIn("scalping", mat["horizons"])
+        self.assertIn("intraday", mat["horizons"])
+        self.assertIn("daily", mat["horizons"])
+        self.assertIn("swing", mat["horizons"])
+        self.assertIn("portfolio_allocation", mat)
+        self.assertLessEqual(mat["portfolio_allocation"]["max_portfolio_concurrent_risk_pct"], 5.0)
+
 
 if __name__ == "__main__":
     unittest.main()

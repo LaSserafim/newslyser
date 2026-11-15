@@ -7,9 +7,10 @@
     "start": "python3 -m uvicorn app:app --host 127.0.0.1 --port 8888",
     "dev": "python3 -m uvicorn app:app --host 127.0.0.1 --port 8888 --reload",
     "ui": "cd ui && python3 -m uvicorn server:app --host 127.0.0.1 --port 8889 --reload",
+    "backtest": "python3 run_3y_multi_horizon_backtest.py",
     "build-guide": "python3 build_guide_pdf.py",
     "sync-data": "python3 data_pipeline.py",
-    "test": "node --check static/app.js && node --check ui/static/app.js"
+    "test": "bash run_tests.sh && node --check static/app.js && node --check ui/static/app.js"
   },
   "keywords": [
     "macroeconomics",
