@@ -1,0 +1,83 @@
+{
+  "generated_at": 1794752213.6031628,
+  "time_utc": "2026-11-15 14:16:53 UTC",
+  "daily_astar_3y": {
+    "naive": {
+      "trades": 208,
+      "wins": 114,
+      "win_rate_pct": 54.8,
+      "mean_r": 0.092,
+      "sum_r": 19.08,
+      "t_stat": 1.41,
+      "p_val": 0.16,
+      "profit_factor": 1.22,
+      "ending_equity_usd": 1303.96,
+      "net_return_pct": 30.4,
+      "max_drawdown_pct": 13.7,
+      "leverage": 2000,
+      "standard_equity": 1000.0
+    },
+    "gated": {
+      "trades": 67,
+      "wins": 39,
+      "win_rate_pct": 58.2,
+      "mean_r": 0.345,
+      "sum_r": 23.14,
+      "t_stat": 2.36,
+      "p_val": 0.0212,
+      "profit_factor": 1.9,
+      "ending_equity_usd": 1398.75,
+      "net_return_pct": 39.87,
+      "max_drawdown_pct": 7.61,
+      "leverage": 2000,
+      "standard_equity": 1000.0
+    }
+  },
+  "macro_news_t3m": {
+    "trades": 87,
+    "wins": 48,
+    "win_rate_pct": 55.2,
+    "mean_r": 0.655,
+    "sum_r": 57.02,
+    "t_stat": 3.72,
+    "p_val": 0.0004,
+    "profit_factor": 2.77,
+    "ending_equity_usd": 2283.47,
+    "net_return_pct": 128.35,
+    "max_drawdown_pct": 5.72,
+    "leverage": 200
+  },
+  "combined_portfolio": {
+    "starting_equity_usd": 1000.0,
+    "ending_equity_usd": 3193.92,
+    "net_return_pct": 219.39,
+    "max_drawdown_pct": 8.63,
+    "total_trades": 154,
+    "wins": 87,
+    "win_rate_pct": 56.5,
+    "mean_r": 0.52,
+    "profit_factor": 2.38,
+    "t_stat": 4.39,
+    "p_val": 2.1e-05
+  },
+  "hypothesis_testing": {
+    "white_hc3_ols": {
+      "f_stat": 26.38,
+      "p_val": 0.0
+    },
+    "variance_ratio_vr5": {
+      "p_val": 0.5157
+    },
+    "daily_t_test": {
+      "t_stat": 2.36,
+      "p_val": 0.0212
+    },
+    "news_t_test": {
+      "t_stat": 3.72,
+      "p_val": 0.0004
+    },
+    "jobless_claims_binomial": {
+      "p_val": 0.14213
+    }
+  }
+}
