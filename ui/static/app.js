@@ -10,7 +10,7 @@ const EVENT_STATE = {
   fomc: { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mcView: "sde", mode: "PREMARKET", fwTimer: null },
   nfp:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mcView: "sde", mode: "PREMARKET", fwTimer: null },
   ppi:  { z: 0.00, horizon: 1, asset: "gold", diag: "tcurve", mcView: "sde", mode: "PREMARKET", fwTimer: null },
-  astar:{ mcView: "sde" }
+  astar:{ z: -1.18, horizon: "daily", asset: "gold", diag: "tcurve", mcView: "sde", mode: "ACTIVE", fwTimer: null }
 };
 
 let PREMARKET_CACHE = null;
@@ -1000,8 +1000,10 @@ async function renderEventMcPane(ev) {
   document.querySelectorAll(`.sde-ctrl, .sde-ctrl-${ev}`).forEach(b => b.style.display = "inline-block");
   let mc = null;
   const confLvl = window.SELECTED_CONFIDENCE || 95;
+  const hVal = (st.horizon !== undefined && st.horizon !== "undefined") ? st.horizon : (ev === "astar" ? "daily" : 1);
+  const zVal = (st.z !== undefined && st.z !== "undefined") ? st.z : (ev === "astar" ? -1.18 : 0.0);
   try {
-    const res = await fetch(`/api/monte-carlo?horizon=${st.horizon}&z=${st.z}&event_type=${ev}&n_paths=10000&min_confidence=${confLvl}`);
+    const res = await fetch(`/api/monte-carlo?horizon=${hVal}&z=${zVal}&event_type=${ev}&n_paths=10000&min_confidence=${confLvl}`);
     mc = await res.json();
   } catch (e) {
     return;

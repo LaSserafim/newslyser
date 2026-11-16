@@ -2625,8 +2625,16 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     - Applies Zero-Luck 80%-99% Hypothesis Gate to determine BUY / SELL / STAND ASIDE.
     """
     ev_key = (event_type or "cpi").lower()
-    h_days = max(1, int(horizon_days))
-    c_key = (ev_key, h_days, round(float(z_shock), 3), round(float(current_price), 2), round(float(atr_m30), 2), int(n_paths), int(min_confidence))
+    try:
+        h_days = max(0.1, float(horizon_days))
+    except Exception:
+        h_days = 1.0
+    try:
+        z_flt = float(z_shock)
+    except Exception:
+        z_flt = 0.0
+
+    c_key = (ev_key, round(h_days, 3), round(z_flt, 3), round(float(current_price), 2), round(float(atr_m30), 2), int(n_paths), int(min_confidence))
     now_mc = time.time()
     cached_mc = _MC_RESULT_CACHE.get(c_key)
     if cached_mc and (now_mc - cached_mc["ts"] < 5.0):

@@ -487,13 +487,37 @@ def get_academic_literature():
     return data
 
 @app.get("/api/monte-carlo")
-def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None, event_type: str = "cpi", n_paths: int = 10000, min_confidence: int = 95):
+def get_monte_carlo(horizon: str = "1", z: str = "0.0", price: float = None, event_type: str = "cpi", n_paths: int = 10000, min_confidence: int = 95):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
     if price is None:
         price = prices.get("GC=F", 3975.0)
     atr_val = prices.get("ATR_M30", 10.80)
-    return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, n_paths=n_paths, event_type=event_type, atr_m30=atr_val, min_confidence=min_confidence)
+
+    # Robust parsing for horizon and z (handles strings like 'intraday', 'undefined', numeric)
+    h_str = str(horizon).lower()
+    if h_str in ["scalping", "0.25"]:
+        h_days = 0.25
+    elif h_str in ["intraday", "0.5"]:
+        h_days = 0.5
+    elif h_str in ["daily", "1", "1.0", "undefined", ""]:
+        h_days = 1.0
+    elif h_str in ["swing", "5", "5.0", "10", "10.0"]:
+        h_days = 5.0
+    elif h_str in ["news"]:
+        h_days = 0.5
+    else:
+        try:
+            h_days = float(horizon)
+        except Exception:
+            h_days = 1.0
+
+    try:
+        z_val = float(z)
+    except Exception:
+        z_val = -1.18 if str(event_type).lower() == "astar" else 0.0
+
+    return quant_model.run_monte_carlo(current_price=price, z_shock=z_val, horizon_days=h_days, n_paths=n_paths, event_type=event_type, atr_m30=atr_val, min_confidence=min_confidence)
 
 @app.get("/api/pdf-distribution")
 def get_pdf_distribution(event_type: str = "cpi"):
@@ -965,6 +989,14 @@ def get_backtest_5y():
         with open(path_5y, "r") as f:
             return json.load(f)
     return {"error": "5y backtest telemetry not found"}
+
+@app.get("/api/backtest-maxtp")
+def get_backtest_maxtp():
+    path_mtp = os.path.join(DATA_DIR, "backtest_maxtp_5y.json")
+    if os.path.exists(path_mtp):
+        with open(path_mtp, "r") as f:
+            return json.load(f)
+    return {"error": "maxtp backtest telemetry not found"}
 
 @app.get("/api/backtest-multi-horizon")
 def get_backtest_multi_horizon():

@@ -1,0 +1,128 @@
+{
+  "generated_at": 1794795514.5190961,
+  "time_utc": "2026-11-16 02:18:34 UTC",
+  "mode": "PURE_MAX_TP_NO_BREAKEVEN",
+  "tracks": {
+    "scalp_maxtp": {
+      "trades": 172,
+      "wins": 73,
+      "win_rate_pct": 42.4,
+      "mean_r": 0.073,
+      "sum_r": 12.63,
+      "t_stat": 0.73,
+      "p_val": 0.466389,
+      "profit_factor": 1.13,
+      "ending_equity": 1043.28,
+      "net_return_pct": 4.33,
+      "max_dd_pct": 4.24
+    },
+    "intra_maxtp": {
+      "trades": 123,
+      "wins": 47,
+      "win_rate_pct": 38.2,
+      "mean_r": 0.026,
+      "sum_r": 3.16,
+      "t_stat": 0.2,
+      "p_val": 0.841814,
+      "profit_factor": 1.04,
+      "ending_equity": 1012.77,
+      "net_return_pct": 1.28,
+      "max_dd_pct": 7.82
+    },
+    "daily_maxtp": {
+      "trades": 91,
+      "wins": 46,
+      "win_rate_pct": 50.5,
+      "mean_r": 0.283,
+      "sum_r": 25.76,
+      "t_stat": 1.97,
+      "p_val": 0.051913,
+      "profit_factor": 1.62,
+      "ending_equity": 1282.54,
+      "net_return_pct": 28.25,
+      "max_dd_pct": 7.07
+    },
+    "swing_maxtp": {
+      "trades": 52,
+      "wins": 20,
+      "win_rate_pct": 38.5,
+      "mean_r": 0.067,
+      "sum_r": 3.48,
+      "t_stat": 0.34,
+      "p_val": 0.735253,
+      "profit_factor": 1.12,
+      "ending_equity": 1030.22,
+      "net_return_pct": 3.02,
+      "max_dd_pct": 10.16
+    },
+    "news_maxtp": {
+      "trades": 87,
+      "wins": 48,
+      "win_rate_pct": 55.2,
+      "mean_r": 0.655,
+      "sum_r": 57.02,
+      "t_stat": 3.72,
+      "p_val": 0.000354,
+      "profit_factor": 2.77,
+      "ending_equity": 2283.47,
+      "net_return_pct": 128.35,
+      "max_dd_pct": 5.72
+    },
+    "portfolio_maxtp": {
+      "trades": 525,
+      "wins": 234,
+      "win_rate_pct": 44.6,
+      "mean_r": 0.194,
+      "sum_r": 102.04,
+      "t_stat": 3.11,
+      "p_val": 0.001973,
+      "profit_factor": 1.37,
+      "ending_equity": 3187.92,
+      "net_return_pct": 218.79,
+      "max_dd_pct": 19.64
+    }
+  },
+  "comparison": {
+    "baseline_portfolio": {
+      "trades": 525,
+      "wins": 240,
+      "win_rate_pct": 45.7,
+      "mean_r": 0.16,
+      "sum_r": 84.22,
+      "t_stat": 2.75,
+      "p_val": 0.006165,
+      "profit_factor": 1.31,
+      "ending_equity": 2904.77,
+      "net_return_pct": 190.48,
+      "max_dd_pct": 18.73
+    },
+    "maxtp_portfolio": {
+      "trades": 525,
+      "wins": 234,
+      "win_rate_pct": 44.6,
+      "mean_r": 0.194,
+      "sum_r": 102.04,
+      "t_stat": 3.11,
+      "p_val": 0.001973,
+      "profit_factor": 1.37,
+      "ending_equity": 3187.92,
+      "net_return_pct": 218.79,
+      "max_dd_pct": 19.64
+    }
+  },
+  "hypothesis_testing": {
+    "student_t_stat": 3.11,
+    "student_t_pval": 0.001973,
+    "rademacher_permutation_pval": 0.0009,
+    "deflated_sharpe_ratio": 1.0,
+    "ann_sharpe": 1.39,
+    "bootstrap_ci_95": [
+      0.07445684489023703,
+      0.3169677112371838
+    ],
+    "bootstrap_ci_99": [
+      0.03784724394954274,
+      0.3524213907690962
+    ]
+  }
+}
