@@ -516,7 +516,8 @@ def get_daily_a_star(price: float = None, horizon: str = "daily"):
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
     h_key = (horizon or "daily").lower()
-    ttl_sec = 3600 if h_key == "scalping" else (14400 if h_key == "intraday" else (432000 if h_key == "swing" else 5400))
+    ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
+    ttl_sec = ttl_map.get(h_key, 5400)
     created_epoch, _ = get_or_create_setup_epoch(h_key, ttl_sec)
     return quant_model.calculate_daily_a_star_setup(
         current_price=price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
@@ -789,15 +790,26 @@ def deepseek_test():
         return {"status": "ERROR", "message": str(e)}
 
 @app.post("/api/reset-setup-session")
-def reset_setup_session(event_type: str = "daily"):
+def reset_setup_session(event_type: str = "all", horizon: str = None):
     """
     Explicitly resets setup session window and generates fresh epoch anchor.
-    Only triggered when trader intentionally forces a fresh session window.
+    Resets the requested horizon (or all horizons), archives expired state,
+    and forces SetupLifecycleManager to recalculate a fresh active setup ticket.
     """
     import time
     now_ts = int(time.time())
-    ttl_map = {"cpi": 3600, "fomc": 7200, "nfp": 5400, "ppi": 3600, "daily": 5400}
-    ttl = ttl_map.get(event_type.lower(), 5400)
+    ttl_map = {
+        "scalping": 3600,
+        "intraday": 14400,
+        "daily": 5400,
+        "swing": 432000,
+        "news": 3600,
+        "cpi": 3600,
+        "fomc": 7200,
+        "nfp": 5400,
+        "ppi": 3600
+    }
+    h_key = (horizon or event_type or "all").lower()
     
     epochs = {}
     if os.path.exists(SETUP_EPOCHS_FILE):
@@ -807,7 +819,17 @@ def reset_setup_session(event_type: str = "daily"):
         except Exception:
             epochs = {}
             
-    epochs[event_type] = {"created_at": now_ts, "expires_at": now_ts + ttl}
+    keys_to_reset = list(ttl_map.keys()) if h_key in ["all", "*"] else [h_key]
+    if h_key not in ttl_map and h_key not in ["all", "*"]:
+        keys_to_reset = [h_key]
+
+    mgr = quant_model.SetupLifecycleManager()
+    for k in keys_to_reset:
+        ttl = ttl_map.get(k, 5400)
+        epochs[k] = {"created_at": now_ts, "expires_at": now_ts + ttl}
+        if hasattr(mgr, "force_reset_horizon"):
+            mgr.force_reset_horizon(k)
+
     try:
         with open(SETUP_EPOCHS_FILE, "w") as f:
             json.dump(epochs, f, indent=2)
@@ -816,10 +838,9 @@ def reset_setup_session(event_type: str = "daily"):
         
     return {
         "status": "SUCCESS",
-        "message": f"Fresh session window initialized for {event_type.upper()}",
+        "message": f"Fresh session window initialized for {', '.join(k.upper() for k in keys_to_reset)}",
         "created_at_epoch": now_ts,
-        "expires_at_epoch": now_ts + ttl,
-        "max_validity_minutes": ttl // 60
+        "reset_horizons": keys_to_reset
     }
 
 @app.get("/api/state")

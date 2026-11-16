@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-11-15 15:47:27 UTC",
+  "generated_at_utc": "2026-11-16 00:51:09 UTC",
   "total_fred_series_ingested": 41,
   "domains": {
     "labor_dol": {
@@ -43,7 +43,7 @@
       "title": "U.S. TREASURY CURVE, BOND & FED LIQUIDITY",
       "fed_target_upper_pct": 4.0,
       "effr_pct": 3.88,
-      "zq_futures_implied_pct": 4.18,
+      "zq_futures_implied_pct": 4.17,
       "dgs2_pct": 4.86,
       "dgs10_pct": 5.1,
       "dgs30_pct": 5.43,
@@ -93,9 +93,9 @@
       "ols_f_p_val": 0.0,
       "beta_core_pce": 1.3486,
       "beta_unemp": -0.2013,
-      "p_tightening_pct": 52.6,
-      "p_hold_pct": 41.1,
-      "p_easing_pct": 6.3
+      "p_tightening_pct": 51.0,
+      "p_hold_pct": 42.4,
+      "p_easing_pct": 6.6
     },
     "macro_regimes_copula": {
       "n_months": 668,
@@ -111,44 +111,44 @@
       }
     },
     "fiscal_liquidity_hc3": {
-      "n_weeks": 149,
+      "n_weeks": 150,
       "full_f_stat": 2.02,
-      "full_f_p": 0.094719,
-      "full_r2": 0.0532,
-      "pruned_f_stat": 2.96,
-      "pruned_f_p": 0.054937,
-      "pruned_r2": 0.039,
+      "full_f_p": 0.094678,
+      "full_r2": 0.0528,
+      "pruned_f_stat": 3.07,
+      "pruned_f_p": 0.049409,
+      "pruned_r2": 0.0401,
       "factors": {
         "d_liq": {
-          "beta_raw": -0.2312,
+          "beta_raw": -0.2354,
           "beta_filtered": 0.0,
-          "t_stat": -0.79,
-          "p_val": 0.4333,
+          "t_stat": -0.8,
+          "p_val": 0.4274,
           "significant_5pct": false
         },
         "d_hy": {
-          "beta_raw": 3.6249,
-          "beta_filtered": 3.6249,
-          "t_stat": 2.09,
-          "p_val": 0.0385,
+          "beta_raw": 3.5073,
+          "beta_filtered": 3.5073,
+          "t_stat": 2.01,
+          "p_val": 0.0465,
           "significant_5pct": true
         },
         "d_nfci": {
-          "beta_raw": -49.923,
-          "beta_filtered": -49.923,
-          "t_stat": -2.03,
-          "p_val": 0.0445,
+          "beta_raw": -50.827,
+          "beta_filtered": -50.827,
+          "t_stat": -2.08,
+          "p_val": 0.0392,
           "significant_5pct": true
         },
         "d_tips": {
-          "beta_raw": -3.0788,
+          "beta_raw": -2.8154,
           "beta_filtered": 0.0,
-          "t_stat": -1.18,
-          "p_val": 0.2388,
+          "t_stat": -1.09,
+          "p_val": 0.2758,
           "significant_5pct": false
         }
       },
-      "current_4w_gold_impulse_pct": -1.7
+      "current_4w_gold_impulse_pct": -1.71
     }
   }
 }

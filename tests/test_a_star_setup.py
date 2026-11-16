@@ -142,16 +142,33 @@ class TestAStarSetupEngine(unittest.TestCase):
         self.assertEqual(swing["time_to_live"]["max_validity_minutes"], 7200)
         self.assertIn("Swing", swing["execution_timeframe"])
 
+        news = qm.calculate_daily_a_star_setup(horizon="news", n_paths=1000)
+        self.assertEqual(news["horizon"], "news")
+        self.assertEqual(news["time_to_live"]["max_validity_minutes"], 60)
+        self.assertIn("News", news["execution_timeframe"])
+
     def test_multi_horizon_matrix(self):
-        """Verifies that calculate_multi_horizon_a_star_setup returns unified matrix with all 4 horizons."""
+        """Verifies that calculate_multi_horizon_a_star_setup returns unified matrix with all 5 horizons."""
         mat = qm.calculate_multi_horizon_a_star_setup(n_paths=1000)
         self.assertIn("horizons", mat)
         self.assertIn("scalping", mat["horizons"])
         self.assertIn("intraday", mat["horizons"])
         self.assertIn("daily", mat["horizons"])
         self.assertIn("swing", mat["horizons"])
+        self.assertIn("news", mat["horizons"])
         self.assertIn("portfolio_allocation", mat)
         self.assertLessEqual(mat["portfolio_allocation"]["max_portfolio_concurrent_risk_pct"], 5.0)
+
+    def test_force_reset_horizon(self):
+        """Verifies that force_reset_horizon clears active setups and archives superseded state."""
+        mgr = qm.SetupLifecycleManager()
+        raw_ticket = {"action": "BUY", "ticket_type": "TEST", "entry_zone": "$2000 - $2002", "stop_loss": "$1990", "take_profit_1": "$2020"}
+        locked, _ = mgr.get_or_create_locked_setup(raw_ticket, 2000.0, is_a_star=True, horizon="intraday")
+        self.assertIsNotNone(locked)
+        # Force reset
+        mgr.force_reset_horizon("intraday")
+        ledger = mgr.get_ledger()
+        self.assertIsNone(ledger.get("active_setups", {}).get("intraday"))
 
 
 if __name__ == "__main__":

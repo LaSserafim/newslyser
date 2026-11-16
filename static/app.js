@@ -2060,7 +2060,13 @@ function initAutoRefreshLoop() {
   document.getElementById("btn-reset-astar-session")?.addEventListener("click", async () => {
     const b = document.getElementById("btn-reset-astar-session");
     b.innerText = "WAIT REFRESHING...";
-    try { await fetch("/api/reset-setup-session", { method: "POST" }); await fetchAstarData(); } catch (e) {}
+    const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
+    try {
+      await fetch(`/api/reset-setup-session?event_type=${h}&horizon=${h}`, { method: "POST" });
+      await fetchAstarData();
+    } catch (e) {
+      console.warn("Reset setup session failed:", e);
+    }
     setTimeout(() => { b.innerText = "FORCE RE-EVALUATE SESSION <GO>"; }, 800);
   });
 }
