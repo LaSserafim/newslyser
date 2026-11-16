@@ -1,6 +1,6 @@
 {
-  "generated_at": 1794758389.9250822,
-  "time_utc": "2026-11-15 15:59:49 UTC",
+  "generated_at": 1794791452.6934988,
+  "time_utc": "2026-11-16 01:10:52 UTC",
   "tracks": {
     "intraday_astar": {
       "trades": 109,
@@ -29,17 +29,17 @@
       "max_drawdown_pct": 5.13
     },
     "swing_astar": {
-      "trades": 37,
+      "trades": 38,
       "wins": 17,
-      "win_rate_pct": 45.9,
-      "mean_r": 0.237,
-      "sum_r": 8.77,
-      "t_stat": 1.06,
-      "p_val": 0.2962,
-      "profit_factor": 1.48,
-      "ending_equity_usd": 1087.89,
-      "net_return_pct": 8.79,
-      "max_drawdown_pct": 6.34
+      "win_rate_pct": 44.7,
+      "mean_r": 0.204,
+      "sum_r": 7.76,
+      "t_stat": 0.92,
+      "p_val": 0.36353,
+      "profit_factor": 1.4,
+      "ending_equity_usd": 1076.9,
+      "net_return_pct": 7.69,
+      "max_drawdown_pct": 7.28
     },
     "macro_news": {
       "trades": 87,
@@ -55,16 +55,16 @@
       "max_drawdown_pct": 5.72
     },
     "combined_portfolio": {
-      "trades": 458,
+      "trades": 460,
       "wins": 225,
-      "win_rate_pct": 49.1,
-      "mean_r": 0.244,
-      "sum_r": 111.91,
-      "t_stat": 3.9,
-      "p_val": 0.000111,
-      "profit_factor": 1.51,
-      "ending_equity_usd": 3434.61,
-      "net_return_pct": 243.46,
+      "win_rate_pct": 48.9,
+      "mean_r": 0.239,
+      "sum_r": 109.89,
+      "t_stat": 3.82,
+      "p_val": 0.000152,
+      "profit_factor": 1.5,
+      "ending_equity_usd": 3387.87,
+      "net_return_pct": 238.79,
       "max_drawdown_pct": 14.48
     }
   },
@@ -86,19 +86,19 @@
       "profit_factor": 1.47
     },
     "2026": {
-      "trades": 153,
+      "trades": 155,
       "wins": 76,
-      "win_rate_pct": 49.7,
-      "mean_r": 0.332,
-      "sum_r": 50.77,
-      "profit_factor": 1.71
+      "win_rate_pct": 49.0,
+      "mean_r": 0.314,
+      "sum_r": 48.75,
+      "profit_factor": 1.66
     }
   },
   "hypothesis_testing": {
-    "student_t_stat": 3.9,
-    "student_t_pval": 0.000111,
-    "rademacher_permutation_pval": 6e-05,
+    "student_t_stat": 3.82,
+    "student_t_pval": 0.000152,
+    "rademacher_permutation_pval": 4e-05,
     "deflated_sharpe_ratio": 1.0,
-    "ann_sharpe": 2.2515807993998487
+    "ann_sharpe": 2.206727262999588
   }
 }

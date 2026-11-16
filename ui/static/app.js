@@ -1758,6 +1758,7 @@ async function fetchAstarData() {
 
     const pe = aStar.probability_engine || {};
     const bt3 = pe.backtest_3y_summary || {};
+    const bt5 = pe.backtest_5y_summary || {};
     if (document.getElementById("ast-z20")) {
       const zVal = Number(pe.z_20_drift || 0);
       document.getElementById("ast-z20").innerText = `${zVal >= 0 ? "+" : ""}${zVal.toFixed(2)}σ (${Math.abs(zVal) >= 0.75 ? "CAUSAL DRIFT PASS" : "NEUTRAL CHOP"})`;
@@ -1782,6 +1783,9 @@ async function fetchAstarData() {
     }
     if (document.getElementById("ast-atr-d1")) {
       document.getElementById("ast-atr-d1").innerText = `$${Number(pe.atr_d1_usd || 0).toFixed(2)} (SL: 1.0 ATR / TP: 2.0 ATR)`;
+    }
+    if (document.getElementById("ast-bt5-summary") && bt5.trades) {
+      document.getElementById("ast-bt5-summary").innerText = `${bt5.trades} Trades | ${bt5.win_rate_pct}% Win | PF ${bt5.profit_factor} (t=${bt5.t_stat}, p=${bt5.p_val})`;
     }
     if (document.getElementById("ast-bt-summary") && bt3.trades) {
       document.getElementById("ast-bt-summary").innerText = `${bt3.trades} Trades | ${bt3.win_rate_pct}% Win | PF ${bt3.profit_factor} (t=${bt3.t_stat}, p=${bt3.p_val})`;

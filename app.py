@@ -958,6 +958,27 @@ def get_cpi_historical():
 def get_hypothesis_test(event_type: str = "cpi"):
     return quant_model.get_event_hypothesis_test(event_type=event_type)
 
+@app.get("/api/backtest-5y")
+def get_backtest_5y():
+    path_5y = os.path.join(DATA_DIR, "backtest_multi_horizon_5y.json")
+    if os.path.exists(path_5y):
+        with open(path_5y, "r") as f:
+            return json.load(f)
+    return {"error": "5y backtest telemetry not found"}
+
+@app.get("/api/backtest-multi-horizon")
+def get_backtest_multi_horizon():
+    path_5y = os.path.join(DATA_DIR, "backtest_multi_horizon_5y.json")
+    path_3y = os.path.join(DATA_DIR, "backtest_multi_horizon_3y.json")
+    res = {}
+    if os.path.exists(path_5y):
+        with open(path_5y, "r") as f:
+            res["backtest_5y"] = json.load(f)
+    if os.path.exists(path_3y):
+        with open(path_3y, "r") as f:
+            res["backtest_3y"] = json.load(f)
+    return res
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="127.0.0.1", port=8888, reload=False)

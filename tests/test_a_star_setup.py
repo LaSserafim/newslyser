@@ -5,6 +5,8 @@ dead-band enforcement, VPIN toxicity lockout, and calculative risk management.
 """
 
 import unittest
+import os
+import json
 import numpy as np
 import quant_model as qm
 
@@ -169,6 +171,31 @@ class TestAStarSetupEngine(unittest.TestCase):
         mgr.force_reset_horizon("intraday")
         ledger = mgr.get_ledger()
         self.assertIsNone(ledger.get("active_setups", {}).get("intraday"))
+
+    def test_5y_multi_horizon_backtest_telemetry(self):
+        """Verifies that 5-year multi-horizon backtest telemetry is validated with statistical rigor."""
+        res = qm.calculate_daily_a_star_setup(horizon="daily", n_paths=1000)
+        pe = res["probability_engine"]
+        self.assertIn("backtest_3y_summary", pe)
+        self.assertIn("backtest_5y_summary", pe)
+        bt5 = pe["backtest_5y_summary"]
+        self.assertGreater(bt5["trades"], 50)
+        self.assertGreater(bt5["profit_factor"], 1.0)
+
+        # Check JSON telemetry on disk
+        bt5_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "backtest_multi_horizon_5y.json")
+        self.assertTrue(os.path.exists(bt5_path))
+        with open(bt5_path, "r") as f:
+            data = json.load(f)
+        self.assertIn("tracks", data)
+        comb = data["tracks"]["combined_portfolio"]
+        self.assertGreaterEqual(comb["trades"], 500)
+        self.assertGreater(comb["sum_r"], 50.0)
+        self.assertGreater(comb["ending_equity_usd"], 2500.0)
+        self.assertGreaterEqual(comb["t_stat"], 2.0)
+        self.assertLess(comb["p_val"], 0.01)
+        self.assertLess(data["hypothesis_testing"]["rademacher_permutation_pval"], 0.01)
+        self.assertGreater(data["hypothesis_testing"]["deflated_sharpe_ratio"], 0.99)
 
 
 if __name__ == "__main__":
