@@ -998,6 +998,14 @@ def get_backtest_maxtp():
             return json.load(f)
     return {"error": "maxtp backtest telemetry not found"}
 
+@app.get("/api/backtest-zero-lookahead")
+def get_backtest_zero_lookahead():
+    path_zl = os.path.join(DATA_DIR, "backtest_zero_lookahead_5y.json")
+    if os.path.exists(path_zl):
+        with open(path_zl, "r") as f:
+            return json.load(f)
+    return {"error": "zero lookahead backtest telemetry not found"}
+
 @app.get("/api/backtest-multi-horizon")
 def get_backtest_multi_horizon():
     path_5y = os.path.join(DATA_DIR, "backtest_multi_horizon_5y.json")

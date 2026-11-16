@@ -1961,8 +1961,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     sl_any = np.any(sl_m, axis=1)
     tau_tp = np.where(tp_any, np.argmax(tp_m, axis=1) + 1, steps + 99)
     tau_sl = np.where(sl_any, np.argmax(sl_m, axis=1) + 1, steps + 99)
+    loss_m = sl_any & (tau_sl <= tau_tp)
     win_m = tp_any & (tau_tp < tau_sl)
-    loss_m = sl_any & (tau_sl < tau_tp)
     undecided_m = ~win_m & ~loss_m
 
     terminal_p = paths[:, -1]

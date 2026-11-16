@@ -197,6 +197,31 @@ class TestAStarSetupEngine(unittest.TestCase):
         self.assertLess(data["hypothesis_testing"]["rademacher_permutation_pval"], 0.01)
         self.assertGreater(data["hypothesis_testing"]["deflated_sharpe_ratio"], 0.99)
 
+    def test_zero_lookahead_audit_telemetry(self):
+        """Verifies that the strict zero-lookahead, anti-overfitting audit telemetry is valid."""
+        zl_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "backtest_zero_lookahead_5y.json")
+        self.assertTrue(os.path.exists(zl_path))
+        with open(zl_path, "r") as f:
+            data = json.load(f)
+        self.assertIn("anti_bias_rules", data)
+        self.assertIn("portfolio", data)
+        self.assertIn("sample_split", data)
+        self.assertIn("scenario_4pct_risk", data)
+
+        port = data["portfolio"]
+        self.assertGreaterEqual(port["trades"], 500)
+        self.assertGreater(port["sum_r"], 50.0)
+        self.assertGreater(port["t_stat"], 2.0)
+        self.assertLess(port["p_val"], 0.05)
+        self.assertGreater(port["dsr_prob_pct"], 95.0)
+
+        # Anti-overfitting validation: Out-of-sample must have positive EV and t-stat
+        oos = data["sample_split"]["out_of_sample"]
+        self.assertGreater(oos["trades"], 300)
+        self.assertGreater(oos["mean_r"], 0.15)
+        self.assertGreater(oos["t_stat"], 3.0)
+        self.assertGreater(oos["sharpe_ratio"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
