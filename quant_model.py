@@ -2216,8 +2216,14 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         session_c = round(float(session_c), 2)
 
     PP = round((session_h + session_l + session_c) / 3.0, 2)
+    # STRICT READ-ONLY: Never mutate setup_ledger.json from calculate_daily_a_star_setup (prevents test/fallback tick leakage)
     mgr = SetupLifecycleManager()
-    active_locked, completed_list = mgr.evaluate_live_tick(current_price, horizon=h_mode)
+    _led = mgr.get_ledger()
+    active_locked = next(
+        (t for t in _led.get("running_trades", []) if t.get("horizon") == h_mode and t.get("status") in ("PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT")),
+        _led.get("active_setups", {}).get(h_mode)
+    )
+    completed_list = _led.get("completed_setups", [])
 
     snap = _load_premarket_snapshot()
     lead = snap.get("leading_indicators", {})

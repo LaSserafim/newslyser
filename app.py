@@ -173,12 +173,14 @@ def fetch_tradingview_live_quotes():
     except Exception as e:
         print("TradingView scanner parse error:", e)
         return {}
+_LAST_VERIFIED_PRICES = {}
+
 def fetch_live_macro_data():
     """
     High-frequency multi-tier real-time market data ingestion:
     Tier 1: TradingView live scanner (FX_IDC:XAUUSD spot bid/ask, TVC:DXY, TVC:US10Y, NYMEX:CL1!).
-    Tier 2: Yahoo Finance fallback.
-    Caches for 2.0s to ensure ultra-fresh live tick re-anchoring with zero latency.
+    Tier 2: Yahoo Finance 5m live quote fallback.
+    NEVER fabricates dummy prices into live trade evaluation (sets is_live_verified=False if offline).
     """
     import time
     now_ts = time.time()
@@ -187,37 +189,44 @@ def fetch_live_macro_data():
 
     now_utc = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     prices = {}
+    is_live_verified = False
 
     # Tier 1: Real-time TradingView spot feed
     tv_quotes = fetch_tradingview_live_quotes()
-    if tv_quotes and "GC=F" in tv_quotes:
+    if tv_quotes and "GC=F" in tv_quotes and tv_quotes["GC=F"] is not None:
         prices = tv_quotes
+        is_live_verified = True
         data_source = "TRADINGVIEW REAL-TIME SPOT FEED (FX_IDC:XAUUSD)"
     else:
-        # Tier 2: Yahoo Finance Fallback
-        tickers = ["GC=F", "DX-Y.NYB", "ZT=F", "^TNX", "CL=F"]
+        # Tier 2: Yahoo Finance 5m live quote fallback
         try:
-            data = yf.download(tickers, period="1d", interval="1m", progress=False)
-            if not data.empty and "Close" in data:
-                for t in tickers:
-                    s = data["Close"][t].dropna()
-                    if not s.empty:
-                        prices[t] = round(float(s.iloc[-1]), 3)
-            data_source = "YAHOO FINANCE LIVE FEED"
-        except Exception as e:
-            data_source = "OFFLINE ANCHOR BASELINE"
+            gc_hist = yf.Ticker("GC=F").history(period="1d", interval="5m")
+            if gc_hist is not None and not gc_hist.empty and "Close" in gc_hist:
+                s = gc_hist["Close"].dropna()
+                if not s.empty:
+                    prices["GC=F"] = round(float(s.iloc[-1]), 2)
+                    prices["XAUUSD_SPOT"] = prices["GC=F"]
+                    is_live_verified = True
+            data_source = "YAHOO FINANCE LIVE FEED" if is_live_verified else "OFFLINE (UNVERIFIED)"
+        except Exception:
+            data_source = "OFFLINE (UNVERIFIED)"
 
-    # Strict fallback bounds if disconnected
-    if "GC=F" not in prices:
-        prices["GC=F"] = 4036.17
+    # Cache verified live prices; if temporarily offline, reuse last verified live quote (NEVER jump to fake 4036.17)
+    if is_live_verified:
+        _LAST_VERIFIED_PRICES.update(prices)
+    elif _LAST_VERIFIED_PRICES:
+        for k, v in _LAST_VERIFIED_PRICES.items():
+            prices.setdefault(k, v)
+
+    # Non-gold macro secondary fallbacks only if missing (Gold is NEVER faked as verified)
     if "DX-Y.NYB" not in prices:
-        prices["DX-Y.NYB"] = 102.24
+        prices["DX-Y.NYB"] = _LAST_VERIFIED_PRICES.get("DX-Y.NYB", 102.24)
     if "ZT=F" not in prices:
-        prices["ZT=F"] = 4.75
+        prices["ZT=F"] = _LAST_VERIFIED_PRICES.get("ZT=F", 4.75)
     if "^TNX" not in prices:
-        prices["^TNX"] = 5.00
+        prices["^TNX"] = _LAST_VERIFIED_PRICES.get("^TNX", 5.00)
     if "CL=F" not in prices:
-        prices["CL=F"] = 86.28
+        prices["CL=F"] = _LAST_VERIFIED_PRICES.get("CL=F", 86.28)
 
     # 2. Release detector: read latest verified release status from tomorrow_preview.json (no hardcoded dummy actuals)
     headline_actual = None
@@ -235,6 +244,7 @@ def fetch_live_macro_data():
     res = {
         "timestamp": now_utc,
         "prices": prices,
+        "is_live_verified": is_live_verified,
         "headline_actual": headline_actual,
         "core_actual": core_actual,
         "source": data_source
@@ -437,16 +447,21 @@ def get_ppi_prenew_model(price: float = None, atr: float = None):
 def get_setup_ledger():
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
-    cur_gold = prices.get("GC=F")
+    cur_gold = prices.get("GC=F") if live.get("is_live_verified") else None
     mgr = quant_model.SetupLifecycleManager()
-    return mgr.get_categorized_ledger(live_price=cur_gold)
+    res = mgr.get_categorized_ledger(live_price=cur_gold)
+    res["data_source"] = live.get("source", "UNKNOWN")
+    res["is_live_verified"] = bool(live.get("is_live_verified"))
+    return res
 
 @app.post("/api/setup-ledger/add")
 def add_setup_to_running_list(payload: dict):
     """Explicit user opt-in: adds an A* setup (selected horizon) into the Running Trading List."""
     live = fetch_live_macro_data()
+    if not live.get("is_live_verified") or live.get("prices", {}).get("GC=F") is None:
+        return {"status": "OFFLINE", "message": "Live gold price feed unverified — cannot add trade without real live tick."}
     prices = live.get("prices", {})
-    cur_gold = float(prices.get("GC=F", 3800.0))
+    cur_gold = float(prices["GC=F"])
     h_key = str(payload.get("horizon") or "daily").lower()
 
     # If client passed only horizon, compute fresh live ticket for that horizon
@@ -493,7 +508,9 @@ def action_on_running_setup(payload: dict):
     if mode not in ("close", "remove"):
         return {"status": "ERROR", "message": "Invalid mode (must be 'close' or 'remove')."}
     live = fetch_live_macro_data()
-    cur_gold = float(live.get("prices", {}).get("GC=F", 3800.0))
+    cur_gold = float(live["prices"]["GC=F"]) if (live.get("is_live_verified") and live.get("prices", {}).get("GC=F") is not None) else None
+    if mode == "close" and cur_gold is None:
+        return {"status": "OFFLINE", "message": "Live gold price feed unverified — cannot close at market without live price."}
     mgr = quant_model.SetupLifecycleManager()
     res = mgr.close_or_remove_running_trade(setup_id, live_price=cur_gold, mode=mode)
     res["ledger"] = mgr.get_categorized_ledger(live_price=cur_gold)
@@ -683,7 +700,7 @@ def refresh_all():
     created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
     dyn_levels = quant_model.calculate_dynamic_levels(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     mgr = quant_model.SetupLifecycleManager()
-    ledger_state = mgr.evaluate_all_live_ticks(current_gold)
+    ledger_state = mgr.evaluate_all_live_ticks(current_gold) if (live_data.get("is_live_verified") and prices.get("GC=F") is not None) else mgr.get_ledger()
     active_setup = ledger_state.get("active_setup")
     completed = ledger_state.get("completed_setups", [])
     a_star = quant_model.calculate_daily_a_star_setup(

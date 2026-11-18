@@ -162,15 +162,23 @@ class TestAStarSetupEngine(unittest.TestCase):
         self.assertLessEqual(mat["portfolio_allocation"]["max_portfolio_concurrent_risk_pct"], 5.0)
 
     def test_force_reset_horizon(self):
-        """Verifies that force_reset_horizon clears active setups and archives superseded state."""
-        mgr = qm.SetupLifecycleManager()
-        raw_ticket = {"action": "BUY", "ticket_type": "TEST", "entry_zone": "$2000 - $2002", "stop_loss": "$1990", "take_profit_1": "$2020"}
-        locked, _ = mgr.get_or_create_locked_setup(raw_ticket, 2000.0, is_a_star=True, horizon="intraday")
-        self.assertIsNotNone(locked)
-        # Force reset
-        mgr.force_reset_horizon("intraday")
-        ledger = mgr.get_ledger()
-        self.assertIsNone(ledger.get("active_setups", {}).get("intraday"))
+        """Verifies that force_reset_horizon clears active setups and archives superseded state (isolated temp ledger)."""
+        import tempfile
+        tmp_path = os.path.join(tempfile.gettempdir(), "test_force_reset_ledger.json")
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        try:
+            mgr = qm.SetupLifecycleManager(filepath=tmp_path)
+            raw_ticket = {"action": "BUY", "ticket_type": "TEST", "entry_zone": "$2000 - $2002", "stop_loss": "$1990", "take_profit_1": "$2020"}
+            locked, _ = mgr.get_or_create_locked_setup(raw_ticket, 2000.0, is_a_star=True, horizon="intraday")
+            self.assertIsNotNone(locked)
+            # Force reset
+            mgr.force_reset_horizon("intraday")
+            ledger = mgr.get_ledger()
+            self.assertIsNone(ledger.get("active_setups", {}).get("intraday"))
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     def test_5y_multi_horizon_backtest_telemetry(self):
         """Verifies that 5-year multi-horizon backtest telemetry is validated with statistical rigor."""
@@ -255,9 +263,6 @@ class TestAStarSetupEngine(unittest.TestCase):
 
             qm._get_daily_prob_regime = mock_daily
             qm._get_intraday_momentum_regime = mock_intra
-            mgr = qm.SetupLifecycleManager()
-            for h in ("scalping", "intraday", "daily"):
-                mgr.force_reset_horizon(h)
 
             scalp = qm.calculate_daily_a_star_setup(current_price=3788.0, horizon="scalping", n_paths=1000)
             intra = qm.calculate_daily_a_star_setup(current_price=3788.0, horizon="intraday", n_paths=1000)
@@ -321,6 +326,15 @@ class TestAStarSetupEngine(unittest.TestCase):
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+    def test_production_ledger_never_mutated_by_read_calls(self):
+        """Strict anti-pollution invariant: calculate_daily_a_star_setup must NEVER write to production setup_ledger.json."""
+        prod_path = "/Users/macbook/newslyser/data/setup_ledger.json"
+        before = open(prod_path).read() if os.path.exists(prod_path) else ""
+        qm.calculate_daily_a_star_setup(current_price=4036.17, horizon="scalping", n_paths=500)
+        qm.calculate_daily_a_star_setup(current_price=4036.17, horizon="daily", n_paths=500)
+        after = open(prod_path).read() if os.path.exists(prod_path) else ""
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":
