@@ -1006,6 +1006,14 @@ def get_backtest_zero_lookahead():
             return json.load(f)
     return {"error": "zero lookahead backtest telemetry not found"}
 
+@app.get("/api/backtest-enhanced-v2")
+def get_backtest_enhanced_v2():
+    path_v2 = os.path.join(DATA_DIR, "backtest_enhanced_v2_5y.json")
+    if os.path.exists(path_v2):
+        with open(path_v2, "r") as f:
+            return json.load(f)
+    return {"error": "enhanced v2 backtest telemetry not found"}
+
 @app.get("/api/backtest-multi-horizon")
 def get_backtest_multi_horizon():
     path_5y = os.path.join(DATA_DIR, "backtest_multi_horizon_5y.json")

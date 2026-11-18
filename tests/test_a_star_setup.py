@@ -222,6 +222,56 @@ class TestAStarSetupEngine(unittest.TestCase):
         self.assertGreater(oos["t_stat"], 3.0)
         self.assertGreater(oos["sharpe_ratio"], 1.0)
 
+    def test_intraday_squeeze_conflict_blocks_blind_short(self):
+        """Verifies that a strong live M15 buying squeeze (+3.0σ) detects LONG on Scalping and blocks blind SHORT on Daily/Intraday."""
+        orig_daily = qm._get_daily_prob_regime
+        orig_intra = qm._get_intraday_momentum_regime
+        try:
+            def mock_daily():
+                d = orig_daily().copy()
+                d["z_20"] = -1.53
+                d["z_60"] = -2.10
+                d["r5_pct"] = -5.0
+                d["sma200"] = 4450.0
+                d["vrp_ann"] = 1.6
+                d["atr_d1"] = 100.0
+                d["mu_daily_post_pct"] = -0.18
+                return d
+
+            def mock_intra():
+                return {
+                    "source": "YAHOO_INTRADAY_LIVE",
+                    "z_m15_1h": 3.00,
+                    "z_m15_4h": 0.20,
+                    "z_h1_4h": 0.25,
+                    "z_h1_12h": -0.60,
+                    "day_open": 3850.0,
+                    "day_high": 3851.0,
+                    "day_low": 3745.0,
+                    "live_px": 3788.0,
+                    "mu_m15_post_pct": 1.20,
+                    "mu_h1_post_pct": -0.40,
+                }
+
+            qm._get_daily_prob_regime = mock_daily
+            qm._get_intraday_momentum_regime = mock_intra
+            mgr = qm.SetupLifecycleManager()
+            for h in ("scalping", "intraday", "daily"):
+                mgr.force_reset_horizon(h)
+
+            scalp = qm.calculate_daily_a_star_setup(current_price=3788.0, horizon="scalping", n_paths=1000)
+            intra = qm.calculate_daily_a_star_setup(current_price=3788.0, horizon="intraday", n_paths=1000)
+            daily = qm.calculate_daily_a_star_setup(current_price=3788.0, horizon="daily", n_paths=1000)
+
+            self.assertIn("LONG", scalp["trade_ticket"]["action"])
+            self.assertFalse(intra["is_a_star"])
+            self.assertIn("STAND ASIDE", intra["trade_ticket"]["action"])
+            self.assertFalse(daily["is_a_star"])
+            self.assertIn("STAND ASIDE", daily["trade_ticket"]["action"])
+        finally:
+            qm._get_daily_prob_regime = orig_daily
+            qm._get_intraday_momentum_regime = orig_intra
+
 
 if __name__ == "__main__":
     unittest.main()

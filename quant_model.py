@@ -23,6 +23,7 @@ _CALIBRATION_CACHE = {}
 _DAILY_OLS_CACHE = {"ts": 0.0, "data": None}
 _LIVE_OVERLAY_CACHE = {"ts": 0.0, "data": {}}
 _DAILY_PROB_CACHE = {"ts": 0.0, "data": None}
+_INTRADAY_MOM_CACHE = {"ts": 0.0, "data": None}
 _PAPER_3Y_CACHE = {"ts": 0.0, "data": None}
 
 def _event_file_mtime(event_type="cpi"):
@@ -1607,8 +1608,12 @@ def _get_daily_prob_regime():
 
         w60 = r_gc.iloc[-60:].dropna().values
         daily_sd_pct = max(0.35, float(np.std(w60, ddof=1)))
+        r5_pct = round(float(np.sum(r_gc.iloc[-5:].dropna().values)), 3)
         r20 = float(np.sum(r_gc.iloc[-20:].dropna().values))
+        r60 = float(np.sum(w60))
         z_20 = round(r20 / max(0.5, daily_sd_pct * math.sqrt(20.0)), 3)
+        z_60 = round(r60 / max(0.5, daily_sd_pct * math.sqrt(60.0)), 3)
+        sma200_now = round(float(gc.rolling(200).mean().iloc[-1]), 2) if len(gc) >= 200 else round(float(gc.mean()), 2)
         rv5_now = round(float(rv5.iloc[-1]), 2)
         rv22_now = round(float(rv22.iloc[-1]), 2)
         gvz_now = round(float(gvz.iloc[-1]), 2)
@@ -1711,6 +1716,9 @@ def _get_daily_prob_regime():
             "date_start": str(closes.index[0].date()),
             "date_end": str(closes.index[-1].date()),
             "z_20": z_20,
+            "z_60": z_60,
+            "r5_pct": r5_pct,
+            "sma200": sma200_now,
             "rv5_ann": rv5_now,
             "rv22_ann": rv22_now,
             "gvz_last": gvz_now,
@@ -1733,6 +1741,9 @@ def _get_daily_prob_regime():
             "date_start": "2023-11-13",
             "date_end": "2026-11-13",
             "z_20": 0.0,
+            "z_60": 0.0,
+            "r5_pct": 0.0,
+            "sma200": 0.0,
             "rv5_ann": round(float(har.get("rv5_pct", 18.0)), 2),
             "rv22_ann": round(float(har.get("rv22_pct", 20.0)), 2),
             "gvz_last": round(float(opt.get("atm_iv_pct", 24.9)), 2),
@@ -1744,6 +1755,81 @@ def _get_daily_prob_regime():
             "dxy_sd_60": 1.2,
             "backtest_3y_naive": {"trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0, "t_stat": 0.0, "p_val": 1.0, "profit_factor": 0.0, "net_return_pct": 0.0, "max_drawdown_pct": 0.0, "ending_equity_usd": 10000.0},
             "backtest_3y_gated": {"trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0, "t_stat": 0.0, "p_val": 1.0, "profit_factor": 0.0, "net_return_pct": 0.0, "max_drawdown_pct": 0.0, "ending_equity_usd": 10000.0}
+        }
+
+
+def _get_intraday_momentum_regime():
+    """
+    Live M15 & H1 intraday momentum and daily range exhaustion sensor (cached 60s).
+    Prevents Scalping/Intraday from blindly inheriting D1 20-day drift into live short-squeezes
+    and prevents Daily/Swing from chasing exhausted (>0.75x ATR) single-day moves.
+    """
+    now = time.time()
+    if _INTRADAY_MOM_CACHE["data"] is not None and (now - _INTRADAY_MOM_CACHE["ts"] < 60.0):
+        return _INTRADAY_MOM_CACHE["data"]
+    try:
+        import yfinance as yf
+        df_15m = yf.download("GC=F", period="5d", interval="15m", progress=False, auto_adjust=False)
+        if isinstance(df_15m.columns, pd.MultiIndex):
+            df_15m.columns = df_15m.columns.get_level_values(0)
+        c15 = df_15m["Close"].dropna()
+        r15 = np.log(c15 / c15.shift(1)).dropna() * 100.0
+        sd15 = max(0.05, float(r15.iloc[-60:].std(ddof=1)))
+        r_1h_pct = float(r15.iloc[-4:].sum())
+        r_4h_m15 = float(r15.iloc[-16:].sum())
+        z_m15_1h = round(r_1h_pct / max(0.05, sd15 * math.sqrt(4.0)), 3)
+        z_m15_4h = round(r_4h_m15 / max(0.10, sd15 * math.sqrt(16.0)), 3)
+
+        df_1h = yf.download("GC=F", period="1mo", interval="1h", progress=False, auto_adjust=False)
+        if isinstance(df_1h.columns, pd.MultiIndex):
+            df_1h.columns = df_1h.columns.get_level_values(0)
+        c1h = df_1h["Close"].dropna()
+        r1h = np.log(c1h / c1h.shift(1)).dropna() * 100.0
+        sd1h = max(0.10, float(r1h.iloc[-60:].std(ddof=1)))
+        r_4h_pct = float(r1h.iloc[-4:].sum())
+        r_12h_pct = float(r1h.iloc[-12:].sum())
+        z_h1_4h = round(r_4h_pct / max(0.10, sd1h * math.sqrt(4.0)), 3)
+        z_h1_12h = round(r_12h_pct / max(0.15, sd1h * math.sqrt(12.0)), 3)
+
+        today_bars = df_1h[df_1h.index.date == df_1h.index[-1].date()]
+        day_open = round(float(today_bars["Open"].iloc[0]), 2) if len(today_bars) else round(float(c1h.iloc[-1]), 2)
+        day_high = round(float(today_bars["High"].max()), 2) if len(today_bars) else day_open
+        day_low = round(float(today_bars["Low"].min()), 2) if len(today_bars) else day_open
+        live_px = round(float(c15.iloc[-1]), 2)
+
+        # Bayesian-shrunk daily-equivalent posterior drift for M15 & H1 horizons
+        mu_m15_post = round(max(-1.2, min(1.2, (r_1h_pct * 4.0) * 0.45)), 4)
+        mu_h1_post = round(max(-1.2, min(1.2, (r_12h_pct * 1.5) * 0.45)), 4)
+
+        res = {
+            "source": "YAHOO_INTRADAY_LIVE",
+            "z_m15_1h": z_m15_1h,
+            "z_m15_4h": z_m15_4h,
+            "z_h1_4h": z_h1_4h,
+            "z_h1_12h": z_h1_12h,
+            "day_open": day_open,
+            "day_high": day_high,
+            "day_low": day_low,
+            "live_px": live_px,
+            "mu_m15_post_pct": mu_m15_post,
+            "mu_h1_post_pct": mu_h1_post,
+        }
+        _INTRADAY_MOM_CACHE["ts"] = now
+        _INTRADAY_MOM_CACHE["data"] = res
+        return res
+    except Exception:
+        return {
+            "source": "INTRADAY_FALLBACK",
+            "z_m15_1h": 0.0,
+            "z_m15_4h": 0.0,
+            "z_h1_4h": 0.0,
+            "z_h1_12h": 0.0,
+            "day_open": 0.0,
+            "day_high": 0.0,
+            "day_low": 0.0,
+            "live_px": 0.0,
+            "mu_m15_post_pct": 0.0,
+            "mu_h1_post_pct": 0.0,
         }
 
 def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None, horizon="daily"):
@@ -1792,6 +1878,9 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     oil_shift = round(((wti_val - 85.00) / 10.00) * 0.142, 3)
 
     z_20 = float(prob_reg["z_20"])
+    z_60 = float(prob_reg.get("z_60", z_20))
+    r5_pct = float(prob_reg.get("r5_pct", 0.0))
+    sma200_val = float(prob_reg.get("sma200", 0.0))
     vrp_ann = float(prob_reg["vrp_ann"])
     rv5_ann = float(prob_reg["rv5_ann"])
     rv22_ann = float(prob_reg["rv22_ann"])
@@ -1801,42 +1890,79 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     mu_daily_post = float(prob_reg["mu_daily_post_pct"])
     macro_drift = (mu_daily_post * 5.0) / 100.0
 
+    # Live Intraday Momentum & Daily Range Exhaustion Guard (eliminates blind D1 shorting into M15/H1 rallies)
+    intra_reg = _get_intraday_momentum_regime()
+    z_m15_1h = float(intra_reg.get("z_m15_1h", 0.0))
+    z_m15_4h = float(intra_reg.get("z_m15_4h", 0.0))
+    z_h1_4h = float(intra_reg.get("z_h1_4h", 0.0))
+    z_h1_12h = float(intra_reg.get("z_h1_12h", 0.0))
+    day_open_px = float(intra_reg.get("day_open", 0.0))
+    day_low_px = float(intra_reg.get("day_low", 0.0))
+    day_high_px = float(intra_reg.get("day_high", 0.0))
+    live_ref_px = float(intra_reg.get("live_px", 0.0)) or current_price
+    mu_m15_post = float(intra_reg.get("mu_m15_post_pct", 0.0))
+    mu_h1_post = float(intra_reg.get("mu_h1_post_pct", 0.0))
+
     def _ncdf(v):
         return 0.5 * (1.0 + math.erf(v / math.sqrt(2.0)))
 
-    p_drift_bull = round(_ncdf(z_20) * 100.0, 1)
-    p_drift_bear = round(100.0 - p_drift_bull, 1)
     kyles_lambda = round((atr_m30 / max(1.0, current_price)) * 100.0, 4)
 
-    # Multi-Horizon Barrier Scaling & SDE Parameters
+    # Multi-Horizon Native Drift, Squeeze Protection & Exhaustion Guards
+    exhaustion_ok = True
+    exhaustion_reason = ""
     if h_mode == "scalping":
         sim_horizon_days = 0.25
         steps = 12
         barrier_sl_scale = 0.25
         rr_base = 1.5
-        drift_ok = (abs(z_20) >= 0.50)
+        # Scalping uses LIVE M15 1H impulse instead of cloning D1 20-day close
+        z_eff = z_m15_1h if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else z_20
+        mu_eff = mu_m15_post if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else mu_daily_post
+        z_label = "z_m15(1H)" if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else "z20"
+        drift_ok = (abs(z_eff) >= 0.85)
+        counter_d1 = (z_eff * z_20 < 0.0)
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = (vpin_now < 0.60)
-        conviction_str = "SCALPING MOMENTUM (1:1.5 RR QUICK HARVEST)"
-        timeframe_label = f"Scalping Horizon (M5/M15) + {n_paths:,}-Path SDE"
+        conviction_str = (
+            f"COUNTER-TREND SCALP {'BUY' if z_eff > 0 else 'SELL'} MOMENTUM (1:1.5 RR — OPPOSING D1 MACRO)"
+            if counter_d1 else "SCALPING MOMENTUM (1:1.5 RR QUICK HARVEST)"
+        )
+        timeframe_label = f"Scalping Horizon (Live M5/M15) + {n_paths:,}-Path SDE"
         exec_tf_label = "Scalping Horizon (0.25 / 0.38 / 0.50 ATR_D1)"
     elif h_mode == "intraday":
         sim_horizon_days = 1.0
         steps = 16
         barrier_sl_scale = 0.50
         rr_base = 2.0
-        drift_ok = (abs(z_20) >= 0.60) and (z_20 * dxy_z < 0.20)
+        # Intraday uses LIVE H1 12H drift + blocks short-squeeze conflict against M15 1H
+        z_eff = z_h1_12h if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else z_20
+        mu_eff = mu_h1_post if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else mu_daily_post
+        z_label = "z_h1(12H)" if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else "z20"
+        squeeze_conflict = (z_eff < 0 and z_m15_1h >= 0.75) or (z_eff > 0 and z_m15_1h <= -0.75)
+        if squeeze_conflict:
+            exhaustion_ok = False
+            exhaustion_reason = f"INTRADAY SQUEEZE CONFLICT (H1 {z_eff:+.2f}σ vs M15 {z_m15_1h:+.2f}σ)"
+        drift_ok = (abs(z_eff) >= 0.75) and (not squeeze_conflict)
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = (vpin_now < 0.65)
         conviction_str = "INTRADAY MOMENTUM (1:2.0 RR SESSION RUNNER)"
-        timeframe_label = f"Intraday Session (4–8H) + {n_paths:,}-Path SDE"
+        timeframe_label = f"Intraday Session (Live H1/H4) + {n_paths:,}-Path SDE"
         exec_tf_label = "Intraday Horizon (0.50 / 1.0 / 1.5 ATR_D1)"
     elif h_mode == "swing":
         sim_horizon_days = 10.0
         steps = 40
         barrier_sl_scale = 1.50
         rr_base = 2.0
-        drift_ok = (abs(z_20) >= 0.70) and (vrp_ann > 0.0) and (z_20 * dxy_z < 0.20)
+        z_eff = z_60 if abs(z_60) > 0 else z_20
+        mu_eff = mu_daily_post
+        z_label = "z60"
+        sma200_ok = True if sma200_val <= 0 else ((live_ref_px >= sma200_val) if z_eff > 0 else (live_ref_px <= sma200_val))
+        squeeze_against = (z_eff < 0 and z_m15_1h >= 1.50) or (z_eff > 0 and z_m15_1h <= -1.50)
+        if squeeze_against:
+            exhaustion_ok = False
+            exhaustion_reason = f"LIVE M15 SQUEEZE AGAINST SWING ({z_m15_1h:+.2f}σ) — WAIT FOR PULLBACK"
+        drift_ok = (abs(z_eff) >= 0.70) and (vrp_ann > 0.0) and (z_eff * dxy_z < 0.20) and sma200_ok
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = (vpin_now < 0.75)
         conviction_str = "SWING MACRO (1:2.0 RR CYCLE RUNNER)"
@@ -1847,7 +1973,10 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         steps = 24
         barrier_sl_scale = 0.50
         rr_base = 4.0
-        drift_ok = (abs(z_20) >= 0.50)
+        z_eff = z_m15_1h if (intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" and abs(z_m15_1h) >= 1.0) else z_20
+        mu_eff = mu_m15_post if (intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" and abs(z_m15_1h) >= 1.0) else mu_daily_post
+        z_label = "z_m15(1H)" if (intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" and abs(z_m15_1h) >= 1.0) else "z20"
+        drift_ok = (abs(z_eff) >= 0.50)
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = (vpin_now < 0.65)
         conviction_str = "MACRO NEWS T+3m (1:4.0 RR SPIKE RUNNER)"
@@ -1857,7 +1986,22 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         sim_horizon_days = 5.0
         steps = 20
         barrier_sl_scale = 1.00
-        drift_ok = abs(z_20) >= 0.75
+        z_eff = z_20
+        mu_eff = mu_daily_post
+        z_label = "z20"
+        sma200_ok = True if sma200_val <= 0 else ((live_ref_px >= sma200_val) if z_20 > 0 else (live_ref_px <= sma200_val))
+        r5_ok = True if r5_pct == 0.0 else (r5_pct * z_20 > 0.0)
+        # Daily ATR exhaustion & live short-squeeze guard (stops chasing -1.0x ATR flush lows)
+        if day_open_px > 0 and atr_d1 > 0:
+            day_move_in_dir = ((live_ref_px - day_open_px) if z_20 > 0 else (day_open_px - live_ref_px)) / atr_d1
+            day_ext_in_dir = ((day_high_px - day_open_px) if z_20 > 0 else (day_open_px - day_low_px)) / atr_d1
+            if day_move_in_dir >= 0.75 or (day_ext_in_dir >= 0.90 and ((z_20 < 0 and z_m15_1h >= 1.50) or (z_20 > 0 and z_m15_1h <= -1.50))):
+                exhaustion_ok = False
+                exhaustion_reason = f"DAILY RANGE EXHAUSTED ({day_ext_in_dir:.2f}x ATR) / LIVE SQUEEZE (M15 {z_m15_1h:+.2f}σ) — DO NOT CHASE"
+        elif (z_20 < 0 and z_m15_1h >= 1.50) or (z_20 > 0 and z_m15_1h <= -1.50):
+            exhaustion_ok = False
+            exhaustion_reason = f"LIVE M15 SQUEEZE AGAINST D1 ({z_m15_1h:+.2f}σ) — WAIT FOR RETEST"
+        drift_ok = (abs(z_20) >= 0.75) and sma200_ok and r5_ok
         rr_base = 2.0 if (abs(z_20) >= 1.0 or vrp_ann >= 1.5) else (1.0 if drift_ok else 1.0)
         conviction_str = "HIGH CONVICTION (1:2.0 RR RUNNER)" if (abs(z_20) >= 1.0 or vrp_ann >= 1.5) else ("MODERATE CONVICTION (1:1.0 RR SCALP)" if drift_ok else "NEUTRAL / NO STATISTICAL DRIFT EDGE")
         timeframe_label = f"D1 + {n_paths:,}-Path Bayesian Drift & VRP SDE (Zero Chart Patterns)"
@@ -1865,16 +2009,19 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = not bool(m5_flow.get("vpin_toxic_gate", False))
 
+    p_drift_bull = round(_ncdf(z_eff) * 100.0, 1)
+    p_drift_bear = round(100.0 - p_drift_bull, 1)
+
     rr_target = rr_base
     eff_sl_dist = round(barrier_sl_scale * atr_d1, 2)
 
-    # 3. 10,000-Path Causal Geometric Brownian Simulation (Volatility-Anchored to 22D/60D SD)
+    # 3. 10,000-Path Causal Geometric Brownian Simulation (Horizon-Native Drift & Volatility)
     rng = np.random.default_rng(42)
     dt = sim_horizon_days / float(steps)
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = current_price
     step_vol = (daily_sd_pct / 100.0) * math.sqrt(dt)
-    drift_step = (mu_daily_post / 100.0) * dt
+    drift_step = (mu_eff / 100.0) * dt
     z_mat = rng.normal(0, 1, (n_paths, steps))
     paths[:, 1:] = current_price * np.exp(np.cumsum((drift_step - 0.5 * step_vol**2) + step_vol * z_mat, axis=1))
     p5 = np.percentile(paths, 5, axis=0)
@@ -1913,16 +2060,16 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
         if not drift_ok:
             is_bullish = None
-            raw_action = f"STAND ASIDE // NO CAUSAL DRIFT ({h_mode.upper()} |z20|={abs(z_20):.2f})"
+            raw_action = f"STAND ASIDE // NO CAUSAL DRIFT ({h_mode.upper()} |{z_label}|={abs(z_eff):.2f})"
             ticket_type = f"NEUTRAL_DRIFT_{h_mode.upper()}_STAND_ASIDE"
             sl_val = round(mid_entry - eff_sl_dist, 2)
             tp1_val = round(mid_entry + eff_sl_dist, 2)
             tp2_val = round(mid_entry + 2.0 * eff_sl_dist, 2)
             bias = "NEUTRAL_EQUILIBRIUM_CHOP"
         else:
-            is_bullish = (z_20 > 0.0)
+            is_bullish = (z_eff > 0.0)
             if is_bullish:
-                raw_action = f"BAYESIAN PROBABILITY LONG ({h_mode.upper()}, z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+                raw_action = f"BAYESIAN PROBABILITY LONG ({h_mode.upper()}, {z_label}={z_eff:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
                 ticket_type = f"BULLISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
                 sl_val = round(mid_entry - eff_sl_dist, 2)
                 tp1_mult = 2.0 if h_mode == "news" else rr_target
@@ -1931,7 +2078,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
                 tp2_val = round(mid_entry + tp2_mult * eff_sl_dist, 2)
                 bias = f"BULLISH_BAYESIAN_{h_mode.upper()}"
             else:
-                raw_action = f"BAYESIAN PROBABILITY SHORT ({h_mode.upper()}, z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+                raw_action = f"BAYESIAN PROBABILITY SHORT ({h_mode.upper()}, {z_label}={z_eff:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
                 ticket_type = f"BEARISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
                 sl_val = round(mid_entry + eff_sl_dist, 2)
                 tp1_mult = 2.0 if h_mode == "news" else rr_target
@@ -2027,13 +2174,13 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     har_calm_ok = rv5_ann <= 1.15 * max(1.0, rv22_ann)
     ev_ok = (ev_r > 0.05) and (win_rate >= 50.0)
 
-    macro_score = 25 if drift_ok else (18 if abs(z_20) >= 0.45 else 10)
+    macro_score = 25 if (drift_ok and exhaustion_ok) else (18 if abs(z_eff) >= 0.45 else 10)
     mc_prob_score = 25 if (ev_r >= 0.15 and win_rate >= 55.0) else (20 if ev_ok else 10)
     vol_score = 25 if (vrp_ok and har_calm_ok) else (17 if vrp_ok else 10)
     cross_score = 25 if (vpin_ok and daily_ols["f_p_val"] < 0.05) else 15
     total_confluence = macro_score + mc_prob_score + vol_score + cross_score
 
-    is_a_star = bool(drift_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0))
+    is_a_star = bool(drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0))
     grade = f"A* GRADE ({conviction_str})" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70 else "C-GRADE (NO EDGE / STAND ASIDE)")
 
     risk_dist_dollars = max(1.0, abs(mid_entry - sl_val))
@@ -2043,7 +2190,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     req_margin = round((computed_lot * 100.0 * current_price) / standard_leverage, 2)
 
     gate_checks = {
-        "bayesian_drift_z20": {"status": "PASS" if drift_ok else "UNMET", "detail": f"20D Drift z={z_20:+.2f}σ (|z| >= 0.75 required; P_bull={p_drift_bull}%, P_bear={p_drift_bear}%)"},
+        "bayesian_drift_z20": {"status": "PASS" if drift_ok else "UNMET", "detail": f"{z_label}={z_eff:+.2f}σ | D1 z20={z_20:+.2f}σ, M15(1H)={z_m15_1h:+.2f}σ (P_bull={p_drift_bull}%, P_bear={p_drift_bear}%)"},
+        "intraday_exhaustion_squeeze_gate": {"status": "PASS" if exhaustion_ok else "BLOCKED", "detail": "Intraday Tape Aligned (No Squeeze / Range Exhaustion)" if exhaustion_ok else exhaustion_reason},
         "vrp_implied_edge": {"status": "PASS" if vrp_ok else "UNMET", "detail": f"VRP = GVZ ({gvz_now:.1f}%) - RV22 ({rv22_ann:.1f}%) = {vrp_ann:+.2f}% (> 0 required)"},
         "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
         "mark_to_market_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {win_rate}% | M2M EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}% | PF={pf}"},
@@ -2068,7 +2216,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         tp_reason = "Targets cancelled."
     elif not is_a_star:
         unmet = []
-        if not drift_ok: unmet.append(f"|z20|={abs(z_20):.2f} < 0.75")
+        if not exhaustion_ok: unmet.append(exhaustion_reason)
+        if not drift_ok: unmet.append(f"|{z_label}|={abs(z_eff):.2f} UNMET")
         if not vrp_ok: unmet.append(f"VRP={vrp_ann:+.1f}% <= 0")
         if not har_calm_ok: unmet.append("RV5 > 1.15*RV22 PANIC")
         if not ev_ok: unmet.append(f"EV={ev_r:+.3f}R <= 0.05")
@@ -2076,7 +2225,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         reason_gate = ", ".join(unmet) if unmet else f"CONFLUENCE {total_confluence}/100"
         action = f"A* GRADE NOT EXIST YET // STAND ASIDE ({reason_gate})"
         ticket_type = "NO_A_STAR_SETUP_STAND_ASIDE"
-        ticket_title = f"STATUS: A* GRADE NOT EXIST YET // STAND ASIDE (z20={z_20:+.2f}σ, VRP={vrp_ann:+.1f}%, {total_confluence}/100)"
+        ticket_title = f"STATUS: A* GRADE NOT EXIST YET // STAND ASIDE ({z_label}={z_eff:+.2f}σ, M15={z_m15_1h:+.2f}σ, {total_confluence}/100)"
         entry_zone = f"${entry_low:.2f} - ${entry_high:.2f} (CANDIDATE // BLOCKED BY GATE)"
         sl_val_str = f"${sl_val:.2f}"
         tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
