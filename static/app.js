@@ -1759,12 +1759,19 @@ async function fetchAstarData() {
     if (!aStar) return;
 
     const pe = aStar.probability_engine || {};
+    // Sync live horizon Z-score into Monte Carlo state so Pane 02 never uses stale -1.18
+    if (!EVENT_STATE.astar) EVENT_STATE.astar = { horizon: h, z: 0 };
+    EVENT_STATE.astar.z = Number(pe.z_eff !== undefined ? pe.z_eff : (pe.z_20_drift || 0));
+    window._LAST_ASTAR_DATA = aStar;
+
     const bt3 = pe.backtest_3y_summary || {};
     const bt5 = pe.backtest_5y_summary || {};
     if (document.getElementById("ast-z20")) {
-      const zVal = Number(pe.z_20_drift || 0);
-      document.getElementById("ast-z20").innerText = `${zVal >= 0 ? "+" : ""}${zVal.toFixed(2)}σ (${Math.abs(zVal) >= 0.75 ? "CAUSAL DRIFT PASS" : "NEUTRAL CHOP"})`;
-      document.getElementById("ast-z20").style.color = Math.abs(zVal) >= 0.75 ? (zVal > 0 ? "#00e5ff" : "#ff4444") : "var(--amber-cmd)";
+      const zVal = Number(pe.z_eff !== undefined ? pe.z_eff : (pe.z_20_drift || 0));
+      const zLbl = pe.z_label || "z20";
+      const m15Str = pe.z_m15_1h !== undefined ? ` | M15(1H): ${pe.z_m15_1h >= 0 ? "+" : ""}${Number(pe.z_m15_1h).toFixed(2)}σ` : "";
+      document.getElementById("ast-z20").innerText = `${zLbl}=${zVal >= 0 ? "+" : ""}${zVal.toFixed(2)}σ${m15Str}`;
+      document.getElementById("ast-z20").style.color = Math.abs(zVal) >= 0.75 ? (zVal > 0 ? "#00e676" : "#ff4444") : "var(--amber-cmd)";
     }
     if (document.getElementById("ast-mu-post")) {
       const muVal = Number(pe.mu_daily_post_pct || 0);
@@ -1831,11 +1838,50 @@ async function fetchAstarData() {
     if (document.getElementById("astar-sl")) document.getElementById("astar-sl").innerText = ticket.stop_loss || "--";
     if (document.getElementById("astar-tp1")) document.getElementById("astar-tp1").innerText = ticket.take_profit_1 || "--";
     if (document.getElementById("astar-tp2")) document.getElementById("astar-tp2").innerText = ticket.take_profit_2 || "--";
-    if (document.getElementById("astar-lot")) document.getElementById("astar-lot").innerText = `${ticket.recommended_lot_size_1000_equity || 0.00} LOT (${ticket.max_risk_amount_usd || '$0.00'})`;
+    const lotTextEl = document.getElementById("astar-lot-text") || document.getElementById("astar-lot");
+    if (lotTextEl) lotTextEl.innerText = `${ticket.recommended_lot_size_1000_equity || 0.00} LOT (${ticket.max_risk_amount_usd || '$0.00'})`;
+
+    // Update Opt-In Add/Skip Buttons on Ticket Pane
+    const btnAdd = document.getElementById("btn-add-astar-running");
+    const btnSkip = document.getElementById("btn-skip-astar-setup");
+    const fbEl = document.getElementById("astar-optin-feedback");
+    if (btnAdd) {
+      if (aStar.in_running_list) {
+        btnAdd.disabled = true;
+        btnAdd.innerText = `✓ IN RUNNING LIST (${h.toUpperCase()})`;
+        btnAdd.style.background = "#092129";
+        btnAdd.style.borderColor = "#00e5ff";
+        btnAdd.style.color = "#00e5ff";
+      } else if (aStar.is_a_star) {
+        btnAdd.disabled = false;
+        const dirWord = (ticket.action || "").includes("LONG") ? "LONG" : "SHORT";
+        btnAdd.innerText = `+ ADD ${h.toUpperCase()} ${dirWord} TO RUNNING LIST <GO>`;
+        btnAdd.style.background = "#0b2414";
+        btnAdd.style.borderColor = "#00e676";
+        btnAdd.style.color = "#00e676";
+      } else {
+        btnAdd.disabled = true;
+        btnAdd.innerText = `STAND ASIDE — NOT A* GRADE (${h.toUpperCase()})`;
+        btnAdd.style.background = "#181414";
+        btnAdd.style.borderColor = "#553333";
+        btnAdd.style.color = "#996666";
+      }
+    }
+    if (btnSkip) {
+      btnSkip.disabled = !!aStar.in_running_list;
+      btnSkip.style.opacity = aStar.in_running_list ? "0.45" : "1";
+    }
+    if (fbEl && !window._ASTAR_OPTIN_LOCK_MSG) {
+      fbEl.innerText = aStar.in_running_list
+        ? `ACTIVE TRACKING: ${h.toUpperCase()} setup is live in [06A // RUNNING & ACTIVE SETUPS] below.`
+        : (aStar.is_a_star
+          ? `READY FOR OPT-IN: Click [+ ADD] to track this ${h.toUpperCase()} A* setup live, or [× SKIP] to ignore.`
+          : `GATE PROTECTED: ${h.toUpperCase()} is currently STAND ASIDE — wait for A* conditions.`);
+    }
 
     // Visual Position Progress Gauge
     const ls = aStar.locked_setup;
-    const curP = aStar.current_price || 3970.0;
+    const curP = aStar.current_price || 3800.0;
     const gSl = document.getElementById("gauge-sl"), gEnt = document.getElementById("gauge-entry"), gLiv = document.getElementById("gauge-live"), gTp = document.getElementById("gauge-tp1");
     const gUsd = document.getElementById("gauge-pnl-usd"), gR = document.getElementById("gauge-pnl-r"), gSt = document.getElementById("gauge-status-badge"), gPin = document.getElementById("gauge-cursor-pin");
 
@@ -1845,8 +1891,8 @@ async function fetchAstarData() {
       if (gLiv) gLiv.innerText = `$${curP.toFixed(2)}`;
       if (gTp) gTp.innerText = `$${(ls.take_profit_1 || 0).toFixed(2)}`;
       const pUsd = ls.floating_pnl_usd || 0, pR = ls.floating_r || 0;
-      if (gUsd) { gUsd.innerText = `${pUsd >= 0 ? "+" : ""}$${pUsd.toFixed(2)} USD`; gUsd.style.color = pUsd >= 0 ? "#fff" : "#ff4444"; }
-      if (gR) { gR.innerText = `${pR >= 0 ? "+" : ""}${pR.toFixed(2)} R`; gR.style.color = pR >= 0 ? "#fff" : "#ff4444"; }
+      if (gUsd) { gUsd.innerText = `${pUsd >= 0 ? "+" : ""}$${pUsd.toFixed(2)} USD`; gUsd.style.color = pUsd >= 0 ? "#00e676" : "#ff4444"; }
+      if (gR) { gR.innerText = `${pR >= 0 ? "+" : ""}${pR.toFixed(2)} R`; gR.style.color = pR >= 0 ? "#00e676" : "#ff4444"; }
       if (gSt) gSt.innerText = ls.status || "PENDING_TRIGGER";
       const rng = Math.abs((ls.take_profit_1 || 0) - (ls.stop_loss || 0));
       if (gPin && rng > 0) {
@@ -1858,7 +1904,9 @@ async function fetchAstarData() {
       if (gEnt) gEnt.innerText = ticket.entry_zone ? ticket.entry_zone.split("(")[0].trim() : "--";
       if (gLiv) gLiv.innerText = `$${curP.toFixed(2)}`;
       if (gTp) gTp.innerText = ticket.take_profit_1 || "--";
-      if (gSt) gSt.innerText = ticket.setup_status || "STAND_ASIDE";
+      if (gUsd) { gUsd.innerText = "$0.00 USD"; gUsd.style.color = "#888"; }
+      if (gR) { gR.innerText = "0.00 R"; gR.style.color = "#888"; }
+      if (gSt) gSt.innerText = aStar.is_a_star ? "OPT-IN READY" : (ticket.setup_status || "STAND_ASIDE");
     }
 
     if (aStar.time_to_live && aStar.time_to_live.expires_at_epoch) {
@@ -1869,71 +1917,290 @@ async function fetchAstarData() {
     fetchGlobalMacroMatrix();
     fetchQuant8AuditTable();
     renderSetupLedgerTable();
+    renderMultiHorizonOptInMatrix();
   } catch (err) {
     console.warn("fetchAstarData error:", err);
   }
 }
 
+window._SKIPPED_ASTAR_HORIZONS = window._SKIPPED_ASTAR_HORIZONS || {};
+
+async function addHorizonSetupToRunning(horizon) {
+  const fbEl = document.getElementById("astar-optin-feedback");
+  try {
+    const res = await fetch("/api/setup-ledger/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ horizon })
+    });
+    const out = await res.json();
+    delete window._SKIPPED_ASTAR_HORIZONS[horizon];
+    if (fbEl) {
+      window._ASTAR_OPTIN_LOCK_MSG = true;
+      fbEl.innerText = out.message || `${horizon.toUpperCase()} status: ${out.status}`;
+      fbEl.style.color = out.status === "ADDED" ? "#00e676" : (out.status === "ALREADY_IN_LIST" ? "#00e5ff" : "#ff6b6b");
+      setTimeout(() => { window._ASTAR_OPTIN_LOCK_MSG = false; }, 4500);
+    }
+    await renderSetupLedgerTable();
+    await renderMultiHorizonOptInMatrix();
+    await fetchAstarData();
+  } catch (e) {
+    if (fbEl) { fbEl.innerText = `Error adding ${horizon}: ${e.message}`; fbEl.style.color = "#ff4444"; }
+  }
+}
+
+function skipHorizonSetup(horizon) {
+  window._SKIPPED_ASTAR_HORIZONS[horizon] = true;
+  const fbEl = document.getElementById("astar-optin-feedback");
+  if (fbEl) {
+    window._ASTAR_OPTIN_LOCK_MSG = true;
+    fbEl.innerText = `SKIPPED ${horizon.toUpperCase()} setup for this session (not added to running list).`;
+    fbEl.style.color = "var(--amber-cmd)";
+    setTimeout(() => { window._ASTAR_OPTIN_LOCK_MSG = false; }, 3500);
+  }
+  renderMultiHorizonOptInMatrix();
+}
+
+async function handleRunningTradeAction(setupId, mode) {
+  try {
+    await fetch("/api/setup-ledger/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ setup_id: setupId, mode })
+    });
+    await renderSetupLedgerTable();
+    await renderMultiHorizonOptInMatrix();
+    await fetchAstarData();
+  } catch (e) {
+    console.warn("handleRunningTradeAction error:", e);
+  }
+}
+
+async function renderMultiHorizonOptInMatrix() {
+  const wrap = document.getElementById("astar-multi-optin-bar");
+  if (!wrap) return;
+  try {
+    const res = await fetch("/api/multi-horizon-a-star");
+    const data = await res.json();
+    const horizons = data.horizons || {};
+    const order = ["scalping", "intraday", "daily", "swing", "news"];
+    wrap.innerHTML = order.map(h => {
+      const item = horizons[h];
+      if (!item) return "";
+      const tt = item.trade_ticket || {};
+      const isA = !!item.is_a_star;
+      const inList = !!item.in_running_list;
+      const skipped = !!window._SKIPPED_ASTAR_HORIZONS[h];
+      const actStr = tt.action || "";
+      const dir = isA ? (actStr.includes("LONG") || actStr.includes("BUY") ? "LONG" : "SHORT") : "STAND ASIDE";
+      const dirColor = dir === "LONG" ? "#00e676" : (dir === "SHORT" ? "#ff4444" : "#888");
+      const borderCol = inList ? "#00e5ff" : (isA ? (skipped ? "#444" : "#00e676") : "#25252c");
+      const pe = item.probability_engine || {};
+      const zTxt = pe.z_eff !== undefined ? `${pe.z_label || "z"}=${pe.z_eff >= 0 ? "+" : ""}${Number(pe.z_eff).toFixed(2)}σ` : "";
+
+      let btns = "";
+      if (inList) {
+        btns = `<span style="display:inline-block; padding:3px 7px; background:#092129; border:1px solid #00e5ff; color:#00e5ff; font-size:8.5px; font-weight:900;">✓ IN RUNNING LIST</span>`;
+      } else if (isA && !skipped) {
+        btns = `
+          <button onclick="addHorizonSetupToRunning('${h}')" class="bbg-btn-mini" style="background:#0b2414; border:1px solid #00e676; color:#00e676; font-size:8.5px; font-weight:900; padding:3px 7px; cursor:pointer;">+ ADD TO RUNNING</button>
+          <button onclick="skipHorizonSetup('${h}')" class="bbg-btn-mini" style="background:#1a1a1f; border:1px solid #555; color:#aaa; font-size:8.5px; padding:3px 6px; cursor:pointer;">SKIP</button>
+        `;
+      } else if (isA && skipped) {
+        btns = `
+          <span style="color:#888; font-size:8.5px;">SKIPPED</span>
+          <button onclick="addHorizonSetupToRunning('${h}')" class="bbg-btn-mini" style="background:#141a14; border:1px solid #4a7c59; color:#8fd19e; font-size:8px; padding:2px 6px; cursor:pointer;">UNDO / ADD</button>
+        `;
+      } else {
+        btns = `<span style="color:#666; font-size:8.5px; font-family:var(--font-mono);">GATE BLOCKED</span>`;
+      }
+
+      return `
+        <div style="background:#0c0c10; border:1px solid ${borderCol}; padding:8px; display:flex; flex-direction:column; gap:5px; font-family:var(--font-mono);">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="color:var(--amber-cmd); font-size:10px;">${h.toUpperCase()}</strong>
+            <span style="color:${dirColor}; font-weight:900; font-size:9.5px;">${dir}</span>
+          </div>
+          <div style="font-size:8.5px; color:#aaa;">Score: <strong style="color:#fff;">${item.confluence_score}/100</strong> | ${zTxt}</div>
+          <div style="font-size:8.5px; color:#888;">SL: <span style="color:#ff6b6b;">${tt.stop_loss || "--"}</span> | TP1: <span style="color:#ddd;">${(tt.take_profit_1 || "--").split("(")[0].trim()}</span></div>
+          <div style="display:flex; gap:6px; align-items:center; margin-top:2px;">${btns}</div>
+        </div>
+      `;
+    }).join("");
+  } catch (e) {
+    console.warn("renderMultiHorizonOptInMatrix error:", e);
+  }
+}
+
 async function renderSetupLedgerTable() {
-  const tbody = document.getElementById("astar-ledger-tbody");
-  if (!tbody) return;
+  const runBody = document.getElementById("astar-running-tbody");
+  const tpBody = document.getElementById("astar-tp-tbody");
+  const slBody = document.getElementById("astar-sl-tbody");
+  const archBody = document.getElementById("astar-ledger-tbody");
+  if (!runBody && !archBody) return;
   try {
     const res = await fetch("/api/setup-ledger");
     const data = await res.json();
-    const rows = [];
-    if (data.active_setup) rows.push(data.active_setup);
-    if (data.completed_setups) rows.push(...data.completed_setups);
-    if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#888;">NO SETUPS LOGGED YET</td></tr>`;
-      return;
+    const activeRunning = data.active_running || [];
+    const hitTp = data.hit_tp || [];
+    const slTouched = data.sl_touched || [];
+    const archived = data.archived_expired || [];
+    const sum = data.summary || {};
+    const livePx = data.live_price;
+
+    // Header summary badges
+    if (document.getElementById("badge-running-count")) document.getElementById("badge-running-count").innerText = activeRunning.length;
+    if (document.getElementById("badge-tp-count")) document.getElementById("badge-tp-count").innerText = hitTp.length;
+    if (document.getElementById("badge-sl-count")) document.getElementById("badge-sl-count").innerText = slTouched.length;
+    if (document.getElementById("badge-archived-count")) document.getElementById("badge-archived-count").innerText = archived.length;
+
+    const fltUsd = Number(sum.floating_usd || 0);
+    const fltR = Number(sum.floating_r || 0);
+    const runUsdEl = document.getElementById("sum-running-usd");
+    const runREl = document.getElementById("sum-running-r");
+    if (runUsdEl) { runUsdEl.innerText = `${fltUsd >= 0 ? "+" : ""}$${fltUsd.toFixed(2)}`; runUsdEl.style.color = fltUsd >= 0 ? "#00e676" : "#ff4444"; }
+    if (runREl) { runREl.innerText = `${fltR >= 0 ? "+" : ""}${fltR.toFixed(2)} R`; runREl.style.color = fltR >= 0 ? "#00e676" : "#ff4444"; }
+
+    if (document.getElementById("sum-tp-r")) document.getElementById("sum-tp-r").innerText = `+${Number(sum.hit_tp_total_r || 0).toFixed(2)} R`;
+    if (document.getElementById("sum-tp-usd")) document.getElementById("sum-tp-usd").innerText = `+$${Number(sum.hit_tp_total_usd || 0).toFixed(2)}`;
+    if (document.getElementById("sum-sl-r")) document.getElementById("sum-sl-r").innerText = `${Number(sum.sl_touched_total_r || 0).toFixed(2)} R`;
+    if (document.getElementById("sum-sl-usd")) document.getElementById("sum-sl-usd").innerText = `$${Number(sum.sl_touched_total_usd || 0).toFixed(2)}`;
+
+    const wrEl = document.getElementById("astar-ledger-winrate");
+    if (wrEl) wrEl.innerText = `WIN RATE: ${sum.win_rate_pct || 0}% (${hitTp.length}W / ${slTouched.length}L)`;
+    const avgEl = document.getElementById("astar-avg-pips");
+    if (avgEl) {
+      const nr = Number(sum.net_realized_r || 0);
+      const nu = Number(sum.net_realized_usd || 0);
+      avgEl.innerText = `NET REALIZED: ${nr >= 0 ? "+" : ""}${nr.toFixed(2)} R (${nu >= 0 ? "+" : ""}$${nu.toFixed(2)})`;
     }
-    let sumAbsPips = 0, sumSignedPips = 0, pipCnt = 0;
-    tbody.innerHTML = rows.map(s => {
-      const isWin = s.status && (s.status.includes("TP") || (s.realized_r && s.realized_r > 0));
-      const isLoss = s.status && (s.status.includes("SL") || (s.realized_r && s.realized_r < 0));
-      const c = isWin ? "#ffffff" : (isLoss ? "#ff4444" : "var(--amber-cmd)");
-      const rStr = s.realized_r !== null && s.realized_r !== undefined ? `${s.realized_r >= 0 ? "+" : ""}${s.realized_r.toFixed(2)} R` : "0.00 R";
-      const eStr = Array.isArray(s.entry_zone) ? `$${s.entry_zone[0].toFixed(2)} - $${s.entry_zone[1].toFixed(2)}` : (s.entry_zone || "N/A");
-      const entryRef = s.fill_price || (Array.isArray(s.entry_zone) ? (s.entry_zone[0] + s.entry_zone[1]) / 2.0 : null);
-      const exitRef = s.exit_price || (s.status && s.status.includes("TP") ? s.take_profit_1 : (s.status && s.status.includes("SL") ? s.stop_loss : null));
-      let pipsMoved = null;
-      if (entryRef && exitRef) {
-        pipsMoved = (s.direction === "BUY" ? (exitRef - entryRef) : (entryRef - exitRef)) * 10.0;
-      } else if (entryRef && s.realized_r && s.stop_loss) {
-        pipsMoved = s.realized_r * Math.abs(entryRef - s.stop_loss) * 10.0;
-      } else if (s.floating_r && entryRef && s.stop_loss) {
-        pipsMoved = s.floating_r * Math.abs(entryRef - s.stop_loss) * 10.0;
+
+    const fmtEntry = s => {
+      if (s.fill_price) return `$${Number(s.fill_price).toFixed(2)}`;
+      if (Array.isArray(s.entry_zone)) return `$${Number(s.entry_zone[0]).toFixed(2)}–$${Number(s.entry_zone[1]).toFixed(2)}`;
+      return s.entry_zone || "N/A";
+    };
+    const calcPips = s => {
+      const eRef = s.fill_price || (Array.isArray(s.entry_zone) ? (s.entry_zone[0] + s.entry_zone[1]) / 2.0 : null);
+      const xRef = s.exit_price || livePx;
+      if (eRef && xRef) return ((s.direction === "BUY" ? (xRef - eRef) : (eRef - xRef)) * 10.0);
+      return null;
+    };
+
+    // BOX 1: RUNNING & ACTIVE SETUPS
+    if (runBody) {
+      if (activeRunning.length === 0) {
+        runBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#777; padding:12px;">NO ACTIVE RUNNING SETUPS — CLICK [+ ADD TO RUNNING LIST] ON ANY A* SETUP ABOVE</td></tr>`;
+      } else {
+        runBody.innerHTML = activeRunning.map(s => {
+          const fu = Number(s.floating_pnl_usd || 0);
+          const fr = Number(s.floating_r || 0);
+          const pnlCol = fu >= 0 ? "#00e676" : "#ff4444";
+          const dirCol = s.direction === "BUY" ? "#00e676" : "#ff4444";
+          const stCol = s.status === "PARTIAL_TP_HIT" ? "#00e676" : "#00e5ff";
+          const tpTxt = `${s.take_profit_1 ? `$${Number(s.take_profit_1).toFixed(2)}` : "--"} / ${s.take_profit_2 ? `$${Number(s.take_profit_2).toFixed(2)}` : "--"}`;
+          return `
+            <tr>
+              <td>${s.created_at_utc || "LIVE"}</td>
+              <td><strong style="color:var(--amber-cmd);">${s.setup_id}</strong></td>
+              <td><strong>${(s.horizon || "daily").toUpperCase()}</strong></td>
+              <td><strong style="color:${dirCol};">${s.direction}</strong></td>
+              <td>${fmtEntry(s)}</td>
+              <td style="color:var(--amber-cmd); font-weight:800;">${livePx ? `$${Number(livePx).toFixed(2)}` : "--"}</td>
+              <td style="color:#ff4444;">${s.stop_loss ? `$${Number(s.stop_loss).toFixed(2)}` : "N/A"}</td>
+              <td style="color:#00e676;">${tpTxt}</td>
+              <td><span style="color:${stCol}; border:1px solid ${stCol}; padding:1px 4px; font-size:8.5px;">${s.status}</span></td>
+              <td style="color:${pnlCol}; font-weight:900;">${fu >= 0 ? "+" : ""}$${fu.toFixed(2)}</td>
+              <td style="color:${pnlCol}; font-weight:900;">${fr >= 0 ? "+" : ""}${fr.toFixed(2)} R</td>
+              <td style="white-space:nowrap;">
+                <button onclick="handleRunningTradeAction('${s.setup_id}','close')" class="bbg-btn-mini" style="border-color:var(--amber-cmd); color:var(--amber-cmd); font-size:8px; padding:2px 5px; cursor:pointer;">CLOSE @ MKT</button>
+                <button onclick="handleRunningTradeAction('${s.setup_id}','remove')" class="bbg-btn-mini" style="border-color:#666; color:#aaa; font-size:8px; padding:2px 5px; margin-left:3px; cursor:pointer;">REMOVE</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
       }
-      if (pipsMoved !== null && !isNaN(pipsMoved)) {
-        sumAbsPips += Math.abs(pipsMoved);
-        sumSignedPips += pipsMoved;
-        pipCnt += 1;
-      }
-      const pipStr = pipsMoved !== null ? `${pipsMoved >= 0 ? "+" : ""}${pipsMoved.toFixed(1)} pips` : "--";
-      const pipColor = pipsMoved === null ? "#888" : (pipsMoved >= 0 ? "#00e5ff" : "#ff4444");
-      return `
-        <tr>
-          <td>${s.created_at_utc || "TODAY"}</td>
-          <td><strong style="color:var(--amber-cmd);">${s.setup_id}</strong></td>
-          <td>${s.event_type || "DAILY_A*"} (${s.asset || "XAUUSD"})</td>
-          <td><strong style="color:${s.direction === 'BUY' ? '#ffffff' : '#ff4444'}">${s.direction}</strong></td>
-          <td>${eStr}</td>
-          <td style="color:#ff4444;">${s.stop_loss ? `$${s.stop_loss.toFixed(2)}` : "N/A"}</td>
-          <td>${s.take_profit_1 ? `$${s.take_profit_1.toFixed(2)}` : "N/A"}</td>
-          <td><span style="color:${c}; border:1px solid ${c}; padding:1px 4px; font-size:8.5px;">${s.status}</span></td>
-          <td style="color:${pipColor}; font-weight:800;">${pipStr}</td>
-          <td style="color:${c}; font-weight:900;">${rStr}</td>
-          <td style="color:#aaa;">${s.resolution || "Active"}</td>
-        </tr>
-      `;
-    }).join("");
-    const astAvgEl = document.getElementById("astar-avg-pips");
-    if (astAvgEl && pipCnt > 0) {
-      const avgAbs = (sumAbsPips / pipCnt).toFixed(1);
-      const avgSig = (sumSignedPips / pipCnt).toFixed(1);
-      astAvgEl.innerText = `AVG PIPS: |Δ| ${avgAbs} pips (NET: ${avgSig >= 0 ? "+" : ""}${avgSig} pips)`;
     }
-  } catch (e) {}
+
+    // BOX 2: HIT TP (WINNERS)
+    if (tpBody) {
+      if (hitTp.length === 0) {
+        tpBody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#666; padding:10px;">NO HIT TP TRADES RECORDED YET</td></tr>`;
+      } else {
+        tpBody.innerHTML = hitTp.map(s => {
+          const pips = calcPips(s);
+          const rr = Number(s.realized_r || 0);
+          const usd = Number(s.realized_pnl_usd || 0);
+          return `
+            <tr>
+              <td>${s.resolved_at || s.created_at_utc || "--"}</td>
+              <td><strong style="color:#00e676;">${s.setup_id}</strong></td>
+              <td>${(s.horizon || "daily").toUpperCase()}</td>
+              <td><strong style="color:${s.direction === 'BUY' ? '#00e676' : '#ff8a80'};">${s.direction}</strong></td>
+              <td>${fmtEntry(s)}</td>
+              <td style="color:#00e676;">${s.exit_price ? `$${Number(s.exit_price).toFixed(2)}` : (s.take_profit_1 ? `$${Number(s.take_profit_1).toFixed(2)}` : "--")}</td>
+              <td><span style="color:#00e676; border:1px solid #00e676; padding:1px 4px; font-size:8px;">${s.status}</span></td>
+              <td style="color:#00e5ff; font-weight:800;">${pips !== null ? `+${Math.abs(pips).toFixed(1)}` : "--"}</td>
+              <td style="color:#00e676; font-weight:900;">+${rr.toFixed(2)} R</td>
+              <td style="color:#fff; font-weight:900;">+$${usd.toFixed(2)}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+
+    // BOX 3: SL TOUCHED (LOSSES)
+    if (slBody) {
+      if (slTouched.length === 0) {
+        slBody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#666; padding:10px;">NO SL TOUCHED TRADES RECORDED YET</td></tr>`;
+      } else {
+        slBody.innerHTML = slTouched.map(s => {
+          const pips = calcPips(s);
+          const rr = Number(s.realized_r || -1.0);
+          const usd = Number(s.realized_pnl_usd || 0);
+          return `
+            <tr>
+              <td>${s.resolved_at || s.created_at_utc || "--"}</td>
+              <td><strong style="color:#ff4444;">${s.setup_id}</strong></td>
+              <td>${(s.horizon || "daily").toUpperCase()}</td>
+              <td><strong style="color:${s.direction === 'BUY' ? '#fff' : '#ff4444'};">${s.direction}</strong></td>
+              <td>${fmtEntry(s)}</td>
+              <td style="color:#ff4444;">${s.exit_price ? `$${Number(s.exit_price).toFixed(2)}` : (s.stop_loss ? `$${Number(s.stop_loss).toFixed(2)}` : "--")}</td>
+              <td><span style="color:#ff4444; border:1px solid #ff4444; padding:1px 4px; font-size:8px;">${s.status}</span></td>
+              <td style="color:#ff6b6b; font-weight:800;">${pips !== null ? `-${Math.abs(pips).toFixed(1)}` : "--"}</td>
+              <td style="color:#ff4444; font-weight:900;">${rr.toFixed(2)} R</td>
+              <td style="color:#ff8a80; font-weight:900;">$${usd.toFixed(2)}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+
+    // BOX 4: EXPIRED / ARCHIVED
+    if (archBody) {
+      if (archived.length === 0) {
+        archBody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#666;">NO ARCHIVED / EXPIRED SETUPS</td></tr>`;
+      } else {
+        archBody.innerHTML = archived.slice(0, 60).map(s => `
+          <tr>
+            <td>${s.created_at_utc || "--"}</td>
+            <td style="color:#888;">${s.setup_id}</td>
+            <td>${(s.horizon || "daily").toUpperCase()}</td>
+            <td>${s.direction || "--"}</td>
+            <td>${fmtEntry(s)}</td>
+            <td>${s.stop_loss ? `$${Number(s.stop_loss).toFixed(2)}` : "N/A"}</td>
+            <td>${s.take_profit_1 ? `$${Number(s.take_profit_1).toFixed(2)}` : "N/A"}</td>
+            <td><span style="color:#888; border:1px solid #444; padding:1px 4px; font-size:8px;">${s.status}</span></td>
+            <td>--</td>
+            <td>0.00 R</td>
+            <td style="color:#777;">${s.resolution || "Archived"}</td>
+          </tr>
+        `).join("");
+      }
+    }
+  } catch (e) {
+    console.warn("renderSetupLedgerTable error:", e);
+  }
 }
 
 async function fetchGlobalMacroMatrix() {
@@ -2075,6 +2342,25 @@ function initAutoRefreshLoop() {
     }
     setTimeout(() => { b.innerText = "FORCE RE-EVALUATE SESSION <GO>"; }, 800);
   });
+
+  document.getElementById("btn-add-astar-running")?.addEventListener("click", async () => {
+    const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
+    await addHorizonSetupToRunning(h);
+  });
+
+  document.getElementById("btn-skip-astar-setup")?.addEventListener("click", () => {
+    const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
+    skipHorizonSetup(h);
+  });
+
+  document.getElementById("btn-refresh-divided-ledger")?.addEventListener("click", async () => {
+    await renderSetupLedgerTable();
+    await renderMultiHorizonOptInMatrix();
+  });
+
+  window.addHorizonSetupToRunning = addHorizonSetupToRunning;
+  window.skipHorizonSetup = skipHorizonSetup;
+  window.handleRunningTradeAction = handleRunningTradeAction;
 }
 
 // ==============================================================

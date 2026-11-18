@@ -435,8 +435,69 @@ def get_ppi_prenew_model(price: float = None, atr: float = None):
     )
 @app.get("/api/setup-ledger")
 def get_setup_ledger():
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {})
+    cur_gold = prices.get("GC=F")
     mgr = quant_model.SetupLifecycleManager()
-    return mgr.get_ledger()
+    return mgr.get_categorized_ledger(live_price=cur_gold)
+
+@app.post("/api/setup-ledger/add")
+def add_setup_to_running_list(payload: dict):
+    """Explicit user opt-in: adds an A* setup (selected horizon) into the Running Trading List."""
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {})
+    cur_gold = float(prices.get("GC=F", 3800.0))
+    h_key = str(payload.get("horizon") or "daily").lower()
+
+    # If client passed only horizon, compute fresh live ticket for that horizon
+    if not payload.get("stop_loss") or not payload.get("take_profit_1"):
+        atr_val = prices.get("ATR_M30", 10.50)
+        dxy = prices.get("DX-Y.NYB", 102.24)
+        us10y = prices.get("^TNX", 5.00)
+        us2y = prices.get("ZT=F", 4.75)
+        ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
+        created_epoch, _ = get_or_create_setup_epoch(h_key, ttl_map.get(h_key, 5400))
+        ast = quant_model.calculate_daily_a_star_setup(
+            current_price=cur_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+            wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
+            n_paths=5000, setup_created_epoch=created_epoch,
+            session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"),
+            horizon=h_key
+        )
+        tt = ast.get("trade_ticket", {})
+        if not ast.get("is_a_star") and not payload.get("allow_non_astar", False):
+            return {"status": "BLOCKED", "message": f"{h_key.upper()} is currently STAND ASIDE (not A* Grade). Wait for gates to pass."}
+        payload = {
+            "horizon": h_key,
+            "action": tt.get("action", ""),
+            "ticket_type": tt.get("ticket_type", ""),
+            "entry_zone": tt.get("entry_zone", ""),
+            "stop_loss": tt.get("stop_loss", ""),
+            "take_profit_1": tt.get("take_profit_1", ""),
+            "take_profit_2": tt.get("take_profit_2", ""),
+            "planned_rr": tt.get("risk_reward_ratio", "1:2.00"),
+            "recommended_lot": tt.get("recommended_lot_size_1000_equity", 0.01),
+            "immediate_entry": True
+        }
+
+    mgr = quant_model.SetupLifecycleManager()
+    res = mgr.add_to_running_list(payload, cur_gold)
+    res["ledger"] = mgr.get_categorized_ledger(live_price=cur_gold)
+    return res
+
+@app.post("/api/setup-ledger/action")
+def action_on_running_setup(payload: dict):
+    """Close at live market price or cleanly remove a trade from the Running Trading List."""
+    setup_id = str(payload.get("setup_id") or "")
+    mode = str(payload.get("mode") or "close").lower()
+    if mode not in ("close", "remove"):
+        return {"status": "ERROR", "message": "Invalid mode (must be 'close' or 'remove')."}
+    live = fetch_live_macro_data()
+    cur_gold = float(live.get("prices", {}).get("GC=F", 3800.0))
+    mgr = quant_model.SetupLifecycleManager()
+    res = mgr.close_or_remove_running_trade(setup_id, live_price=cur_gold, mode=mode)
+    res["ledger"] = mgr.get_categorized_ledger(live_price=cur_gold)
+    return res
 
 @app.get("/api/global-macro-matrix")
 def get_global_macro_matrix():
@@ -622,7 +683,9 @@ def refresh_all():
     created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
     dyn_levels = quant_model.calculate_dynamic_levels(current_price=current_gold, atr_m30=atr_val, session_h=sh, session_l=sl, session_c=sc)
     mgr = quant_model.SetupLifecycleManager()
-    active_setup, completed = mgr.evaluate_live_tick(current_gold, live_high=sh, live_low=sl)
+    ledger_state = mgr.evaluate_all_live_ticks(current_gold)
+    active_setup = ledger_state.get("active_setup")
+    completed = ledger_state.get("completed_setups", [])
     a_star = quant_model.calculate_daily_a_star_setup(
         current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
         wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),

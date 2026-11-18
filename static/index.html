@@ -1031,8 +1031,14 @@
               <tr><td class="label">STOP LOSS:</td><td class="val" id="astar-sl" style="color:#ff4444; font-weight:700;">--</td></tr>
               <tr><td class="label">TAKE PROFIT 1:</td><td class="val" id="astar-tp1" style="color:#ffffff; font-weight:700;">--</td></tr>
               <tr><td class="label">TAKE PROFIT 2:</td><td class="val" id="astar-tp2" style="color:#ffffff; font-weight:700;">--</td></tr>
-              <tr><td class="label">POSITION SIZE:</td><td class="val" id="astar-lot" style="color:var(--amber-cmd); font-weight:800;">-- <button class="bbg-btn-mini btn-ticket-sizer" data-ev="astar" style="border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;">⚡ SIZER &lt;GO&gt;</button></td></tr>
+              <tr><td class="label">POSITION SIZE:</td><td class="val" id="astar-lot" style="color:var(--amber-cmd); font-weight:800;"><span id="astar-lot-text">--</span> <button class="bbg-btn-mini btn-ticket-sizer" data-ev="astar" style="border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;">⚡ SIZER &lt;GO&gt;</button></td></tr>
             </table>
+
+            <div id="astar-optin-bar" style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap;">
+              <button class="bbg-btn-mini" id="btn-add-astar-running" style="flex:1; background:#0b2414; border:1px solid #00e676; color:#00e676; font-weight:900; padding:6px 10px; cursor:pointer; letter-spacing:0.4px;">+ ADD TO RUNNING LIST &lt;GO&gt;</button>
+              <button class="bbg-btn-mini" id="btn-skip-astar-setup" style="background:#18181c; border:1px solid #555; color:#bbb; font-weight:800; padding:6px 10px; cursor:pointer;">× SKIP SETUP</button>
+              <span id="astar-optin-feedback" style="width:100%; font-size:9px; font-family:var(--font-mono); color:#888; min-height:12px;">MANUAL OPT-IN MODE: Setups are NEVER auto-added until you click [+ ADD TO RUNNING LIST].</span>
+            </div>
 
             <div id="astar-progress-wrap" style="margin-top:10px; padding:8px; background:#080808; border:1px solid #222;">
               <div style="display:flex; justify-content:space-between; font-size:9px; color:#888; font-family:var(--font-mono); margin-bottom:4px;">
@@ -1301,19 +1307,100 @@
         </div>
       </section>
 
-      <section class="audit-ledger-container">
-        <div class="audit-ledger-header" id="astar-audit-toggle-header">
-          <div>[ 06 // AUDIT.ASTR &lt;GO&gt; : HISTORICAL SETUP PERFORMANCE RECORD (VERIFIED TICKS) ]</div>
+      <!-- ==================== 06 // MULTI-HORIZON OPT-IN & DIVIDED EXECUTION BOXES ==================== -->
+      <section class="audit-ledger-container" id="astar-optin-matrix-section" style="border:1px solid var(--amber-dim); margin-top:12px;">
+        <div class="audit-ledger-header" style="background:#11100a; border-bottom:1px solid #2a2410; cursor:default;">
+          <div>[ 06 // OPT-IN MATRIX &lt;GO&gt; : SELECT WHICH A* SETUPS TO ADD TO RUNNING LIST ]</div>
           <div style="display:flex; align-items:center; gap:10px;">
-            <span id="astar-avg-pips" style="color:var(--amber-cmd); font-size:9.5px; font-weight:800;">AVG PIPS: --</span>
-            <button class="bbg-btn-mini btn-update-history" data-hist-ev="astar" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE HISTORY &lt;GO&gt;</button>
-            <div id="astar-audit-toggle-icon">[ - CLICK TO COLLAPSE DATABASE ]</div>
+            <span id="astar-ledger-winrate" style="color:#00e5ff; font-size:9.5px; font-weight:800;">WIN RATE: --</span>
+            <span id="astar-avg-pips" style="color:var(--amber-cmd); font-size:9.5px; font-weight:800;">NET REALIZED: --</span>
+            <button class="bbg-btn-mini" id="btn-refresh-divided-ledger" style="border-color:var(--amber-cmd); color:var(--amber-cmd); cursor:pointer;">↻ REFRESH LIVE &lt;GO&gt;</button>
           </div>
         </div>
-        <div class="audit-table-scroll" id="astar-audit-table-scroll" style="display:block;">
+        <div id="astar-multi-optin-bar" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:8px; padding:10px; background:#070709;">
+          <div style="color:#777; font-size:10px; font-family:var(--font-mono);">Loading 5-horizon live A* candidates...</div>
+        </div>
+      </section>
+
+      <!-- BOX 1: ACTIVE & RUNNING SETUPS -->
+      <section class="audit-ledger-container" id="box-running-setups" style="border:1px solid #00e5ff; margin-top:10px;">
+        <div class="audit-ledger-header" style="background:#05161c; border-bottom:1px solid #0e3a48; cursor:default;">
+          <div style="color:#00e5ff; font-weight:900;">[ 06A // RUNNING &amp; ACTIVE SETUPS ] <span id="badge-running-count" style="margin-left:6px; padding:1px 6px; background:#00e5ff; color:#000; font-size:9px; font-weight:900;">0</span></div>
+          <div style="display:flex; align-items:center; gap:12px; font-family:var(--font-mono); font-size:9.5px;">
+            <span>FLOATING P&amp;L: <strong id="sum-running-usd" style="color:#fff;">$0.00</strong></span>
+            <span>FLOATING R: <strong id="sum-running-r" style="color:#fff;">0.00 R</strong></span>
+          </div>
+        </div>
+        <div class="audit-table-scroll" style="display:block; max-height:260px; overflow-y:auto;">
           <table class="bbg-audit-table">
             <thead>
-              <tr><th>DATE / TIME</th><th>SETUP ID</th><th>EVENT / ASSET</th><th>DIRECTION</th><th>LOCKED ENTRY</th><th>STOP LOSS</th><th>TAKE PROFIT 1</th><th>STATUS</th><th>PIPS MOVED</th><th>REALIZED R</th><th>TRADE RESOLUTION</th></tr>
+              <tr><th>TIME (UTC)</th><th>SETUP ID</th><th>HORIZON</th><th>DIR</th><th>ENTRY</th><th>LIVE</th><th>STOP LOSS</th><th>TP1 / TP2</th><th>STATUS</th><th>FLOATING P&amp;L</th><th>FLOATING R</th><th>CONTROL</th></tr>
+            </thead>
+            <tbody id="astar-running-tbody">
+              <tr><td colspan="12" style="text-align:center; color:#777;">NO ACTIVE RUNNING SETUPS — CLICK [+ ADD TO RUNNING LIST] ON ANY A* SETUP ABOVE</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- BOX 2 & BOX 3: SIDE-BY-SIDE HIT TP (WINNERS) vs SL TOUCHED (LOSSES) -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(460px, 1fr)); gap:10px; margin-top:10px;">
+        <!-- BOX 2: HIT TP -->
+        <section class="audit-ledger-container" id="box-hit-tp" style="border:1px solid #00e676; margin-top:0;">
+          <div class="audit-ledger-header" style="background:#071b10; border-bottom:1px solid #124026; cursor:default;">
+            <div style="color:#00e676; font-weight:900;">[ 06B // HIT TP (WINNERS) ] <span id="badge-tp-count" style="margin-left:6px; padding:1px 6px; background:#00e676; color:#000; font-size:9px; font-weight:900;">0</span></div>
+            <div style="display:flex; align-items:center; gap:10px; font-family:var(--font-mono); font-size:9.5px;">
+              <span style="color:#00e676; font-weight:800;" id="sum-tp-r">+0.00 R</span>
+              <span style="color:#fff; font-weight:800;" id="sum-tp-usd">+$0.00</span>
+            </div>
+          </div>
+          <div class="audit-table-scroll" style="display:block; max-height:280px; overflow-y:auto;">
+            <table class="bbg-audit-table">
+              <thead>
+                <tr><th>TIME</th><th>SETUP ID</th><th>HORIZON</th><th>DIR</th><th>ENTRY</th><th>EXIT</th><th>STATUS</th><th>PIPS</th><th>REALIZED R</th><th>P&amp;L ($)</th></tr>
+              </thead>
+              <tbody id="astar-tp-tbody">
+                <tr><td colspan="10" style="text-align:center; color:#666;">NO HIT TP TRADES RECORDED YET</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- BOX 3: SL TOUCHED -->
+        <section class="audit-ledger-container" id="box-sl-touched" style="border:1px solid #ff4444; margin-top:0;">
+          <div class="audit-ledger-header" style="background:#1c0707; border-bottom:1px solid #481212; cursor:default;">
+            <div style="color:#ff4444; font-weight:900;">[ 06C // SL TOUCHED (LOSSES) ] <span id="badge-sl-count" style="margin-left:6px; padding:1px 6px; background:#ff4444; color:#000; font-size:9px; font-weight:900;">0</span></div>
+            <div style="display:flex; align-items:center; gap:10px; font-family:var(--font-mono); font-size:9.5px;">
+              <span style="color:#ff4444; font-weight:800;" id="sum-sl-r">0.00 R</span>
+              <span style="color:#ff8a80; font-weight:800;" id="sum-sl-usd">$0.00</span>
+            </div>
+          </div>
+          <div class="audit-table-scroll" style="display:block; max-height:280px; overflow-y:auto;">
+            <table class="bbg-audit-table">
+              <thead>
+                <tr><th>TIME</th><th>SETUP ID</th><th>HORIZON</th><th>DIR</th><th>ENTRY</th><th>EXIT</th><th>STATUS</th><th>PIPS</th><th>REALIZED R</th><th>P&amp;L ($)</th></tr>
+              </thead>
+              <tbody id="astar-sl-tbody">
+                <tr><td colspan="10" style="text-align:center; color:#666;">NO SL TOUCHED TRADES RECORDED YET</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- BOX 4: EXPIRED / ARCHIVED (COLLAPSED BY DEFAULT TO KEEP WORKSPACE CLEAN) -->
+      <section class="audit-ledger-container" id="box-archived-setups" style="border:1px solid #2b2b32; margin-top:10px;">
+        <div class="audit-ledger-header" id="astar-audit-toggle-header" style="background:#0c0c0f;">
+          <div style="color:#888;">[ 06D // EXPIRED / SUPERSEDED / ARCHIVED LOG ] <span id="badge-archived-count" style="margin-left:6px; padding:1px 6px; background:#333; color:#ccc; font-size:9px;">0</span></div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button class="bbg-btn-mini btn-update-history" data-hist-ev="astar" style="border-color:var(--amber-cmd); color:var(--amber-cmd);">UPDATE HISTORY &lt;GO&gt;</button>
+            <div id="astar-audit-toggle-icon">[ + CLICK TO EXPAND ARCHIVE ]</div>
+          </div>
+        </div>
+        <div class="audit-table-scroll" id="astar-audit-table-scroll" style="display:none; max-height:240px; overflow-y:auto;">
+          <table class="bbg-audit-table">
+            <thead>
+              <tr><th>DATE / TIME</th><th>SETUP ID</th><th>HORIZON</th><th>DIR</th><th>ENTRY</th><th>SL</th><th>TP1</th><th>STATUS</th><th>PIPS</th><th>REALIZED R</th><th>RESOLUTION</th></tr>
             </thead>
             <tbody id="astar-ledger-tbody"></tbody>
           </table>

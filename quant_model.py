@@ -1107,13 +1107,19 @@ class SetupLifecycleManager:
 
     def _load(self):
         import os
+        default_doc = {
+            "active_setup": None,
+            "active_setups": {"scalping": None, "intraday": None, "daily": None, "swing": None, "news": None},
+            "running_trades": [],
+            "completed_setups": []
+        }
         if not os.path.exists(self.filepath):
-            return {"active_setup": None, "active_setups": {"scalping": None, "intraday": None, "daily": None, "swing": None, "news": None}, "completed_setups": []}
+            return default_doc
         try:
             with open(self.filepath) as f:
                 d = json.load(f)
         except Exception:
-            return {"active_setup": None, "active_setups": {"scalping": None, "intraday": None, "daily": None, "swing": None, "news": None}, "completed_setups": []}
+            return default_doc
         if "active_setups" not in d or not isinstance(d.get("active_setups"), dict):
             d["active_setups"] = {
                 "scalping": None,
@@ -1123,11 +1129,9 @@ class SetupLifecycleManager:
                 "news": None
             }
         else:
-            d["active_setups"].setdefault("scalping", None)
-            d["active_setups"].setdefault("intraday", None)
-            d["active_setups"].setdefault("daily", None)
-            d["active_setups"].setdefault("swing", None)
-            d["active_setups"].setdefault("news", None)
+            for k in ("scalping", "intraday", "daily", "swing", "news"):
+                d["active_setups"].setdefault(k, None)
+        d.setdefault("running_trades", [])
         d.setdefault("completed_setups", [])
         return d
 
@@ -1143,6 +1147,360 @@ class SetupLifecycleManager:
     def get_ledger(self):
         return self._load()
 
+    def _parse_price(self, val, fallback):
+        if isinstance(val, (int, float)):
+            return float(val)
+        try:
+            s = str(val).replace("$", "").split("(")[0].strip()
+            return float(s)
+        except Exception:
+            return float(fallback)
+
+    def _parse_entry_zone(self, val, current_price):
+        if isinstance(val, list) and len(val) >= 2:
+            return [min(float(val[0]), float(val[1])), max(float(val[0]), float(val[1]))]
+        try:
+            clean = str(val).split("(")[0]
+            parts = [float(p.replace("$", "").strip()) for p in clean.split("-")]
+            if len(parts) >= 2:
+                return [min(parts[0], parts[1]), max(parts[0], parts[1])]
+            if len(parts) == 1:
+                return [parts[0] - 1.0, parts[0] + 1.0]
+        except Exception:
+            pass
+        return [round(current_price - 1.5, 2), round(current_price + 1.5, 2)]
+
+    def add_to_running_list(self, payload, current_price):
+        """Explicit user opt-in: adds an A* setup to the user's running trading list."""
+        import time
+        data = self._load()
+        now_ts = int(time.time())
+        h_key = (payload.get("horizon") or "daily").lower()
+        action_str = str(payload.get("action", ""))
+        dir_raw = str(payload.get("direction", "")).upper()
+        if dir_raw in ("BUY", "LONG"):
+            direction = "BUY"
+        elif dir_raw in ("SELL", "SHORT"):
+            direction = "SELL"
+        else:
+            direction = "BUY" if ("LONG" in action_str.upper() or "BUY" in action_str.upper()) else "SELL"
+
+        # Prevent accidental duplicate active entry for the same horizon
+        running = data.get("running_trades", [])
+        for existing in running:
+            if existing.get("horizon") == h_key and existing.get("status") in ("PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"):
+                return {"status": "ALREADY_IN_LIST", "setup": existing, "message": f"{h_key.upper()} setup already in running list ({existing.get('setup_id')})."}
+
+        cur_p = float(current_price)
+        entry_zone = self._parse_entry_zone(payload.get("entry_zone"), cur_p)
+        sl_val = self._parse_price(payload.get("stop_loss"), cur_p - 15.0 if direction == "BUY" else cur_p + 15.0)
+        tp1_val = self._parse_price(payload.get("take_profit_1"), cur_p + 30.0 if direction == "BUY" else cur_p - 30.0)
+        tp2_val = self._parse_price(payload.get("take_profit_2"), cur_p + 45.0 if direction == "BUY" else cur_p - 45.0)
+        lot_val = float(payload.get("recommended_lot") or payload.get("recommended_lot_size_1000_equity") or 0.01)
+
+        ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 86400, "swing": 432000, "news": 3600}
+        ttl_sec = ttl_map.get(h_key, 14400)
+        setup_id = f"TRD-{h_key.upper()[:5]}-{time.strftime('%Y%m%d')}-{now_ts % 10000:04d}"
+
+        in_zone = (entry_zone[0] <= cur_p <= entry_zone[1]) or bool(payload.get("immediate_entry", True))
+        rec = {
+            "setup_id": setup_id,
+            "horizon": h_key,
+            "event_type": f"A*_{h_key.upper()}",
+            "asset": "XAUUSD",
+            "added_by_user": True,
+            "created_at_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts)),
+            "created_epoch": now_ts,
+            "expires_epoch": now_ts + ttl_sec,
+            "direction": direction,
+            "action": action_str or f"A* {direction} ({h_key.upper()})",
+            "ticket_type": payload.get("ticket_type", f"{direction}_{h_key.upper()}"),
+            "entry_zone": entry_zone,
+            "stop_loss": round(sl_val, 2),
+            "take_profit_1": round(tp1_val, 2),
+            "take_profit_2": round(tp2_val, 2),
+            "planned_rr": payload.get("planned_rr") or payload.get("risk_reward_ratio") or "1:2.00",
+            "recommended_lot": round(max(0.01, lot_val), 2),
+            "status": "TRIGGERED_RUNNING" if in_zone else "PENDING_TRIGGER",
+            "fill_price": round(cur_p, 2) if in_zone else None,
+            "fill_timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts)) if in_zone else None,
+            "trailed_sl": None,
+            "highest_seen": round(cur_p, 2),
+            "lowest_seen": round(cur_p, 2),
+            "floating_pnl_usd": 0.0,
+            "floating_r": 0.0,
+            "realized_r": None,
+            "realized_pnl_usd": None,
+            "exit_price": None,
+            "resolution": "Added by trader — live tracking active."
+        }
+        running.insert(0, rec)
+        data["running_trades"] = running
+        data.setdefault("active_setups", {})[h_key] = rec
+        self._save(data)
+        return {"status": "ADDED", "setup": rec, "message": f"Added {setup_id} ({h_key.upper()} {direction}) to Running List."}
+
+    def close_or_remove_running_trade(self, setup_id, live_price=None, mode="close"):
+        """Closes a running trade at live market price (recording win/loss) or removes it cleanly."""
+        import time
+        data = self._load()
+        now_ts = int(time.time())
+        running = data.get("running_trades", [])
+        target = None
+        new_running = []
+        for item in running:
+            if item.get("setup_id") == setup_id and target is None:
+                target = item
+            else:
+                new_running.append(item)
+
+        # Also check active_setups slots in case it's legacy
+        for h_k, act in list(data.get("active_setups", {}).items()):
+            if act and act.get("setup_id") == setup_id:
+                if target is None:
+                    target = act
+                data["active_setups"][h_k] = None
+
+        if target is None:
+            return {"status": "NOT_FOUND", "message": f"Setup {setup_id} not found in running list."}
+
+        data["running_trades"] = new_running
+        if mode == "close" and live_price is not None:
+            fill_p = float(target.get("fill_price") or live_price)
+            sl_p = float(target.get("stop_loss") or (fill_p - 10.0))
+            risk_dist = max(0.50, abs(fill_p - sl_p))
+            lot = float(target.get("recommended_lot") or 0.01)
+            delta = (float(live_price) - fill_p) if target.get("direction") == "BUY" else (fill_p - float(live_price))
+            r_val = round(delta / risk_dist, 2)
+            pnl_usd = round(delta * lot * 100.0, 2)
+            target["status"] = "MANUAL_CLOSE_WIN" if r_val > 0 else "MANUAL_CLOSE_LOSS"
+            target["realized_r"] = r_val
+            target["realized_pnl_usd"] = pnl_usd
+            target["exit_price"] = round(float(live_price), 2)
+            target["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+            target["resolution"] = f"Manually closed at ${float(live_price):.2f} ({r_val:+.2f}R / ${pnl_usd:+.2f})."
+            data.setdefault("completed_setups", []).insert(0, target)
+        elif mode == "remove":
+            pass  # Silently dropped from running list per user request
+
+        self._save(data)
+        return {"status": "OK", "mode": mode, "setup_id": setup_id}
+
+    def _evaluate_single_trade(self, active, live_price, p_high, p_low, now_ts):
+        """Evaluates one active/running setup strictly against live tick price. Returns (updated, completed_bool)."""
+        import time
+        terminal = {
+            "FULL_TP_HIT", "SL_TOUCHED_LOSS", "BREAKEVEN_EXIT", "INVALIDATED_TIME_DECAY",
+            "INVALIDATED_PRE_TRIGGER", "CLOSED_TIME_LIMIT", "FORCE_RESET_SUPERSEDED",
+            "MANUAL_CLOSE_WIN", "MANUAL_CLOSE_LOSS"
+        }
+        if not active or active.get("status") in terminal:
+            return active, False
+
+        active["highest_seen"] = round(max(float(active.get("highest_seen") or live_price), p_high), 2)
+        active["lowest_seen"] = round(min(float(active.get("lowest_seen") or live_price), p_low), 2)
+
+        direction = active.get("direction", "BUY")
+        h_key = active.get("horizon", "daily")
+        e_low, e_high = active.get("entry_zone", [live_price, live_price])
+        sl = active.get("trailed_sl") if active.get("trailed_sl") is not None else active.get("stop_loss", 0.0)
+        tp1 = active.get("take_profit_1", 0.0)
+        tp2 = active.get("take_profit_2", 0.0)
+        status = active.get("status", "PENDING_TRIGGER")
+
+        # 1. PENDING_TRIGGER
+        if status == "PENDING_TRIGGER":
+            if active.get("expires_epoch", 0) > 0 and now_ts >= active.get("expires_epoch", 0):
+                active["status"] = "INVALIDATED_TIME_DECAY"
+                active["resolution"] = f"Time limit exceeded before entry fill ({h_key.upper()})."
+                active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+                return active, True
+            if (direction == "BUY" and p_low <= sl) or (direction == "SELL" and p_high >= sl):
+                active["status"] = "INVALIDATED_PRE_TRIGGER"
+                active["resolution"] = "Structure violated: Stop Loss hit before entry filled."
+                active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+                return active, True
+            if (direction == "BUY" and p_low <= e_high and p_high >= e_low) or (direction == "SELL" and p_high >= e_low and p_low <= e_high):
+                active["status"] = "TRIGGERED_RUNNING"
+                active["fill_price"] = round(float(live_price), 2)
+                active["fill_timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+
+        # 2. TRIGGERED_RUNNING or PARTIAL_TP_HIT
+        if active["status"] in ("TRIGGERED_RUNNING", "PARTIAL_TP_HIT"):
+            fill_p = float(active.get("fill_price") or ((e_low + e_high) / 2.0))
+            risk_dist = abs(fill_p - float(active.get("stop_loss", fill_p - 6.0))) or 6.0
+            lot = float(active.get("recommended_lot", 0.01))
+
+            # Holding TTL check (only auto-expire non-user-managed or expired slots)
+            if active.get("expires_epoch", 0) > 0 and now_ts >= active.get("expires_epoch", 0):
+                delta = (live_price - fill_p) if direction == "BUY" else (fill_p - live_price)
+                realized_r = round(delta / risk_dist, 2)
+                realized_pnl = round(delta * lot * 100.0, 2)
+                active["status"] = "CLOSED_TIME_LIMIT"
+                active["realized_r"] = realized_r
+                active["realized_pnl_usd"] = realized_pnl
+                active["exit_price"] = round(float(live_price), 2)
+                active["resolution"] = f"Holding time limit reached ({h_key.upper()} TTL). Closed at ${live_price:.2f} ({realized_r:+.2f}R)."
+                active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+                return active, True
+
+            delta = (live_price - fill_p) if direction == "BUY" else (fill_p - live_price)
+            active["floating_pnl_usd"] = round(delta * lot * 100.0, 2)
+            active["floating_r"] = round(delta / risk_dist, 2)
+
+            sl_hit = (p_low <= sl) if direction == "BUY" else (p_high >= sl)
+            tp1_hit = (p_high >= tp1) if direction == "BUY" else (p_low <= tp1)
+            tp2_hit = (p_high >= tp2) if direction == "BUY" else (p_low <= tp2)
+
+            # Worst-case conservative: check SL first
+            if sl_hit:
+                if active["status"] == "PARTIAL_TP_HIT":
+                    active["status"] = "BREAKEVEN_EXIT"
+                    active["realized_r"] = round(0.5 * abs(tp1 - fill_p) / risk_dist, 2)
+                    active["realized_pnl_usd"] = round(lot * 100.0 * abs(tp1 - fill_p) * 0.5, 2)
+                    active["resolution"] = "Closed at trailed Breakeven SL after TP1 lock."
+                else:
+                    active["status"] = "SL_TOUCHED_LOSS"
+                    active["realized_r"] = -1.0
+                    active["realized_pnl_usd"] = -round(lot * 100.0 * risk_dist, 2)
+                    active["resolution"] = f"Stop loss touched at ${sl:.2f}. Defined -1.0R loss."
+                active["exit_price"] = round(float(sl), 2)
+                active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+                return active, True
+
+            if active["status"] == "TRIGGERED_RUNNING" and tp1_hit:
+                active["status"] = "PARTIAL_TP_HIT"
+                active["trailed_sl"] = round(fill_p, 2)
+                active["resolution"] = f"TP1 touched at ${tp1:.2f}. 50% locked, SL trailed to BE (${fill_p:.2f})."
+
+            if tp2_hit:
+                was_partial = (active["status"] == "PARTIAL_TP_HIT")
+                gain_tp1 = abs(tp1 - fill_p)
+                gain_tp2 = abs(tp2 - fill_p)
+                avg_gain = (0.5 * gain_tp1 + 0.5 * gain_tp2) if was_partial else gain_tp2
+                active["status"] = "FULL_TP_HIT"
+                active["realized_r"] = round(avg_gain / risk_dist, 2)
+                active["realized_pnl_usd"] = round(lot * 100.0 * avg_gain, 2)
+                active["exit_price"] = round(float(tp2), 2)
+                active["resolution"] = f"Full TP2 hit at ${tp2:.2f} (+{active['realized_r']:.2f}R captured)."
+                active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+                return active, True
+
+        return active, False
+
+    def evaluate_all_live_ticks(self, live_price, current_epoch=None):
+        """Evaluates ALL running trades and active horizon slots against live tick price (no stale session extrema)."""
+        import time
+        data = self._load()
+        now_ts = int(current_epoch) if current_epoch else int(time.time())
+        lp = float(live_price)
+        changed = False
+
+        # 1. Evaluate user running_trades list
+        still_running = []
+        seen_ids = set()
+        for item in data.get("running_trades", []):
+            sid = item.get("setup_id")
+            if sid in seen_ids:
+                continue
+            seen_ids.add(sid)
+            upd, done = self._evaluate_single_trade(item, lp, lp, lp, now_ts)
+            changed = True
+            if done:
+                data.setdefault("completed_setups", []).insert(0, upd)
+                h_k = upd.get("horizon")
+                if h_k and data.get("active_setups", {}).get(h_k, {}) and data["active_setups"][h_k].get("setup_id") == sid:
+                    data["active_setups"][h_k] = None
+            else:
+                still_running.append(upd)
+                h_k = upd.get("horizon")
+                if h_k:
+                    data.setdefault("active_setups", {})[h_k] = upd
+        data["running_trades"] = still_running
+
+        # 2. Evaluate any legacy active_setups not in running_trades
+        for h_k in ("scalping", "intraday", "daily", "swing", "news"):
+            act = data.get("active_setups", {}).get(h_k)
+            if act and act.get("setup_id") not in seen_ids:
+                upd, done = self._evaluate_single_trade(act, lp, lp, lp, now_ts)
+                changed = True
+                if done:
+                    data.setdefault("completed_setups", []).insert(0, upd)
+                    data["active_setups"][h_k] = None
+                else:
+                    data["active_setups"][h_k] = upd
+
+        if changed:
+            self._save(data)
+        return data
+
+    def get_categorized_ledger(self, live_price=None):
+        """Returns ledger cleanly divided into Active/Running, Hit TP, SL Touched, and Archived."""
+        data = self.evaluate_all_live_ticks(live_price) if live_price is not None else self._load()
+
+        # Deduplicated Active & Running list
+        active_running = []
+        seen = set()
+        for item in data.get("running_trades", []):
+            sid = item.get("setup_id")
+            if sid and sid not in seen:
+                seen.add(sid)
+                active_running.append(item)
+        for h_k in ("scalping", "intraday", "daily", "swing", "news"):
+            act = data.get("active_setups", {}).get(h_k)
+            if act and act.get("setup_id") not in seen:
+                seen.add(act.get("setup_id"))
+                active_running.append(act)
+
+        hit_tp = []
+        sl_touched = []
+        archived = []
+        for s in data.get("completed_setups", []):
+            st = str(s.get("status") or "")
+            rr = s.get("realized_r")
+            if st in ("FULL_TP_HIT", "BREAKEVEN_EXIT", "MANUAL_CLOSE_WIN") or (st == "CLOSED_TIME_LIMIT" and rr is not None and rr > 0):
+                hit_tp.append(s)
+            elif st in ("SL_TOUCHED_LOSS", "MANUAL_CLOSE_LOSS") or (st == "CLOSED_TIME_LIMIT" and rr is not None and rr < 0):
+                sl_touched.append(s)
+            else:
+                archived.append(s)
+
+        tp_r = round(sum(float(x.get("realized_r") or 0.0) for x in hit_tp), 2)
+        tp_usd = round(sum(float(x.get("realized_pnl_usd") or 0.0) for x in hit_tp), 2)
+        sl_r = round(sum(float(x.get("realized_r") or 0.0) for x in sl_touched), 2)
+        sl_usd = round(sum(float(x.get("realized_pnl_usd") or 0.0) for x in sl_touched), 2)
+        flt_r = round(sum(float(x.get("floating_r") or 0.0) for x in active_running), 2)
+        flt_usd = round(sum(float(x.get("floating_pnl_usd") or 0.0) for x in active_running), 2)
+        decided = len(hit_tp) + len(sl_touched)
+        win_rate = round((len(hit_tp) / decided) * 100.0, 1) if decided > 0 else 0.0
+
+        return {
+            "live_price": round(float(live_price), 2) if live_price is not None else None,
+            "active_setup": data.get("active_setup"),
+            "active_setups": data.get("active_setups", {}),
+            "running_trades": active_running,
+            "active_running": active_running,
+            "hit_tp": hit_tp,
+            "sl_touched": sl_touched,
+            "archived_expired": archived,
+            "completed_setups": data.get("completed_setups", []),
+            "summary": {
+                "running_count": len(active_running),
+                "hit_tp_count": len(hit_tp),
+                "sl_touched_count": len(sl_touched),
+                "archived_count": len(archived),
+                "win_rate_pct": win_rate,
+                "hit_tp_total_r": tp_r,
+                "hit_tp_total_usd": tp_usd,
+                "sl_touched_total_r": sl_r,
+                "sl_touched_total_usd": sl_usd,
+                "net_realized_r": round(tp_r + sl_r, 2),
+                "net_realized_usd": round(tp_usd + sl_usd, 2),
+                "floating_r": flt_r,
+                "floating_usd": flt_usd,
+            }
+        }
+
     def force_reset_horizon(self, horizon="all"):
         data = self._load()
         h_key = (horizon or "all").lower()
@@ -1150,14 +1508,21 @@ class SetupLifecycleManager:
         now_ts = int(time.time())
         all_keys = ["scalping", "intraday", "daily", "swing", "news"]
         keys_to_clear = all_keys if h_key in ["all", "*"] else [h_key]
+        cleared_ids = set()
         for k in keys_to_clear:
             active = data.get("active_setups", {}).get(k)
             if active and active.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
+                cleared_ids.add(active.get("setup_id"))
                 active["status"] = "FORCE_RESET_SUPERSEDED"
                 active["resolution"] = f"Session force re-evaluated by trader ({k.upper()})."
                 active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                 data.setdefault("completed_setups", []).insert(0, active)
             data.setdefault("active_setups", {})[k] = None
+        # Also remove cleared horizons from running_trades
+        data["running_trades"] = [
+            t for t in data.get("running_trades", [])
+            if t.get("horizon") not in keys_to_clear and t.get("setup_id") not in cleared_ids
+        ]
         self._save(data)
         return data
 
@@ -1395,7 +1760,6 @@ class SetupLifecycleManager:
                     self._save(data)
                     return active, data.get("completed_setups", [])
         self._save(data)
-        return active, data.get("completed_setups", [])
         return active, data.get("completed_setups", [])
 
 def calculate_lot_and_risk(
@@ -2238,31 +2602,20 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         sl_reason = "No capital at risk."
         tp_reason = "Targets suspended until A* gate passes."
     else:
-        if not (active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]):
-            raw_t = {
-                "action": raw_action,
-                "ticket_type": ticket_type,
-                "entry_zone": f"${entry_low:.2f} - ${entry_high:.2f}",
-                "stop_loss": f"${sl_val:.2f}",
-                "take_profit_1": f"${tp1_val:.2f}",
-                "take_profit_2": f"${tp2_val:.2f}",
-                "risk_reward_ratio": f"1:{rr:.2f}",
-                "recommended_lot_size_1000_equity": computed_lot
-            }
-            active_locked, completed_list = mgr.get_or_create_locked_setup(raw_t, current_price, is_a_star=True, horizon=h_mode)
-
-        setup_id_str = active_locked.get("setup_id", "A*") if active_locked else "A*"
-        status_str = active_locked.get("status", "ACTIVE") if active_locked else "ACTIVE"
-        ticket_title = f"LOCKED {setup_id_str} [{status_str}] // {total_confluence}/100 (EV={ev_r:+.3f}R, P(Win)={win_rate}%)"
+        # STRICT USER OPT-IN: Do NOT auto-insert into running trading list without trader click.
+        in_running_list = bool(active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"])
+        setup_id_str = active_locked.get("setup_id", "CANDIDATE") if in_running_list else "A* CANDIDATE"
+        status_str = active_locked.get("status", "OPT-IN READY") if in_running_list else "CLICK [+ ADD TO RUNNING]"
+        ticket_title = f"{setup_id_str} [{status_str}] // {total_confluence}/100 (EV={ev_r:+.3f}R, P(Win)={win_rate}%)"
         action = raw_action
         sl_val_str = f"${sl_val:.2f}"
         tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
         tp2_val_str = f"${tp2_val:.2f}"
         rr_str = f"1:{rr:.2f}"
         entry_zone = f"${entry_low:.2f} - ${entry_high:.2f}"
-        safe_lot = active_locked.get("recommended_lot", computed_lot) if active_locked else computed_lot
+        safe_lot = active_locked.get("recommended_lot", computed_lot) if in_running_list else computed_lot
         max_risk_usd = f"${round(safe_lot * 100.0 * risk_dist_dollars, 2):.2f} (HAR-RV Cap ${target_risk_usd:.2f})"
-        bias_reason = f"{bias}: z={z_20:+.2f}σ (mu_post={mu_daily_post:+.3f}%/d), VRP={vrp_ann:+.1f}%, P(Win)={win_rate}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
+        bias_reason = f"{bias}: {z_label}={z_eff:+.2f}σ (D1 z20={z_20:+.2f}σ, M15={z_m15_1h:+.2f}σ), VRP={vrp_ann:+.1f}%, P(Win)={win_rate}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
         entry_reason = f"Pure-probability execution around spot ${current_price:.2f} (no visual chart patterns)."
         sl_reason = f"Stop loss ${sl_val:.2f} anchored to {barrier_sl_scale:.2f} ATR_D1 (${atr_d1:.2f})."
         tp_reason = f"TP1 ${tp1_val:.2f} & TP2 ${tp2_val:.2f}."
@@ -2291,13 +2644,15 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "news": {"trades": 87, "win_rate_pct": 55.2, "profit_factor": 2.77, "t_stat": "+3.72", "p_val": "0.0004"}
     }
     bt5 = bt_5y_map.get(h_mode, {"trades": 94, "win_rate_pct": 53.2, "profit_factor": 1.63, "t_stat": "+2.12", "p_val": "0.0367"})
+    is_tracked = bool(active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"])
     return {
         "horizon": h_mode,
         "confluence_score": total_confluence,
         "confluence_moe_95": 3.8,
         "is_a_star": is_a_star,
+        "in_running_list": is_tracked,
         "grade": grade,
-        "locked_setup": active_locked,
+        "locked_setup": active_locked if is_tracked else None,
         "current_price": current_price,
         "pivot_point": PP,
         "determining_timeframe": timeframe_label,
@@ -2308,9 +2663,15 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "time_to_live": ttl,
         "probability_engine": {
             "z_20_drift": z_20,
+            "z_eff": z_eff,
+            "z_label": z_label,
+            "z_m15_1h": z_m15_1h,
+            "z_h1_12h": z_h1_12h,
+            "exhaustion_ok": exhaustion_ok,
+            "exhaustion_reason": exhaustion_reason,
             "p_drift_bull_pct": p_drift_bull,
             "p_drift_bear_pct": p_drift_bear,
-            "mu_daily_post_pct": mu_daily_post,
+            "mu_daily_post_pct": mu_eff,
             "vrp_ann_pct": vrp_ann,
             "rv5_ann_pct": rv5_ann,
             "rv22_ann_pct": rv22_ann,

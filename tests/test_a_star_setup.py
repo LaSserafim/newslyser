@@ -272,6 +272,56 @@ class TestAStarSetupEngine(unittest.TestCase):
             qm._get_daily_prob_regime = orig_daily
             qm._get_intraday_momentum_regime = orig_intra
 
+    def test_optin_running_list_and_divided_ledger(self):
+        """Verifies manual opt-in add, live tick evaluation (TP hit & SL touched), and 4-box ledger categorization."""
+        import tempfile
+        tmp_path = os.path.join(tempfile.gettempdir(), "test_optin_ledger.json")
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        try:
+            mgr = qm.SetupLifecycleManager(filepath=tmp_path)
+            # 1. Opt-in add Scalping BUY
+            r1 = mgr.add_to_running_list({
+                "horizon": "scalping",
+                "direction": "BUY",
+                "entry_zone": "$3785.00 - $3787.00",
+                "stop_loss": "$3765.00",
+                "take_profit_1": "$3805.00",
+                "take_profit_2": "$3820.00",
+                "recommended_lot": 0.02,
+                "immediate_entry": True
+            }, 3786.0)
+            self.assertEqual(r1["status"], "ADDED")
+
+            # Duplicate add on same horizon blocked cleanly
+            r_dup = mgr.add_to_running_list({"horizon": "scalping", "direction": "BUY", "stop_loss": "$3765.00", "take_profit_1": "$3805.00"}, 3786.0)
+            self.assertEqual(r_dup["status"], "ALREADY_IN_LIST")
+
+            # 2. Opt-in add Daily SELL
+            r2 = mgr.add_to_running_list({
+                "horizon": "daily",
+                "direction": "SELL",
+                "entry_zone": "$3785.00 - $3787.00",
+                "stop_loss": "$3810.00",
+                "take_profit_1": "$3735.00",
+                "take_profit_2": "$3700.00",
+                "recommended_lot": 0.01,
+                "immediate_entry": True
+            }, 3786.0)
+            self.assertEqual(r2["status"], "ADDED")
+
+            # 3. Price moves to 3822.0 -> Scalping BUY hits FULL TP2, Daily SELL hits SL!
+            cat = mgr.get_categorized_ledger(live_price=3822.0)
+            self.assertEqual(cat["summary"]["running_count"], 0)
+            self.assertEqual(cat["summary"]["hit_tp_count"], 1)
+            self.assertEqual(cat["summary"]["sl_touched_count"], 1)
+            self.assertEqual(cat["summary"]["win_rate_pct"], 50.0)
+            self.assertGreater(cat["summary"]["hit_tp_total_r"], 1.0)
+            self.assertEqual(cat["summary"]["sl_touched_total_r"], -1.0)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
 
 if __name__ == "__main__":
     unittest.main()
