@@ -1171,8 +1171,9 @@ class SetupLifecycleManager:
         return [round(current_price - 1.5, 2), round(current_price + 1.5, 2)]
 
     def add_to_running_list(self, payload, current_price):
-        """Explicit user opt-in: adds an A* setup to the user's running trading list."""
+        """Explicit user opt-in: adds an A* setup to the user's running trading list with multi-position/scale-in support."""
         import time
+        import random
         data = self._load()
         now_ts = int(time.time())
         h_key = (payload.get("horizon") or "daily").lower()
@@ -1185,11 +1186,28 @@ class SetupLifecycleManager:
         else:
             direction = "BUY" if ("LONG" in action_str.upper() or "BUY" in action_str.upper()) else "SELL"
 
-        # Prevent accidental duplicate active entry for the same horizon
         running = data.get("running_trades", [])
+
+        # Debounce to prevent accidental rapid double-clicking within 5 seconds for same horizon & price
         for existing in running:
-            if existing.get("horizon") == h_key and existing.get("status") in ("PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"):
-                return {"status": "ALREADY_IN_LIST", "setup": existing, "message": f"{h_key.upper()} setup already in running list ({existing.get('setup_id')})."}
+            if existing.get("horizon") == h_key and existing.get("direction") == direction:
+                created_ep = int(existing.get("created_epoch", 0))
+                time_diff = now_ts - created_ep
+                existing_fill = float(existing.get("fill_price") or existing.get("entry_zone", [0, 0])[0])
+                if time_diff < 5 and abs(existing_fill - float(current_price)) < 0.20:
+                    return {
+                        "status": "DUPLICATE_DEBOUNCE",
+                        "setup": existing,
+                        "message": f"Setup was just added {time_diff}s ago. Please wait before re-adding."
+                    }
+
+        # Concurrency safety cap: max 5 active positions per horizon, max 10 total across portfolio
+        horizon_active = [t for t in running if t.get("horizon") == h_key and t.get("status") in ("PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT")]
+        if len(horizon_active) >= 5:
+            return {
+                "status": "CAPACITY_LIMIT",
+                "message": f"Maximum of 5 active concurrent positions reached for {h_key.upper()} horizon. Manage or close positions in Box 06A."
+            }
 
         cur_p = float(current_price)
         entry_zone = self._parse_entry_zone(payload.get("entry_zone"), cur_p)
@@ -1200,7 +1218,8 @@ class SetupLifecycleManager:
 
         ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 86400, "swing": 432000, "news": 3600}
         ttl_sec = ttl_map.get(h_key, 14400)
-        setup_id = f"TRD-{h_key.upper()[:5]}-{time.strftime('%Y%m%d')}-{now_ts % 10000:04d}"
+        rand_suffix = random.randint(10, 99)
+        setup_id = f"TRD-{h_key.upper()[:5]}-{time.strftime('%Y%m%d')}-{now_ts % 10000:04d}-{rand_suffix}"
 
         in_zone = (entry_zone[0] <= cur_p <= entry_zone[1]) or bool(payload.get("immediate_entry", True))
         rec = {
@@ -1238,7 +1257,13 @@ class SetupLifecycleManager:
         data["running_trades"] = running
         data.setdefault("active_setups", {})[h_key] = rec
         self._save(data)
-        return {"status": "ADDED", "setup": rec, "message": f"Added {setup_id} ({h_key.upper()} {direction}) to Running List."}
+        new_active_count = len([t for t in running if t.get("horizon") == h_key and t.get("status") in ("PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT")])
+        return {
+            "status": "ADDED",
+            "setup": rec,
+            "running_count": new_active_count,
+            "message": f"Added {setup_id} ({h_key.upper()} {direction}) to Running List (Active: {new_active_count})."
+        }
 
     def close_or_remove_running_trade(self, setup_id, live_price=None, mode="close"):
         """Closes a running trade at live market price (recording win/loss) or removes it cleanly."""
@@ -1254,12 +1279,10 @@ class SetupLifecycleManager:
             else:
                 new_running.append(item)
 
-        # Also check active_setups slots in case it's legacy
-        for h_k, act in list(data.get("active_setups", {}).items()):
-            if act and act.get("setup_id") == setup_id:
-                if target is None:
-                    target = act
-                data["active_setups"][h_k] = None
+        # Also update active_setups slots to point to remaining active trades
+        for h_k in list(data.get("active_setups", {}).keys()):
+            rem = [t for t in new_running if t.get("horizon") == h_k and t.get("status") in ("PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT")]
+            data["active_setups"][h_k] = rem[0] if rem else None
 
         if target is None:
             return {"status": "NOT_FOUND", "message": f"Setup {setup_id} not found in running list."}
@@ -2219,10 +2242,11 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     # STRICT READ-ONLY: Never mutate setup_ledger.json from calculate_daily_a_star_setup (prevents test/fallback tick leakage)
     mgr = SetupLifecycleManager()
     _led = mgr.get_ledger()
-    active_locked = next(
-        (t for t in _led.get("running_trades", []) if t.get("horizon") == h_mode and t.get("status") in ("PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT")),
-        _led.get("active_setups", {}).get(h_mode)
-    )
+    running_trades_h = [
+        t for t in _led.get("running_trades", [])
+        if t.get("horizon") == h_mode and t.get("status") in ("PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT")
+    ]
+    latest_running = running_trades_h[0] if running_trades_h else None
     completed_list = _led.get("completed_setups", [])
 
     snap = _load_premarket_snapshot()
@@ -2407,59 +2431,44 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     cvar_95_pct = round(float(np.mean(terminal_rets[terminal_rets <= var_95_pct])), 2)
     median_terminal = round(float(p50[-1]), 2)
 
-    # 4. Locked vs Live Pure-Probability Setup Evaluation
-    if active_locked and active_locked.get("status") in ["TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
-        e_low, e_high = active_locked.get("entry_zone", [current_price, current_price])
-        entry_low, entry_high = e_low, e_high
-        sl_val = active_locked.get("trailed_sl") if active_locked.get("trailed_sl") is not None else active_locked.get("stop_loss", current_price - eff_sl_dist)
-        tp1_val = active_locked.get("take_profit_1", current_price + rr_target * eff_sl_dist)
-        tp2_val = active_locked.get("take_profit_2", current_price + (rr_target + 1.0) * eff_sl_dist)
-        raw_action = active_locked.get("action", "")
-        ticket_type = active_locked.get("ticket_type", "")
-        is_bullish = active_locked.get("direction", "BUY") == "BUY"
-        mid_entry = (entry_low + entry_high) / 2.0
-        risk = max(1.0, abs(mid_entry - sl_val))
-        reward = abs(tp1_val - mid_entry)
-        rr = round(reward / risk, 2)
-        bias = f"BULLISH_{h_mode.upper()}_LOCKED" if is_bullish else f"BEARISH_{h_mode.upper()}_LOCKED"
+    # 4. Pure-Probability Live Candidate Setup Evaluation (Always calculated on current live price)
+    band = round(0.10 * atr_m30, 2)
+    entry_low = round(current_price - band, 2)
+    entry_high = round(current_price + band, 2)
+    mid_entry = current_price
+
+    if not drift_ok:
+        is_bullish = None
+        raw_action = f"STAND ASIDE // NO CAUSAL DRIFT ({h_mode.upper()} |{z_label}|={abs(z_eff):.2f})"
+        ticket_type = f"NEUTRAL_DRIFT_{h_mode.upper()}_STAND_ASIDE"
+        sl_val = round(mid_entry - eff_sl_dist, 2)
+        tp1_val = round(mid_entry + eff_sl_dist, 2)
+        tp2_val = round(mid_entry + 2.0 * eff_sl_dist, 2)
+        bias = "NEUTRAL_EQUILIBRIUM_CHOP"
     else:
-        band = round(0.10 * atr_m30, 2)
-        entry_low = round(current_price - band, 2)
-        entry_high = round(current_price + band, 2)
-        mid_entry = current_price
-
-        if not drift_ok:
-            is_bullish = None
-            raw_action = f"STAND ASIDE // NO CAUSAL DRIFT ({h_mode.upper()} |{z_label}|={abs(z_eff):.2f})"
-            ticket_type = f"NEUTRAL_DRIFT_{h_mode.upper()}_STAND_ASIDE"
+        is_bullish = (z_eff > 0.0)
+        if is_bullish:
+            raw_action = f"BAYESIAN PROBABILITY LONG ({h_mode.upper()}, {z_label}={z_eff:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+            ticket_type = f"BULLISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
             sl_val = round(mid_entry - eff_sl_dist, 2)
-            tp1_val = round(mid_entry + eff_sl_dist, 2)
-            tp2_val = round(mid_entry + 2.0 * eff_sl_dist, 2)
-            bias = "NEUTRAL_EQUILIBRIUM_CHOP"
+            tp1_mult = 2.0 if h_mode == "news" else rr_target
+            tp2_mult = 4.0 if h_mode == "news" else (rr_target + (0.5 if h_mode != 'daily' else 1.0))
+            tp1_val = round(mid_entry + tp1_mult * eff_sl_dist, 2)
+            tp2_val = round(mid_entry + tp2_mult * eff_sl_dist, 2)
+            bias = f"BULLISH_BAYESIAN_{h_mode.upper()}"
         else:
-            is_bullish = (z_eff > 0.0)
-            if is_bullish:
-                raw_action = f"BAYESIAN PROBABILITY LONG ({h_mode.upper()}, {z_label}={z_eff:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
-                ticket_type = f"BULLISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
-                sl_val = round(mid_entry - eff_sl_dist, 2)
-                tp1_mult = 2.0 if h_mode == "news" else rr_target
-                tp2_mult = 4.0 if h_mode == "news" else (rr_target + (0.5 if h_mode != 'daily' else 1.0))
-                tp1_val = round(mid_entry + tp1_mult * eff_sl_dist, 2)
-                tp2_val = round(mid_entry + tp2_mult * eff_sl_dist, 2)
-                bias = f"BULLISH_BAYESIAN_{h_mode.upper()}"
-            else:
-                raw_action = f"BAYESIAN PROBABILITY SHORT ({h_mode.upper()}, {z_label}={z_eff:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
-                ticket_type = f"BEARISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
-                sl_val = round(mid_entry + eff_sl_dist, 2)
-                tp1_mult = 2.0 if h_mode == "news" else rr_target
-                tp2_mult = 4.0 if h_mode == "news" else (rr_target + (0.5 if h_mode != 'daily' else 1.0))
-                tp1_val = round(mid_entry - tp1_mult * eff_sl_dist, 2)
-                tp2_val = round(mid_entry - tp2_mult * eff_sl_dist, 2)
-                bias = f"BEARISH_BAYESIAN_{h_mode.upper()}"
+            raw_action = f"BAYESIAN PROBABILITY SHORT ({h_mode.upper()}, {z_label}={z_eff:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
+            ticket_type = f"BEARISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
+            sl_val = round(mid_entry + eff_sl_dist, 2)
+            tp1_mult = 2.0 if h_mode == "news" else rr_target
+            tp2_mult = 4.0 if h_mode == "news" else (rr_target + (0.5 if h_mode != 'daily' else 1.0))
+            tp1_val = round(mid_entry - tp1_mult * eff_sl_dist, 2)
+            tp2_val = round(mid_entry - tp2_mult * eff_sl_dist, 2)
+            bias = f"BEARISH_BAYESIAN_{h_mode.upper()}"
 
-        risk = max(1.0, abs(mid_entry - sl_val))
-        reward = abs(tp1_val - mid_entry)
-        rr = round(reward / risk, 2)
+    risk = max(1.0, abs(mid_entry - sl_val))
+    reward = abs(tp1_val - mid_entry)
+    rr = round(reward / risk, 2)
     sl_d = max(1.0, abs(mid_entry - sl_val))
     tp_d = abs(tp1_val - mid_entry)
 
@@ -2537,7 +2546,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
     footprint = compute_algorithmic_footprint("daily", current_price, atr_m30)
     garch_shock = predict_garch_shock_dispersion("daily", 0.45, vix_live, wti_22d_live)
-    eff_created = setup_created_epoch or (active_locked.get("created_epoch") if active_locked else None)
+    eff_created = setup_created_epoch or int(time.time())
     ttl = calculate_time_to_live_status(h_mode, setup_created_epoch=eff_created)
 
     vrp_ok = vrp_ann > 0.0
@@ -2609,9 +2618,9 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         tp_reason = "Targets suspended until A* gate passes."
     else:
         # STRICT USER OPT-IN: Do NOT auto-insert into running trading list without trader click.
-        in_running_list = bool(active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"])
-        setup_id_str = active_locked.get("setup_id", "CANDIDATE") if in_running_list else "A* CANDIDATE"
-        status_str = active_locked.get("status", "OPT-IN READY") if in_running_list else "CLICK [+ ADD TO RUNNING]"
+        in_running_list = len(running_trades_h) > 0
+        setup_id_str = f"A* CANDIDATE ({h_mode.upper()})"
+        status_str = f"{len(running_trades_h)} RUNNING" if in_running_list else "CLICK [+ ADD TO RUNNING]"
         ticket_title = f"{setup_id_str} [{status_str}] // {total_confluence}/100 (EV={ev_r:+.3f}R, P(Win)={win_rate}%)"
         action = raw_action
         sl_val_str = f"${sl_val:.2f}"
@@ -2619,7 +2628,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         tp2_val_str = f"${tp2_val:.2f}"
         rr_str = f"1:{rr:.2f}"
         entry_zone = f"${entry_low:.2f} - ${entry_high:.2f}"
-        safe_lot = active_locked.get("recommended_lot", computed_lot) if in_running_list else computed_lot
+        safe_lot = computed_lot
         max_risk_usd = f"${round(safe_lot * 100.0 * risk_dist_dollars, 2):.2f} (HAR-RV Cap ${target_risk_usd:.2f})"
         bias_reason = f"{bias}: {z_label}={z_eff:+.2f}σ (D1 z20={z_20:+.2f}σ, M15={z_m15_1h:+.2f}σ), VRP={vrp_ann:+.1f}%, P(Win)={win_rate}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
         entry_reason = f"Pure-probability execution around spot ${current_price:.2f} (no visual chart patterns)."
@@ -2650,15 +2659,17 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "news": {"trades": 87, "win_rate_pct": 55.2, "profit_factor": 2.77, "t_stat": "+3.72", "p_val": "0.0004"}
     }
     bt5 = bt_5y_map.get(h_mode, {"trades": 94, "win_rate_pct": 53.2, "profit_factor": 1.63, "t_stat": "+2.12", "p_val": "0.0367"})
-    is_tracked = bool(active_locked and active_locked.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"])
+    is_tracked = len(running_trades_h) > 0
     return {
         "horizon": h_mode,
         "confluence_score": total_confluence,
         "confluence_moe_95": 3.8,
         "is_a_star": is_a_star,
         "in_running_list": is_tracked,
+        "running_count": len(running_trades_h),
+        "running_trades": running_trades_h,
         "grade": grade,
-        "locked_setup": active_locked if is_tracked else None,
+        "locked_setup": latest_running,
         "current_price": current_price,
         "pivot_point": PP,
         "determining_timeframe": timeframe_label,
@@ -2728,12 +2739,14 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "trade_ticket": {
             "asset": "XAUUSD (Gold Spot)",
             "is_a_star": is_a_star,
-            "setup_id": active_locked.get("setup_id", "N/A") if active_locked else "N/A",
-            "setup_status": active_locked.get("status", "STAND_ASIDE") if active_locked else "STAND_ASIDE",
-            "fill_price": active_locked.get("fill_price") if active_locked else None,
-            "trailed_sl": active_locked.get("trailed_sl") if active_locked else None,
-            "floating_pnl_usd": active_locked.get("floating_pnl_usd", 0.0) if active_locked else 0.0,
-            "floating_r": active_locked.get("floating_r", 0.0) if active_locked else 0.0,
+            "candidate_id": f"A*_{h_mode.upper()}_CANDIDATE",
+            "setup_id": latest_running.get("setup_id", "A* CANDIDATE") if latest_running else "A* CANDIDATE",
+            "setup_status": ("TRIGGERED_RUNNING" if is_tracked else ("A*_OPT_IN_READY" if is_a_star else "STAND_ASIDE")),
+            "running_count": len(running_trades_h),
+            "fill_price": latest_running.get("fill_price") if latest_running else None,
+            "trailed_sl": latest_running.get("trailed_sl") if latest_running else None,
+            "floating_pnl_usd": sum(float(t.get("floating_pnl_usd") or 0.0) for t in running_trades_h),
+            "floating_r": sum(float(t.get("floating_r") or 0.0) for t in running_trades_h),
             "ticket_title": ticket_title,
             "action": action,
             "ticket_type": ticket_type,
@@ -2746,7 +2759,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "max_risk_amount_usd": max_risk_usd
         },
         "setup_ledger": {
-            "active_setup": active_locked,
+            "active_setup": latest_running,
+            "active_running": running_trades_h,
             "completed_setups": completed_list
         },
         "hypothesis_validation": {

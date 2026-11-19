@@ -1845,20 +1845,24 @@ async function fetchAstarData() {
     const btnAdd = document.getElementById("btn-add-astar-running");
     const btnSkip = document.getElementById("btn-skip-astar-setup");
     const fbEl = document.getElementById("astar-optin-feedback");
+    const runningCount = Number(aStar.running_count || (aStar.in_running_list ? 1 : 0));
+    const isAStar = !!aStar.is_a_star;
+    const dirWord = (ticket.action || "").includes("LONG") ? "LONG" : "SHORT";
+
     if (btnAdd) {
-      if (aStar.in_running_list) {
-        btnAdd.disabled = true;
-        btnAdd.innerText = `✓ IN RUNNING LIST (${h.toUpperCase()})`;
-        btnAdd.style.background = "#092129";
-        btnAdd.style.borderColor = "#00e5ff";
-        btnAdd.style.color = "#00e5ff";
-      } else if (aStar.is_a_star) {
+      if (isAStar) {
         btnAdd.disabled = false;
-        const dirWord = (ticket.action || "").includes("LONG") ? "LONG" : "SHORT";
-        btnAdd.innerText = `+ ADD ${h.toUpperCase()} ${dirWord} TO RUNNING LIST <GO>`;
-        btnAdd.style.background = "#0b2414";
-        btnAdd.style.borderColor = "#00e676";
-        btnAdd.style.color = "#00e676";
+        if (runningCount > 0) {
+          btnAdd.innerText = `+ SCALE IN / ADD NEW ${h.toUpperCase()} (${runningCount} ACTIVE) <GO>`;
+          btnAdd.style.background = "#092129";
+          btnAdd.style.borderColor = "#00e5ff";
+          btnAdd.style.color = "#00e5ff";
+        } else {
+          btnAdd.innerText = `+ ADD ${h.toUpperCase()} ${dirWord} TO RUNNING LIST <GO>`;
+          btnAdd.style.background = "#0b2414";
+          btnAdd.style.borderColor = "#00e676";
+          btnAdd.style.color = "#00e676";
+        }
       } else {
         btnAdd.disabled = true;
         btnAdd.innerText = `STAND ASIDE — NOT A* GRADE (${h.toUpperCase()})`;
@@ -1868,15 +1872,19 @@ async function fetchAstarData() {
       }
     }
     if (btnSkip) {
-      btnSkip.disabled = !!aStar.in_running_list;
-      btnSkip.style.opacity = aStar.in_running_list ? "0.45" : "1";
+      btnSkip.disabled = false;
+      btnSkip.style.opacity = "1";
     }
     if (fbEl && !window._ASTAR_OPTIN_LOCK_MSG) {
-      fbEl.innerText = aStar.in_running_list
-        ? `ACTIVE TRACKING: ${h.toUpperCase()} setup is live in [06A // RUNNING & ACTIVE SETUPS] below.`
-        : (aStar.is_a_star
-          ? `READY FOR OPT-IN: Click [+ ADD] to track this ${h.toUpperCase()} A* setup live, or [× SKIP] to ignore.`
-          : `GATE PROTECTED: ${h.toUpperCase()} is currently STAND ASIDE — wait for A* conditions.`);
+      if (runningCount > 0) {
+        fbEl.innerHTML = `ACTIVE POSITIONS: <strong style="color:#00e5ff;">${runningCount} ${h.toUpperCase()} trade(s)</strong> running in <a href="#astar-running-tbody" style="color:#00e5ff; text-decoration:underline;">[06A // RUNNING & ACTIVE]</a> below. Fresh live candidate shown above.`;
+      } else if (isAStar) {
+        fbEl.innerText = `READY FOR OPT-IN: Click [+ ADD] to track this ${h.toUpperCase()} A* setup live, or [× SKIP] to ignore.`;
+        fbEl.style.color = "#00e676";
+      } else {
+        fbEl.innerText = `GATE PROTECTED: ${h.toUpperCase()} is currently STAND ASIDE — wait for A* conditions.`;
+        fbEl.style.color = "#888";
+      }
     }
 
     // Visual Position Progress Gauge
@@ -1927,6 +1935,11 @@ window._SKIPPED_ASTAR_HORIZONS = window._SKIPPED_ASTAR_HORIZONS || {};
 
 async function addHorizonSetupToRunning(horizon) {
   const fbEl = document.getElementById("astar-optin-feedback");
+  const btnAdd = document.getElementById("btn-add-astar-running");
+  if (btnAdd) {
+    btnAdd.disabled = true;
+    btnAdd.innerText = "SUBMITTING TO RUNNING LIST...";
+  }
   try {
     const res = await fetch("/api/setup-ledger/add", {
       method: "POST",
@@ -1938,7 +1951,7 @@ async function addHorizonSetupToRunning(horizon) {
     if (fbEl) {
       window._ASTAR_OPTIN_LOCK_MSG = true;
       fbEl.innerText = out.message || `${horizon.toUpperCase()} status: ${out.status}`;
-      fbEl.style.color = out.status === "ADDED" ? "#00e676" : (out.status === "ALREADY_IN_LIST" ? "#00e5ff" : "#ff6b6b");
+      fbEl.style.color = out.status === "ADDED" ? "#00e676" : (out.status === "DUPLICATE_DEBOUNCE" ? "var(--amber-cmd)" : "#ff6b6b");
       setTimeout(() => { window._ASTAR_OPTIN_LOCK_MSG = false; }, 4500);
     }
     await renderSetupLedgerTable();
@@ -1946,6 +1959,8 @@ async function addHorizonSetupToRunning(horizon) {
     await fetchAstarData();
   } catch (e) {
     if (fbEl) { fbEl.innerText = `Error adding ${horizon}: ${e.message}`; fbEl.style.color = "#ff4444"; }
+  } finally {
+    if (btnAdd) btnAdd.disabled = false;
   }
 }
 
@@ -1989,7 +2004,8 @@ async function renderMultiHorizonOptInMatrix() {
       if (!item) return "";
       const tt = item.trade_ticket || {};
       const isA = !!item.is_a_star;
-      const inList = !!item.in_running_list;
+      const runCnt = Number(item.running_count || (item.in_running_list ? 1 : 0));
+      const inList = runCnt > 0;
       const skipped = !!window._SKIPPED_ASTAR_HORIZONS[h];
       const actStr = tt.action || "";
       const dir = isA ? (actStr.includes("LONG") || actStr.includes("BUY") ? "LONG" : "SHORT") : "STAND ASIDE";
@@ -1998,21 +2014,29 @@ async function renderMultiHorizonOptInMatrix() {
       const pe = item.probability_engine || {};
       const zTxt = pe.z_eff !== undefined ? `${pe.z_label || "z"}=${pe.z_eff >= 0 ? "+" : ""}${Number(pe.z_eff).toFixed(2)}σ` : "";
 
+      const runBadge = runCnt > 0 ? `<span style="display:inline-block; padding:2px 5px; background:#092129; border:1px solid #00e5ff; color:#00e5ff; font-size:8px; font-weight:800;">${runCnt} ACTIVE</span>` : "";
+
       let btns = "";
-      if (inList) {
-        btns = `<span style="display:inline-block; padding:3px 7px; background:#092129; border:1px solid #00e5ff; color:#00e5ff; font-size:8.5px; font-weight:900;">✓ IN RUNNING LIST</span>`;
-      } else if (isA && !skipped) {
+      if (isA && !skipped) {
+        const addLabel = runCnt > 0 ? `+ SCALE IN (${runCnt})` : "+ ADD TO RUNNING";
+        const btnCol = runCnt > 0 ? "#00e5ff" : "#00e676";
+        const btnBg = runCnt > 0 ? "#092129" : "#0b2414";
         btns = `
-          <button onclick="addHorizonSetupToRunning('${h}')" class="bbg-btn-mini" style="background:#0b2414; border:1px solid #00e676; color:#00e676; font-size:8.5px; font-weight:900; padding:3px 7px; cursor:pointer;">+ ADD TO RUNNING</button>
+          ${runBadge}
+          <button onclick="addHorizonSetupToRunning('${h}')" class="bbg-btn-mini" style="background:${btnBg}; border:1px solid ${btnCol}; color:${btnCol}; font-size:8.5px; font-weight:900; padding:3px 7px; cursor:pointer;">${addLabel}</button>
           <button onclick="skipHorizonSetup('${h}')" class="bbg-btn-mini" style="background:#1a1a1f; border:1px solid #555; color:#aaa; font-size:8.5px; padding:3px 6px; cursor:pointer;">SKIP</button>
         `;
       } else if (isA && skipped) {
         btns = `
+          ${runBadge}
           <span style="color:#888; font-size:8.5px;">SKIPPED</span>
           <button onclick="addHorizonSetupToRunning('${h}')" class="bbg-btn-mini" style="background:#141a14; border:1px solid #4a7c59; color:#8fd19e; font-size:8px; padding:2px 6px; cursor:pointer;">UNDO / ADD</button>
         `;
       } else {
-        btns = `<span style="color:#666; font-size:8.5px; font-family:var(--font-mono);">GATE BLOCKED</span>`;
+        btns = `
+          ${runBadge}
+          <span style="color:#666; font-size:8.5px; font-family:var(--font-mono);">GATE BLOCKED</span>
+        `;
       }
 
       return `

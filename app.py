@@ -526,7 +526,7 @@ def get_global_macro_matrix():
 def get_first_passage_win_prob(event_type: str = "daily", is_buy: bool = True):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
-    gold = prices.get("GC=F", 4036.17)
+    gold = prices.get("GC=F", _LAST_VERIFIED_PRICES.get("GC=F", 3725.0))
     astar = quant_model.calculate_daily_a_star_setup(
         current_price=gold, atr_m30=prices.get("ATR_M30", 10.50),
         dxy_val=prices.get("DX-Y.NYB", 102.24), us10y_val=prices.get("^TNX", 5.00), us2y_val=prices.get("ZT=F", 4.75),
@@ -538,7 +538,7 @@ def get_first_passage_win_prob(event_type: str = "daily", is_buy: bool = True):
 @app.get("/api/algorithmic-footprint")
 def get_algorithmic_footprint(event_type: str = "daily"):
     live = fetch_live_macro_data()
-    gold = live.get("prices", {}).get("GC=F", 4036.17)
+    gold = live.get("prices", {}).get("GC=F", _LAST_VERIFIED_PRICES.get("GC=F", 3725.0))
     return quant_model.compute_algorithmic_footprint(event_type=event_type, current_price=gold)
 
 @app.get("/api/garch-predicted-shock")

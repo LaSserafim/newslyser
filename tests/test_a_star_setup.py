@@ -298,9 +298,23 @@ class TestAStarSetupEngine(unittest.TestCase):
             }, 3786.0)
             self.assertEqual(r1["status"], "ADDED")
 
-            # Duplicate add on same horizon blocked cleanly
-            r_dup = mgr.add_to_running_list({"horizon": "scalping", "direction": "BUY", "stop_loss": "$3765.00", "take_profit_1": "$3805.00"}, 3786.0)
-            self.assertEqual(r_dup["status"], "ALREADY_IN_LIST")
+            # Duplicate identical instant click caught cleanly by debounce
+            r_dup = mgr.add_to_running_list({"horizon": "scalping", "direction": "BUY", "entry_zone": "$3785.00 - $3787.00", "stop_loss": "$3765.00", "take_profit_1": "$3805.00"}, 3786.0)
+            self.assertEqual(r_dup["status"], "DUPLICATE_DEBOUNCE")
+
+            # Scale-in / new candidate setup at different price succeeds with ADDED
+            r_scale = mgr.add_to_running_list({
+                "horizon": "scalping",
+                "direction": "BUY",
+                "entry_zone": "$3790.00 - $3792.00",
+                "stop_loss": "$3775.00",
+                "take_profit_1": "$3815.00",
+                "take_profit_2": "$3830.00",
+                "recommended_lot": 0.01,
+                "immediate_entry": True
+            }, 3791.0)
+            self.assertEqual(r_scale["status"], "ADDED")
+            self.assertEqual(r_scale["running_count"], 2)
 
             # 2. Opt-in add Daily SELL
             r2 = mgr.add_to_running_list({
@@ -315,13 +329,13 @@ class TestAStarSetupEngine(unittest.TestCase):
             }, 3786.0)
             self.assertEqual(r2["status"], "ADDED")
 
-            # 3. Price moves to 3822.0 -> Scalping BUY hits FULL TP2, Daily SELL hits SL!
-            cat = mgr.get_categorized_ledger(live_price=3822.0)
+            # 3. Price moves to 3832.0 -> Both Scalping BUYs hit FULL TP2, Daily SELL hits SL!
+            cat = mgr.get_categorized_ledger(live_price=3832.0)
             self.assertEqual(cat["summary"]["running_count"], 0)
-            self.assertEqual(cat["summary"]["hit_tp_count"], 1)
+            self.assertEqual(cat["summary"]["hit_tp_count"], 2)
             self.assertEqual(cat["summary"]["sl_touched_count"], 1)
-            self.assertEqual(cat["summary"]["win_rate_pct"], 50.0)
-            self.assertGreater(cat["summary"]["hit_tp_total_r"], 1.0)
+            self.assertEqual(cat["summary"]["win_rate_pct"], 66.7)
+            self.assertGreater(cat["summary"]["hit_tp_total_r"], 2.0)
             self.assertEqual(cat["summary"]["sl_touched_total_r"], -1.0)
         finally:
             if os.path.exists(tmp_path):
@@ -330,11 +344,63 @@ class TestAStarSetupEngine(unittest.TestCase):
     def test_production_ledger_never_mutated_by_read_calls(self):
         """Strict anti-pollution invariant: calculate_daily_a_star_setup must NEVER write to production setup_ledger.json."""
         prod_path = "/Users/macbook/newslyser/data/setup_ledger.json"
-        before = open(prod_path).read() if os.path.exists(prod_path) else ""
-        qm.calculate_daily_a_star_setup(current_price=4036.17, horizon="scalping", n_paths=500)
-        qm.calculate_daily_a_star_setup(current_price=4036.17, horizon="daily", n_paths=500)
-        after = open(prod_path).read() if os.path.exists(prod_path) else ""
+        with open(prod_path, "r") as f:
+            before = f.read() if os.path.exists(prod_path) else ""
+        qm.calculate_daily_a_star_setup(current_price=3725.0, horizon="scalping", n_paths=500)
+        qm.calculate_daily_a_star_setup(current_price=3725.0, horizon="daily", n_paths=500)
+        with open(prod_path, "r") as f:
+            after = f.read() if os.path.exists(prod_path) else ""
         self.assertEqual(before, after)
+
+    def test_candidate_setup_never_locked_out_by_running_trade(self):
+        """Verifies candidate setup is freshly computed around spot and never locked out by running trades."""
+        import tempfile
+        tmp_path = os.path.join(tempfile.gettempdir(), "test_nolock_ledger.json")
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        try:
+            mgr = qm.SetupLifecycleManager(filepath=tmp_path)
+            # Add initial trade at 3750.0
+            r1 = mgr.add_to_running_list({
+                "horizon": "daily",
+                "direction": "SELL",
+                "entry_zone": "$3748.00 - $3752.00",
+                "stop_loss": "$3780.00",
+                "take_profit_1": "$3700.00",
+                "take_profit_2": "$3680.00",
+                "recommended_lot": 0.01,
+                "immediate_entry": True
+            }, 3750.0)
+            self.assertEqual(r1["status"], "ADDED")
+            self.assertEqual(r1["running_count"], 1)
+
+            # Spot price moves to 3720.0; calculate fresh daily setup
+            res = qm.calculate_daily_a_star_setup(current_price=3720.0, horizon="daily", n_paths=500)
+            tt = res.get("trade_ticket", {})
+            # Entry zone must be calculated around new spot $3720, not the old $3750
+            self.assertIn("372", tt.get("entry_zone", ""))
+            self.assertNotIn("3748", tt.get("entry_zone", ""))
+
+            # Now add a new setup / scale-in position at 3720.0
+            r2 = mgr.add_to_running_list({
+                "horizon": "daily",
+                "direction": "SELL",
+                "entry_zone": "$3718.00 - $3722.00",
+                "stop_loss": "$3740.00",
+                "take_profit_1": "$3690.00",
+                "take_profit_2": "$3670.00",
+                "recommended_lot": 0.01,
+                "immediate_entry": True
+            }, 3720.0)
+            self.assertEqual(r2["status"], "ADDED")
+            self.assertEqual(r2["running_count"], 2)
+
+            # Both positions run concurrently in ledger
+            cat = mgr.get_categorized_ledger(live_price=3720.0)
+            self.assertEqual(cat["summary"]["running_count"], 2)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
 
 if __name__ == "__main__":
