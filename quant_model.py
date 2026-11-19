@@ -1304,7 +1304,10 @@ class SetupLifecycleManager:
             target["resolution"] = f"Manually closed at ${float(live_price):.2f} ({r_val:+.2f}R / ${pnl_usd:+.2f})."
             data.setdefault("completed_setups", []).insert(0, target)
         elif mode == "remove":
-            pass  # Silently dropped from running list per user request
+            target["status"] = "REMOVED_BY_TRADER"
+            target["resolution"] = "Manually removed from active running list by trader."
+            target["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+            data.setdefault("completed_setups", []).insert(0, target)
 
         self._save(data)
         return {"status": "OK", "mode": mode, "setup_id": setup_id}
@@ -1354,8 +1357,8 @@ class SetupLifecycleManager:
             risk_dist = abs(fill_p - float(active.get("stop_loss", fill_p - 6.0))) or 6.0
             lot = float(active.get("recommended_lot", 0.01))
 
-            # Holding TTL check (only auto-expire non-user-managed or expired slots)
-            if active.get("expires_epoch", 0) > 0 and now_ts >= active.get("expires_epoch", 0):
+            # Holding TTL check (only auto-expire non-user-managed or unverified slots; user-opted trades run until SL/TP/Manual close)
+            if not active.get("added_by_user") and active.get("expires_epoch", 0) > 0 and now_ts >= active.get("expires_epoch", 0):
                 delta = (live_price - fill_p) if direction == "BUY" else (fill_p - live_price)
                 realized_r = round(delta / risk_dist, 2)
                 realized_pnl = round(delta * lot * 100.0, 2)
@@ -1531,21 +1534,22 @@ class SetupLifecycleManager:
         now_ts = int(time.time())
         all_keys = ["scalping", "intraday", "daily", "swing", "news"]
         keys_to_clear = all_keys if h_key in ["all", "*"] else [h_key]
-        cleared_ids = set()
+        
+        # Reset the candidate slot for the requested horizon(s) so a fresh proposal can be generated.
+        # CRITICAL: We NEVER mutate or purge user-opted-in positions in running_trades.
+        running_ids = {t.get("setup_id") for t in data.get("running_trades", []) if t.get("setup_id")}
         for k in keys_to_clear:
             active = data.get("active_setups", {}).get(k)
-            if active and active.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
-                cleared_ids.add(active.get("setup_id"))
-                active["status"] = "FORCE_RESET_SUPERSEDED"
-                active["resolution"] = f"Session force re-evaluated by trader ({k.upper()})."
-                active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
-                data.setdefault("completed_setups", []).insert(0, active)
+            if active:
+                sid = active.get("setup_id")
+                # If this setup was NOT added to running_trades by user, archive it as superseded candidate
+                if sid and sid not in running_ids and active.get("status") in ["PENDING_TRIGGER", "TRIGGERED_RUNNING", "PARTIAL_TP_HIT"]:
+                    active["status"] = "FORCE_RESET_SUPERSEDED"
+                    active["resolution"] = f"Candidate session re-evaluated by trader ({k.upper()})."
+                    active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
+                    data.setdefault("completed_setups", []).insert(0, active)
             data.setdefault("active_setups", {})[k] = None
-        # Also remove cleared horizons from running_trades
-        data["running_trades"] = [
-            t for t in data.get("running_trades", [])
-            if t.get("horizon") not in keys_to_clear and t.get("setup_id") not in cleared_ids
-        ]
+
         self._save(data)
         return data
 

@@ -398,6 +398,23 @@ class TestAStarSetupEngine(unittest.TestCase):
             # Both positions run concurrently in ledger
             cat = mgr.get_categorized_ledger(live_price=3720.0)
             self.assertEqual(cat["summary"]["running_count"], 2)
+
+            # Test force_reset_horizon: NEVER purges user running trades
+            mgr.force_reset_horizon(horizon="daily")
+            cat_after_reset = mgr.get_categorized_ledger(live_price=3720.0)
+            self.assertEqual(cat_after_reset["summary"]["running_count"], 2, "Running trades must not be purged by session reset!")
+
+            # Test remove mode: archives into completed_setups with REMOVED_BY_TRADER status (no vanishing)
+            sid_to_remove = r1["setup"]["setup_id"]
+            res_rem = mgr.close_or_remove_running_trade(sid_to_remove, mode="remove")
+            self.assertEqual(res_rem["status"], "OK")
+            cat_after_remove = mgr.get_categorized_ledger(live_price=3720.0)
+            self.assertEqual(cat_after_remove["summary"]["running_count"], 1)
+            archived = cat_after_remove["archived_expired"]
+            arch_ids = [x["setup_id"] for x in archived]
+            self.assertIn(sid_to_remove, arch_ids, "Removed trade must be preserved in archived ledger with audit trail!")
+            rem_entry = [x for x in archived if x["setup_id"] == sid_to_remove][0]
+            self.assertEqual(rem_entry["status"], "REMOVED_BY_TRADER")
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
