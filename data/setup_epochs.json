@@ -1,22 +1,22 @@
 {
   "daily": {
-    "created_at": 1794790599,
-    "expires_at": 1794795999
+    "created_at": 1795062852,
+    "expires_at": 1795068252
   },
   "intraday": {
-    "created_at": 1794791322,
-    "expires_at": 1794805722
+    "created_at": 1795062849,
+    "expires_at": 1795077249
   },
   "scalping": {
-    "created_at": 1794791318,
-    "expires_at": 1794794918
+    "created_at": 1795074350,
+    "expires_at": 1795077950
   },
   "swing": {
-    "created_at": 1794759569,
-    "expires_at": 1795191569
+    "created_at": 1795005633,
+    "expires_at": 1795437633
   },
   "news": {
-    "created_at": 1794791045,
-    "expires_at": 1794794645
+    "created_at": 1795010606,
+    "expires_at": 1795014206
   }
 }

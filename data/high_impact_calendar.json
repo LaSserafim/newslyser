@@ -65,7 +65,7 @@
     "effect_xauusd": "OFFICIAL BLS PRINT +0.35% vs 0.40% FCST // GOLD +0.08%"
   },
   {
-    "event_id": "ff_2026-11-16_9458",
+    "event_id": "ff_2026-11-16_3456",
     "title": "Fed Chairman Warsh Speaks",
     "country": "USD",
     "date": "2026-11-16",
@@ -85,13 +85,13 @@
     "time": "08:30 AM EST (20:30 WIB)",
     "impact": "HIGH",
     "actual": "",
-    "forecast": "0.2%",
+    "forecast": "0.1%",
     "previous": "0.8%",
     "category": "CONSUMER_DEMAND",
     "effect_xauusd": "U.S. CONSUMER RESILIENCE & GDP TRACKER"
   },
   {
-    "event_id": "ff_2026-11-17_8598",
+    "event_id": "ff_2026-11-17_6935",
     "title": "Core Retail Sales m/m",
     "country": "USD",
     "date": "2026-11-17",
@@ -104,7 +104,7 @@
     "effect_xauusd": "HIGH-IMPACT USD RELEASE (NY PRE-MARKET / US OPEN)"
   },
   {
-    "event_id": "ff_2026-11-18_7648",
+    "event_id": "ff_2026-11-18_2644",
     "title": "FOMC Meeting Minutes",
     "country": "USD",
     "date": "2026-11-18",
@@ -117,46 +117,46 @@
     "effect_xauusd": "HIGH-IMPACT USD RELEASE (NY AFTERNOON)"
   },
   {
-    "event_id": "ff_2026-11-19_9679",
+    "event_id": "ff_2026-11-19_7970",
     "title": "Philly Fed Manufacturing Index",
     "country": "USD",
     "date": "2026-11-19",
     "time": "08:30 EST (20:30 WIB) [NY PRE-MARKET / US OPEN]",
     "impact": "MEDIUM",
     "actual": "",
-    "forecast": "19.2",
+    "forecast": "20.6",
     "previous": "20.9",
     "category": "MACRO_WEEKLY",
     "effect_xauusd": "MEDIUM-IMPACT USD RELEASE (NY PRE-MARKET / US OPEN)"
   },
   {
-    "event_id": "ff_2026-11-19_5724",
+    "event_id": "ff_2026-11-19_7648",
     "title": "Unemployment Claims",
     "country": "USD",
     "date": "2026-11-19",
     "time": "08:30 EST (20:30 WIB) [NY PRE-MARKET / US OPEN]",
     "impact": "MEDIUM",
     "actual": "",
-    "forecast": "199K",
+    "forecast": "198K",
     "previous": "200K",
     "category": "MACRO_WEEKLY",
     "effect_xauusd": "MEDIUM-IMPACT USD RELEASE (NY PRE-MARKET / US OPEN)"
   },
   {
-    "event_id": "ff_2026-11-20_2243",
+    "event_id": "ff_2026-11-20_8868",
     "title": "Revised UoM Consumer Sentiment",
     "country": "USD",
     "date": "2026-11-20",
     "time": "10:00 EST (22:00 WIB) [NY CASH SESSION]",
     "impact": "MEDIUM",
     "actual": "",
-    "forecast": "52.1",
+    "forecast": "51.7",
     "previous": "51.0",
     "category": "MACRO_WEEKLY",
     "effect_xauusd": "MEDIUM-IMPACT USD RELEASE (NY CASH SESSION)"
   },
   {
-    "event_id": "ff_2026-11-20_9259",
+    "event_id": "ff_2026-11-20_4391",
     "title": "Revised UoM Inflation Expectations",
     "country": "USD",
     "date": "2026-11-20",
