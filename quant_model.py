@@ -152,9 +152,22 @@ def _get_daily_cross_asset_ols():
         for idx_c, sym_c in enumerate(zoo_cols, start=1):
             sk = short_map[sym_c]
             pv = float(ols["p_values"][idx_c])
-            sig5 = pv < 0.05
-            filtered_betas[sk] = round(float(ols["beta"][idx_c]) if sig5 else 0.0, 4)
-            factor_details[sk] = {"ticker": sym_c, "beta_raw": round(float(ols["beta"][idx_c]), 4), "beta_filtered": filtered_betas[sk], "t_stat": round(float(ols["t_stats"][idx_c]), 2), "p_val": round(pv, 4), "significant_5pct": bool(sig5)}
+            t_val = float(ols["t_stats"][idx_c])
+            # Smooth Empirical Bayes shrinkage: w = max(0, 1 - t_crit^2 / t^2)
+            # Eliminates pre-test knife-edge cliff while zeroing out non-significant noise
+            t_crit = 1.96
+            shrink_w = max(0.0, 1.0 - (t_crit ** 2) / max(1e-4, t_val ** 2))
+            beta_shrunk = round(float(ols["beta"][idx_c]) * shrink_w, 4)
+            filtered_betas[sk] = beta_shrunk
+            factor_details[sk] = {
+                "ticker": sym_c,
+                "beta_raw": round(float(ols["beta"][idx_c]), 4),
+                "beta_filtered": beta_shrunk,
+                "shrinkage_weight": round(shrink_w, 3),
+                "t_stat": round(t_val, 2),
+                "p_val": round(pv, 4),
+                "significant_5pct": bool(pv < 0.05)
+            }
         res = {
             "n": n, "f_stat": ols["f_stat"], "f_p_val": f_p, "r2": ols["r2"],
             "beta_dxy_raw": ols["beta"][1], "t_dxy": ols["t_stats"][1], "p_dxy": ols["p_values"][1],
@@ -575,12 +588,48 @@ def calculate_first_passage_win_probability(current_price, entry_price, sl_price
     paths[:, 1:] = paths[:, :1] * np.exp(np.cumsum(log_rets, axis=1))
 
     sub = paths[:, 1:]
+    p0 = paths[:, :-1]
+    p1 = paths[:, 1:]
+    spread_usd = 0.35
+    eff_tp = (tp_price + 0.5 * spread_usd) if is_buy else (tp_price - 0.5 * spread_usd)
+    eff_sl = (sl_price + 0.5 * spread_usd) if is_buy else (sl_price - 0.5 * spread_usd)
+
     if is_buy:
-        tp_mask = sub >= tp_price
-        sl_mask = sub <= sl_price
+        disc_tp = sub >= eff_tp
+        disc_sl = sub <= eff_sl
+        valid_sl = (p0 > eff_sl) & (p1 > eff_sl)
+        x0_sl = np.log(np.maximum(1e-6, p0 / eff_sl))
+        x1_sl = np.log(np.maximum(1e-6, p1 / eff_sl))
+        prob_sl = np.where(valid_sl, np.exp(-2.0 * x0_sl * x1_sl / max(1e-8, step_vol**2)), 0.0)
+
+        valid_tp = (p0 < eff_tp) & (p1 < eff_tp)
+        x0_tp = np.log(np.maximum(1e-6, eff_tp / p0))
+        x1_tp = np.log(np.maximum(1e-6, eff_tp / p1))
+        prob_tp = np.where(valid_tp, np.exp(-2.0 * x0_tp * x1_tp / max(1e-8, step_vol**2)), 0.0)
+
+        u_b = rng.uniform(0, 1, (n_paths, steps))
+        bridge_sl = valid_sl & (u_b < prob_sl)
+        bridge_tp = valid_tp & ~bridge_sl & (u_b < (prob_sl + prob_tp))
+        tp_mask = disc_tp | bridge_tp
+        sl_mask = disc_sl | bridge_sl
     else:
-        tp_mask = sub <= tp_price
-        sl_mask = sub >= sl_price
+        disc_tp = sub <= eff_tp
+        disc_sl = sub >= eff_sl
+        valid_sl = (p0 < eff_sl) & (p1 < eff_sl)
+        x0_sl = np.log(np.maximum(1e-6, eff_sl / p0))
+        x1_sl = np.log(np.maximum(1e-6, eff_sl / p1))
+        prob_sl = np.where(valid_sl, np.exp(-2.0 * x0_sl * x1_sl / max(1e-8, step_vol**2)), 0.0)
+
+        valid_tp = (p0 > eff_tp) & (p1 > eff_tp)
+        x0_tp = np.log(np.maximum(1e-6, p0 / eff_tp))
+        x1_tp = np.log(np.maximum(1e-6, p1 / eff_tp))
+        prob_tp = np.where(valid_tp, np.exp(-2.0 * x0_tp * x1_tp / max(1e-8, step_vol**2)), 0.0)
+
+        u_b = rng.uniform(0, 1, (n_paths, steps))
+        bridge_sl = valid_sl & (u_b < prob_sl)
+        bridge_tp = valid_tp & ~bridge_sl & (u_b < (prob_sl + prob_tp))
+        tp_mask = disc_tp | bridge_tp
+        sl_mask = disc_sl | bridge_sl
 
     tp_any = np.any(tp_mask, axis=1)
     sl_any = np.any(sl_mask, axis=1)
@@ -1500,6 +1549,12 @@ class SetupLifecycleManager:
         decided = len(hit_tp) + len(sl_touched)
         win_rate = round((len(hit_tp) / decided) * 100.0, 1) if decided > 0 else 0.0
 
+        long_exp = sum(float(x.get("recommended_lot") or x.get("lot") or 0.01) * 100.0 for x in active_running if str(x.get("direction")).upper() == "BUY")
+        short_exp = sum(float(x.get("recommended_lot") or x.get("lot") or 0.01) * 100.0 for x in active_running if str(x.get("direction")).upper() == "SELL")
+        net_delta_oz = round(long_exp - short_exp, 2)
+        gross_exp_oz = round(long_exp + short_exp, 2)
+        is_hedged_conflict = bool(long_exp > 0 and short_exp > 0)
+
         return {
             "live_price": round(float(live_price), 2) if live_price is not None else None,
             "active_setup": data.get("active_setup"),
@@ -1524,6 +1579,11 @@ class SetupLifecycleManager:
                 "net_realized_usd": round(tp_usd + sl_usd, 2),
                 "floating_r": flt_r,
                 "floating_usd": flt_usd,
+                "long_exposure_oz": round(long_exp, 2),
+                "short_exposure_oz": round(short_exp, 2),
+                "gross_exposure_oz": gross_exp_oz,
+                "net_delta_oz": net_delta_oz,
+                "is_hedged_conflict": is_hedged_conflict,
             }
         }
 
@@ -2413,15 +2473,40 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     rr_target = rr_base
     eff_sl_dist = round(barrier_sl_scale * atr_d1, 2)
 
-    # 3. 10,000-Path Causal Geometric Brownian Simulation (Horizon-Native Drift & Volatility)
+    # 3. 10,000-Path Causal Compensated Jump-Diffusion Simulation (Horizon-Native Drift & Volatility)
     rng = np.random.default_rng(42)
     dt = sim_horizon_days / float(steps)
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = current_price
     step_vol = (daily_sd_pct / 100.0) * math.sqrt(dt)
     drift_step = (mu_eff / 100.0) * dt
+
+    dir_sign = 1.0 if z_eff > 0 else (-1.0 if z_eff < 0 else 0.0)
+    p_up_jump = float(1.0 / (1.0 + np.exp(-0.45 * dir_sign * abs(float(z_eff))))) if dir_sign != 0.0 else 0.50
+    mean_up_jump = 0.0065
+    mean_down_jump = 0.0065
+    eta1 = 1.0 / mean_up_jump
+    eta2 = 1.0 / mean_down_jump
+    kappa_j = (p_up_jump * eta1 / max(1.0001, eta1 - 1.0)) + ((1.0 - p_up_jump) * eta2 / (eta2 + 1.0)) - 1.0
+    lambda_step = 0.20 * dt
+
     z_mat = rng.normal(0, 1, (n_paths, steps))
-    paths[:, 1:] = current_price * np.exp(np.cumsum((drift_step - 0.5 * step_vol**2) + step_vol * z_mat, axis=1))
+    n_jumps = rng.poisson(lambda_step, (n_paths, steps))
+    max_k = int(np.max(n_jumps))
+    jump_rets = np.zeros((n_paths, steps))
+    if max_k > 0:
+        u_j = rng.uniform(0, 1, (n_paths, steps, max_k))
+        up_m = u_j < p_up_jump
+        e_up = rng.exponential(1.0 / eta1, (n_paths, steps, max_k))
+        e_dn = rng.exponential(1.0 / eta2, (n_paths, steps, max_k))
+        j_vals = np.where(up_m, e_up, -e_dn)
+        k_indices = np.arange(max_k)[None, None, :]
+        active_k = k_indices < n_jumps[:, :, None]
+        jump_rets = np.sum(j_vals * active_k, axis=2)
+
+    diff_rets = (drift_step - 0.5 * (step_vol ** 2) - lambda_step * kappa_j) + step_vol * z_mat
+    log_rets = diff_rets + jump_rets
+    paths[:, 1:] = current_price * np.exp(np.cumsum(log_rets, axis=1))
     p5 = np.percentile(paths, 5, axis=0)
     p25 = np.percentile(paths, 25, axis=0)
     p50 = np.percentile(paths, 50, axis=0)
@@ -2477,12 +2562,51 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     tp_d = abs(tp1_val - mid_entry)
 
     sub = paths[:, 1:]
+    p0 = paths[:, :-1]
+    p1 = paths[:, 1:]
+    spread_usd = 0.35
+    var_step = max(1e-8, step_vol ** 2)
+
     if is_bullish is True:
-        tp_m = sub >= tp1_val
-        sl_m = sub <= sl_val
+        eff_tp = tp1_val + 0.5 * spread_usd
+        eff_sl = sl_val + 0.5 * spread_usd
+        disc_tp = p1 >= eff_tp
+        disc_sl = p1 <= eff_sl
+        valid_sl = (p0 > eff_sl) & (p1 > eff_sl)
+        x0_sl = np.log(np.maximum(1e-6, p0 / eff_sl))
+        x1_sl = np.log(np.maximum(1e-6, p1 / eff_sl))
+        prob_sl = np.where(valid_sl, np.exp(-2.0 * x0_sl * x1_sl / var_step), 0.0)
+
+        valid_tp = (p0 < eff_tp) & (p1 < eff_tp)
+        x0_tp = np.log(np.maximum(1e-6, eff_tp / p0))
+        x1_tp = np.log(np.maximum(1e-6, eff_tp / p1))
+        prob_tp = np.where(valid_tp, np.exp(-2.0 * x0_tp * x1_tp / var_step), 0.0)
+
+        u_b = rng.uniform(0, 1, (n_paths, steps))
+        bridge_sl = valid_sl & (u_b < prob_sl)
+        bridge_tp = valid_tp & ~bridge_sl & (u_b < (prob_sl + prob_tp))
+        tp_m = disc_tp | bridge_tp
+        sl_m = disc_sl | bridge_sl
     elif is_bullish is False:
-        tp_m = sub <= tp1_val
-        sl_m = sub >= sl_val
+        eff_tp = tp1_val - 0.5 * spread_usd
+        eff_sl = sl_val - 0.5 * spread_usd
+        disc_tp = p1 <= eff_tp
+        disc_sl = p1 >= eff_sl
+        valid_sl = (p0 < eff_sl) & (p1 < eff_sl)
+        x0_sl = np.log(np.maximum(1e-6, eff_sl / p0))
+        x1_sl = np.log(np.maximum(1e-6, eff_sl / p1))
+        prob_sl = np.where(valid_sl, np.exp(-2.0 * x0_sl * x1_sl / var_step), 0.0)
+
+        valid_tp = (p0 > eff_tp) & (p1 > eff_tp)
+        x0_tp = np.log(np.maximum(1e-6, p0 / eff_tp))
+        x1_tp = np.log(np.maximum(1e-6, p1 / eff_tp))
+        prob_tp = np.where(valid_tp, np.exp(-2.0 * x0_tp * x1_tp / var_step), 0.0)
+
+        u_b = rng.uniform(0, 1, (n_paths, steps))
+        bridge_sl = valid_sl & (u_b < prob_sl)
+        bridge_tp = valid_tp & ~bridge_sl & (u_b < (prob_sl + prob_tp))
+        tp_m = disc_tp | bridge_tp
+        sl_m = disc_sl | bridge_sl
     else:
         tp_m = np.zeros((n_paths, steps), dtype=bool)
         sl_m = np.zeros((n_paths, steps), dtype=bool)
@@ -2514,11 +2638,20 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     neg_r = abs(realized_r_all[realized_r_all < 0])
     pf = round(float(np.sum(pos_r) / max(1e-6, np.sum(neg_r))), 2)
 
-    b_ratio = float(np.mean(pos_r) / max(1e-6, np.mean(neg_r))) if len(pos_r) and len(neg_r) else max(0.1, rr)
-    p = win_rate / 100.0
-    q = 1.0 - p
-    kelly = max(0.0, (p * b_ratio - q) / max(0.1, b_ratio))
+    # Continuous 4th-Moment Kelly Criterion
+    mu_r = float(np.mean(realized_r_all))
+    sigma_r = float(np.std(realized_r_all))
+    r_diff = realized_r_all - mu_r
+    skew_r = float(np.mean(r_diff ** 3) / max(1e-6, sigma_r ** 3))
+    kurt_r = float(np.mean(r_diff ** 4) / max(1e-6, sigma_r ** 4))
+
+    if mu_r > 0 and sigma_r > 1e-4:
+        raw_kelly = (mu_r / (sigma_r ** 2)) + (skew_r * (mu_r ** 2) / (2.0 * (sigma_r ** 3))) - ((kurt_r - 3.0) * (mu_r ** 3) / (6.0 * (sigma_r ** 4)))
+        kelly = max(0.0, float(raw_kelly))
+    else:
+        kelly = 0.0
     quarter_kelly_pct = round(min(2.0, kelly * 25.0), 2)
+    b_ratio = float(np.mean(pos_r) / max(1e-6, np.mean(neg_r))) if len(pos_r) and len(neg_r) else max(0.1, rr)
     p_breakeven = round(100.0 / (1.0 + max(0.1, b_ratio)), 1)
 
     survival_curve = []
@@ -2557,14 +2690,33 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     har_calm_ok = rv5_ann <= 1.15 * max(1.0, rv22_ann)
     ev_ok = (ev_r > 0.05) and (win_rate >= 50.0)
 
-    macro_score = 25 if (drift_ok and exhaustion_ok) else (18 if abs(z_eff) >= 0.45 else 10)
-    mc_prob_score = 25 if (ev_r >= 0.15 and win_rate >= 55.0) else (20 if ev_ok else 10)
-    vol_score = 25 if (vrp_ok and har_calm_ok) else (17 if vrp_ok else 10)
-    cross_score = 25 if (vpin_ok and daily_ols["f_p_val"] < 0.05) else 15
-    total_confluence = macro_score + mc_prob_score + vol_score + cross_score
+    # Continuous Sigmoid Confluence Scoring (zero cliff edge)
+    # 1. Macro Pillar [5.0 - 25.0]
+    s_z = 1.0 / (1.0 + math.exp(-4.0 * (abs(z_eff) - 0.60)))
+    s_ex = 1.0 if exhaustion_ok else 0.30
+    macro_score = round(5.0 + 20.0 * s_z * s_ex, 1)
+
+    # 2. Monte Carlo First-Passage Pillar [5.0 - 25.0]
+    s_ev = 1.0 / (1.0 + math.exp(-15.0 * (ev_r - 0.08)))
+    s_wr = 1.0 / (1.0 + math.exp(-0.25 * (win_rate - 50.0)))
+    mc_prob_score = round(5.0 + 20.0 * (0.60 * s_ev + 0.40 * s_wr), 1)
+
+    # 3. Volatility Structure Pillar [5.0 - 25.0]
+    s_vrp = 1.0 / (1.0 + math.exp(-1.5 * vrp_ann))
+    har_ratio = rv5_ann / max(1.0, rv22_ann)
+    s_har = 1.0 / (1.0 + math.exp(4.0 * (har_ratio - 1.15)))
+    vol_score = round(5.0 + 20.0 * (0.50 * s_vrp + 0.50 * s_har), 1)
+
+    # 4. Microstructure & Cross-Asset Pillar [5.0 - 25.0]
+    s_vpin = 1.0 / (1.0 + math.exp(12.0 * (vpin_now - 0.65)))
+    f_stat = float(daily_ols.get("f_stat", 4.0)) if isinstance(daily_ols, dict) else 4.0
+    s_f = 1.0 / (1.0 + math.exp(-1.0 * (f_stat - 4.0)))
+    cross_score = round(5.0 + 20.0 * (0.60 * s_vpin + 0.40 * s_f), 1)
+
+    total_confluence = round(macro_score + mc_prob_score + vol_score + cross_score, 1)
 
     is_a_star = bool(drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0))
-    grade = f"A* GRADE ({conviction_str})" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70 else "C-GRADE (NO EDGE / STAND ASIDE)")
+    grade = f"A* GRADE ({conviction_str})" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70.0 else "C-GRADE (NO EDGE / STAND ASIDE)")
 
     risk_dist_dollars = max(1.0, abs(mid_entry - sl_val))
     target_risk_usd = round(20.0 * vol_target_scalar * (quarter_kelly_pct / 2.0), 2)
@@ -3230,6 +3382,8 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     mean_down_jump = 0.0065
     eta1 = 1.0 / mean_up_jump
     eta2 = 1.0 / mean_down_jump
+    kappa_j = (p_up * eta1 / max(1.0001, eta1 - 1.0)) + ((1.0 - p_up) * eta2 / (eta2 + 1.0)) - 1.0
+    step_vols = np.zeros((n_paths, steps))
 
     # RMS-normalize intraday burst weights so integrated path variance matches target daily vol
     t_idx = np.arange(1, steps + 1, dtype=float)
@@ -3257,7 +3411,8 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         vol_paths[:, t] = sig_cur
 
         step_vol = (sig_cur / math.sqrt(252.0)) * base_blend_ratio * math.sqrt(dt) * float(norm_decay[t - 1])
-        diff_ret = -0.5 * (step_vol ** 2) + step_vol * z_s
+        step_vols[:, t - 1] = step_vol
+        diff_ret = -0.5 * (step_vol ** 2) - lambda_t * kappa_j + step_vol * z_s
 
         n_jumps = rng.poisson(lambda_t, n_paths)
         max_k = int(np.max(n_jumps))
@@ -3284,14 +3439,56 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     sub = paths[:, 1:]
 
     def _fp_eval(tp_lvl, sl_lvl, is_buy_dir):
-        tp_m = (sub >= tp_lvl) if is_buy_dir else (sub <= tp_lvl)
-        sl_m = (sub <= sl_lvl) if is_buy_dir else (sub >= sl_lvl)
+        p0 = paths[:, :-1]
+        p1 = paths[:, 1:]
+        spread_usd = 0.35
+        eff_tp = (tp_lvl + 0.5 * spread_usd) if is_buy_dir else (tp_lvl - 0.5 * spread_usd)
+        eff_sl = (sl_lvl + 0.5 * spread_usd) if is_buy_dir else (sl_lvl - 0.5 * spread_usd)
+        var_mat = np.maximum(1e-8, step_vols ** 2)
+
+        if is_buy_dir:
+            disc_tp = p1 >= eff_tp
+            disc_sl = p1 <= eff_sl
+            valid_sl = (p0 > eff_sl) & (p1 > eff_sl)
+            x0_sl = np.log(np.maximum(1e-6, p0 / eff_sl))
+            x1_sl = np.log(np.maximum(1e-6, p1 / eff_sl))
+            prob_sl = np.where(valid_sl, np.exp(-2.0 * x0_sl * x1_sl / var_mat), 0.0)
+
+            valid_tp = (p0 < eff_tp) & (p1 < eff_tp)
+            x0_tp = np.log(np.maximum(1e-6, eff_tp / p0))
+            x1_tp = np.log(np.maximum(1e-6, eff_tp / p1))
+            prob_tp = np.where(valid_tp, np.exp(-2.0 * x0_tp * x1_tp / var_mat), 0.0)
+
+            u_b = rng.uniform(0, 1, (n_paths, steps))
+            bridge_sl = valid_sl & (u_b < prob_sl)
+            bridge_tp = valid_tp & ~bridge_sl & (u_b < (prob_sl + prob_tp))
+            tp_m = disc_tp | bridge_tp
+            sl_m = disc_sl | bridge_sl
+        else:
+            disc_tp = p1 <= eff_tp
+            disc_sl = p1 >= eff_sl
+            valid_sl = (p0 < eff_sl) & (p1 < eff_sl)
+            x0_sl = np.log(np.maximum(1e-6, eff_sl / p0))
+            x1_sl = np.log(np.maximum(1e-6, eff_sl / p1))
+            prob_sl = np.where(valid_sl, np.exp(-2.0 * x0_sl * x1_sl / var_mat), 0.0)
+
+            valid_tp = (p0 > eff_tp) & (p1 > eff_tp)
+            x0_tp = np.log(np.maximum(1e-6, p0 / eff_tp))
+            x1_tp = np.log(np.maximum(1e-6, p1 / eff_tp))
+            prob_tp = np.where(valid_tp, np.exp(-2.0 * x0_tp * x1_tp / var_mat), 0.0)
+
+            u_b = rng.uniform(0, 1, (n_paths, steps))
+            bridge_sl = valid_sl & (u_b < prob_sl)
+            bridge_tp = valid_tp & ~bridge_sl & (u_b < (prob_sl + prob_tp))
+            tp_m = disc_tp | bridge_tp
+            sl_m = disc_sl | bridge_sl
+
         tp_any = np.any(tp_m, axis=1)
         sl_any = np.any(sl_m, axis=1)
         tau_tp = np.where(tp_any, np.argmax(tp_m, axis=1) + 1, steps + 99)
         tau_sl = np.where(sl_any, np.argmax(sl_m, axis=1) + 1, steps + 99)
         win_m = tp_any & (tau_tp < tau_sl)
-        loss_m = sl_any & (tau_sl < tau_tp)
+        loss_m = sl_any & (tau_sl <= tau_tp)
         p_prof = round(float(np.mean(win_m) * 100.0), 1)
         p_los = round(float(np.mean(loss_m) * 100.0), 1)
         decided = int(np.sum(win_m)) + int(np.sum(loss_m))

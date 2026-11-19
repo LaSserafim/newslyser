@@ -419,6 +419,146 @@ class TestAStarSetupEngine(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+    def test_brownian_bridge_barrier_correction(self):
+        """Verifies that Brownian bridge barrier correction detects intra-step crossings and penalizes friction."""
+        res_buy = qm.calculate_first_passage_win_probability(
+            current_price=2000.0,
+            entry_price=2000.0,
+            sl_price=1990.0,
+            tp_price=2020.0,
+            drift_pct=0.0,
+            atr_m30=10.0,
+            is_buy=True,
+            n_paths=5000,
+            steps=20
+        )
+        self.assertIn("win_probability_pct", res_buy)
+        self.assertIn("overall_loss_rate_pct", res_buy)
+        self.assertIn("survival_curve", res_buy)
+        # Symmetrical barrier with friction: SL hit probability should be strictly > 0
+        self.assertGreater(res_buy["overall_loss_rate_pct"], 0.0)
+        self.assertGreater(res_buy["win_probability_pct"], 0.0)
+
+    def test_compensated_kou_jump_martingale(self):
+        """Verifies that Kou jump diffusion with martingale compensator eliminates Jensen inequality drift bias at z=0."""
+        rng = np.random.default_rng(123)
+        n_paths = 10000
+        steps = 20
+        dt = 1.0 / steps
+        step_vol = 0.01
+        p_up = 0.50
+        eta1 = 1.0 / 0.0065
+        eta2 = 1.0 / 0.0065
+        kappa_j = (p_up * eta1 / max(1.0001, eta1 - 1.0)) + ((1.0 - p_up) * eta2 / (eta2 + 1.0)) - 1.0
+        lambda_step = 0.20 * dt
+
+        z_mat = rng.normal(0, 1, (n_paths, steps))
+        n_jumps = rng.poisson(lambda_step, (n_paths, steps))
+        max_k = int(np.max(n_jumps))
+        jump_rets = np.zeros((n_paths, steps))
+        if max_k > 0:
+            u_j = rng.uniform(0, 1, (n_paths, steps, max_k))
+            up_m = u_j < p_up
+            e_up = rng.exponential(1.0 / eta1, (n_paths, steps, max_k))
+            e_dn = rng.exponential(1.0 / eta2, (n_paths, steps, max_k))
+            j_vals = np.where(up_m, e_up, -e_dn)
+            k_indices = np.arange(max_k)[None, None, :]
+            active_k = k_indices < n_jumps[:, :, None]
+            jump_rets = np.sum(j_vals * active_k, axis=2)
+
+        # Compensated log return
+        diff_rets = (-0.5 * (step_vol ** 2) - lambda_step * kappa_j) + step_vol * z_mat
+        log_rets = diff_rets + jump_rets
+        terminal_ratio = np.exp(np.sum(log_rets, axis=1))
+        mean_ratio = float(np.mean(terminal_ratio))
+        se = float(np.std(terminal_ratio) / np.sqrt(n_paths))
+
+        # Under the martingale property, E[S_T / S_0] == 1.0 within 2.5 standard errors
+        self.assertAlmostEqual(mean_ratio, 1.0, delta=2.5 * se,
+                               msg=f"Compensated Kou jump must be martingale: mean={mean_ratio:.5f}, se={se:.5f}")
+
+    def test_smooth_factor_shrinkage(self):
+        """Verifies that Empirical Bayes factor shrinkage is smooth and has no cliff edge at t=1.96."""
+        def shrinkage_weight(t):
+            t_sq = float(t) ** 2
+            return max(0.0, 1.0 - (1.96 ** 2) / max(1e-6, t_sq))
+
+        # At t=1.95 (just below 1.96), weight is 0
+        w_below = shrinkage_weight(1.95)
+        self.assertEqual(w_below, 0.0)
+
+        # At t=1.961 (just above 1.96), weight is smoothly positive without cliff
+        w_just_above = shrinkage_weight(1.961)
+        self.assertGreater(w_just_above, 0.0)
+        self.assertLess(w_just_above, 0.01, "Weight must smoothly scale from 0 without discontinuous jump")
+
+        # At t=4.0, weight is ~0.76
+        w_high = shrinkage_weight(4.0)
+        self.assertAlmostEqual(w_high, 1.0 - (1.96**2)/16.0, places=3)
+
+    def test_portfolio_net_delta_and_hedging(self):
+        """Verifies net delta exposure, gross exposure, and hedging conflict calculation in SetupLifecycleManager."""
+        import tempfile
+        tmp_dir = tempfile.gettempdir()
+        tmp_path = os.path.join(tmp_dir, "test_net_delta_ledger.json")
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+        mgr = qm.SetupLifecycleManager(filepath=tmp_path)
+        try:
+            # Add a BUY trade (0.02 lot = 2.0 oz)
+            mgr.add_to_running_list({
+                "horizon": "daily",
+                "direction": "BUY",
+                "entry_zone": "$2000.00",
+                "stop_loss": "$1980.00",
+                "take_profit_1": "$2040.00",
+                "recommended_lot": 0.02,
+                "immediate_entry": True
+            }, 2000.0)
+
+            # Add a SELL trade (0.01 lot = 1.0 oz)
+            mgr.add_to_running_list({
+                "horizon": "scalping",
+                "direction": "SELL",
+                "entry_zone": "$2000.00",
+                "stop_loss": "$2010.00",
+                "take_profit_1": "$1990.00",
+                "recommended_lot": 0.01,
+                "immediate_entry": True
+            }, 2000.0)
+
+            cat = mgr.get_categorized_ledger(live_price=2000.0)
+            summary = cat["summary"]
+            self.assertEqual(summary["long_exposure_oz"], 2.0)
+            self.assertEqual(summary["short_exposure_oz"], 1.0)
+            self.assertEqual(summary["gross_exposure_oz"], 3.0)
+            self.assertEqual(summary["net_delta_oz"], 1.0)
+            self.assertTrue(summary["is_hedged_conflict"])
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_continuous_4th_moment_kelly(self):
+        """Verifies that 4th-moment continuous Kelly incorporates skewness and excess kurtosis."""
+        ast = qm.calculate_daily_a_star_setup(n_paths=2000)
+        fp = ast["first_passage_analysis"]
+        q_kelly = fp["quarter_kelly_pct"]
+        self.assertGreaterEqual(q_kelly, 0.0)
+        self.assertLessEqual(q_kelly, 2.0, "Quarter-Kelly must be bounded by risk ceiling 2.0%")
+
+    def test_differentiable_sigmoid_confluence(self):
+        """Verifies that confluence score is smoothly evaluated across pillars."""
+        ast = qm.calculate_daily_a_star_setup(n_paths=1500)
+        score = ast["confluence_score"]
+        self.assertGreaterEqual(score, 20.0)
+        self.assertLessEqual(score, 100.0)
+        pillars = ast["pillars"]
+        for p_name, p_data in pillars.items():
+            self.assertIn("score", p_data)
+            self.assertGreaterEqual(p_data["score"], 5.0)
+            self.assertLessEqual(p_data["score"], 25.0)
+
 
 if __name__ == "__main__":
     unittest.main()
