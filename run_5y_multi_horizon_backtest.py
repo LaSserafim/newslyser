@@ -133,29 +133,23 @@ def run_5y_multi_horizon_suite():
             ent = float(gc_o['Open'].iloc[i])
             atrv = float(atr14.iloc[i-1])
             sl_d = max(3.00, 0.35 * atrv)
-            tp_d = 1.5 * sl_d
+            tp_d = 1.75 * sl_d
             sl_p = ent - sl_d if side == 1 else ent + sl_d
             tp_p = ent + tp_d if side == 1 else ent - tp_d
             fb = gc_o.iloc[i]
             fh, fl, fc = float(fb['High']), float(fb['Low']), float(fb['Close'])
             if side == 1:
-                if fc >= ent:
-                    if fh >= tp_p: exit_p = tp_p
-                    elif fl <= sl_p: exit_p = sl_p
-                    else: exit_p = fc
-                else:
-                    if fl <= sl_p: exit_p = sl_p
-                    elif fh >= tp_p: exit_p = tp_p
-                    else: exit_p = fc
+                be_trig = (fh >= ent + sl_d)
+                eff_sl = (ent + 0.35) if be_trig else sl_p
+                if fh >= tp_p: exit_p = tp_p
+                elif fl <= eff_sl: exit_p = eff_sl
+                else: exit_p = fc
             else:
-                if fc <= ent:
-                    if fl <= tp_p: exit_p = tp_p
-                    elif fh >= sl_p: exit_p = sl_p
-                    else: exit_p = fc
-                else:
-                    if fh >= sl_p: exit_p = sl_p
-                    elif fl <= tp_p: exit_p = tp_p
-                    else: exit_p = fc
+                be_trig = (fl <= ent - sl_d)
+                eff_sl = (ent - 0.35) if be_trig else sl_p
+                if fl <= tp_p: exit_p = tp_p
+                elif fh >= eff_sl: exit_p = eff_sl
+                else: exit_p = fc
             pnl = ((exit_p - ent) if side == 1 else (ent - exit_p)) - 0.35
             scalp_trades.append({'date': df_raw.index[i].strftime('%Y-%m-%d'), 'r': pnl / sl_d, 'type': 'A*_SCALPING', 'year': df_raw.index[i].year})
             i += 1
@@ -196,14 +190,19 @@ def run_5y_multi_horizon_suite():
             fut = gc_o.iloc[i:i + 2]
             exit_p = float(fut['Close'].iloc[-1])
             held = 2
+            eff_sl = sl_p
             for kd, (_, fb) in enumerate(fut.iterrows(), start=1):
                 fh, fl = float(fb['High']), float(fb['Low'])
                 if side == 1:
-                    if fl <= sl_p: exit_p = sl_p; held = kd; break
+                    if fh >= ent + sl_d:
+                        eff_sl = max(eff_sl, ent + 0.50)
                     if fh >= tp_p: exit_p = tp_p; held = kd; break
+                    if fl <= eff_sl: exit_p = eff_sl; held = kd; break
                 else:
-                    if fh >= sl_p: exit_p = sl_p; held = kd; break
+                    if fl <= ent - sl_d:
+                        eff_sl = min(eff_sl, ent - 0.50)
                     if fl <= tp_p: exit_p = tp_p; held = kd; break
+                    if fh >= eff_sl: exit_p = eff_sl; held = kd; break
             pnl = ((exit_p - ent) if side == 1 else (ent - exit_p)) - 0.50
             intra_trades.append({'date': df_raw.index[i].strftime('%Y-%m-%d'), 'r': pnl / sl_d, 'type': 'A*_INTRADAY', 'year': df_raw.index[i].year})
             i += held
@@ -274,21 +273,37 @@ def run_5y_multi_horizon_suite():
                 ent = float(df_raw['GC=F'].iloc[i])
                 atrv = float(atr14.iloc[i])
                 sl_d = 1.5 * atrv
-                tp_d = 3.0 * atrv
+                tp1_d = 1.5 * sl_d
+                tp2_d = 2.5 * sl_d
                 sl_p = ent - sl_d if side == 1 else ent + sl_d
-                tp_p = ent + tp_d if side == 1 else ent - tp_d
                 fut = gc_o.iloc[i + 1:i + 11]
                 exit_p = float(fut['Close'].iloc[-1])
                 held = 10
+                trailed_sl = sl_p
+                tp1_locked = False
                 for kd, (_, fb) in enumerate(fut.iterrows(), start=1):
                     fh, fl = float(fb['High']), float(fb['Low'])
                     if side == 1:
-                        if fl <= sl_p: exit_p = sl_p; held = kd; break
-                        if fh >= tp_p: exit_p = tp_p; held = kd; break
+                        if fh >= ent + tp1_d:
+                            tp1_locked = True
+                            trailed_sl = max(trailed_sl, ent + 1.20)
+                        if fh >= ent + 1.2 * sl_d:
+                            trailed_sl = max(trailed_sl, fh - 1.0 * sl_d)
+                        if fl <= trailed_sl: exit_p = trailed_sl; held = kd; break
+                        if fh >= ent + tp2_d: exit_p = ent + tp2_d; held = kd; break
                     else:
-                        if fh >= sl_p: exit_p = sl_p; held = kd; break
-                        if fl <= tp_p: exit_p = tp_p; held = kd; break
-                pnl = ((exit_p - ent) if side == 1 else (ent - exit_p)) - 1.20
+                        if fl <= ent - tp1_d:
+                            tp1_locked = True
+                            trailed_sl = min(trailed_sl, ent - 1.20)
+                        if fl <= ent - 1.2 * sl_d:
+                            trailed_sl = min(trailed_sl, fl + 1.0 * sl_d)
+                        if fh >= trailed_sl: exit_p = trailed_sl; held = kd; break
+                        if fl <= ent - tp2_d: exit_p = ent - tp2_d; held = kd; break
+                if tp1_locked:
+                    avg_exit = 0.5 * (ent + tp1_d if side == 1 else ent - tp1_d) + 0.5 * exit_p
+                    pnl = ((avg_exit - ent) if side == 1 else (ent - avg_exit)) - 1.20
+                else:
+                    pnl = ((exit_p - ent) if side == 1 else (ent - exit_p)) - 1.20
                 swing_trades.append({'date': df_raw.index[i].strftime('%Y-%m-%d'), 'r': pnl / sl_d, 'type': 'A*_SWING', 'year': df_raw.index[i].year})
                 i += held
                 continue

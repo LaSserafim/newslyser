@@ -1423,6 +1423,12 @@ class SetupLifecycleManager:
             active["floating_pnl_usd"] = round(delta * lot * 100.0, 2)
             active["floating_r"] = round(delta / risk_dist, 2)
 
+            # Dynamic Breakeven Shield at +1.0R floating gain
+            if active["status"] == "TRIGGERED_RUNNING" and active["floating_r"] >= 1.0 and active.get("trailed_sl") is None:
+                be_sl = round(fill_p + 0.35 if direction == "BUY" else fill_p - 0.35, 2)
+                active["trailed_sl"] = be_sl
+                active["resolution"] = f"Mark-to-market reached +1.0R. Dynamic Breakeven Shield engaged at ${be_sl:.2f}."
+
             sl_hit = (p_low <= sl) if direction == "BUY" else (p_high >= sl)
             tp1_hit = (p_high >= tp1) if direction == "BUY" else (p_low <= tp1)
             tp2_hit = (p_high >= tp2) if direction == "BUY" else (p_low <= tp2)
@@ -2378,13 +2384,17 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         z_eff = z_m15_1h if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else z_20
         mu_eff = mu_m15_post if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else mu_daily_post
         z_label = "z_m15(1H)" if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else "z20"
-        drift_ok = (abs(z_eff) >= 0.85)
-        counter_d1 = (z_eff * z_20 < 0.0)
+        # Counter-trend guard: minor pullbacks (<2.0σ) against D1 are blocked; extreme squeezes (>=2.0σ) permitted as thrust scalps
+        counter_d1 = (z_eff * z_20 < 0.0) if (abs(z_20) >= 0.50 and abs(z_eff) < 2.0) else False
+        if counter_d1:
+            exhaustion_ok = False
+            exhaustion_reason = f"COUNTER-TREND SCALP AGAINST D1 MACRO (M15 {z_eff:+.2f}σ vs D1 {z_20:+.2f}σ) — BLOCKED"
+        drift_ok = (abs(z_eff) >= 0.85) and (not counter_d1)
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = (vpin_now < 0.60)
         conviction_str = (
-            f"COUNTER-TREND SCALP {'BUY' if z_eff > 0 else 'SELL'} MOMENTUM (1:1.5 RR — OPPOSING D1 MACRO)"
-            if counter_d1 else "SCALPING MOMENTUM (1:1.5 RR QUICK HARVEST)"
+            f"EXTREME LIVE SQUEEZE {'BUY' if z_eff > 0 else 'SELL'} MOMENTUM (1:1.75 RR THRUST)"
+            if (z_eff * z_20 < 0.0 and abs(z_eff) >= 2.0) else "SCALPING MOMENTUM (1:1.75 RR QUICK HARVEST)"
         )
         timeframe_label = f"Scalping Horizon (Live M5/M15) + {n_paths:,}-Path SDE"
         exec_tf_label = "Scalping Horizon (0.25 / 0.38 / 0.50 ATR_D1)"
@@ -2393,18 +2403,22 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         steps = 16
         barrier_sl_scale = 0.50
         rr_base = 2.0
-        # Intraday uses LIVE H1 12H drift + blocks short-squeeze conflict against M15 1H
+        # Intraday uses LIVE H1 12H drift + blocks counter-trend and short-squeeze conflict
         z_eff = z_h1_12h if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else z_20
         mu_eff = mu_h1_post if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else mu_daily_post
         z_label = "z_h1(12H)" if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else "z20"
+        counter_d1 = (z_eff * z_20 < 0.0) if abs(z_20) >= 0.50 else False
         squeeze_conflict = (z_eff < 0 and z_m15_1h >= 0.75) or (z_eff > 0 and z_m15_1h <= -0.75)
-        if squeeze_conflict:
+        if counter_d1:
+            exhaustion_ok = False
+            exhaustion_reason = f"INTRADAY COUNTER-TREND (H1 {z_eff:+.2f}σ OPPOSES D1 {z_20:+.2f}σ) — BLOCKED"
+        elif squeeze_conflict:
             exhaustion_ok = False
             exhaustion_reason = f"INTRADAY SQUEEZE CONFLICT (H1 {z_eff:+.2f}σ vs M15 {z_m15_1h:+.2f}σ)"
-        drift_ok = (abs(z_eff) >= 0.75) and (not squeeze_conflict)
+        drift_ok = (abs(z_eff) >= 0.75) and (not squeeze_conflict) and (not counter_d1)
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = (vpin_now < 0.65)
-        conviction_str = "INTRADAY MOMENTUM (1:2.0 RR SESSION RUNNER)"
+        conviction_str = "INTRADAY MOMENTUM (1:2.0 RR SESSION RUNNER // ZERO COUNTER-TREND)"
         timeframe_label = f"Intraday Session (Live H1/H4) + {n_paths:,}-Path SDE"
         exec_tf_label = "Intraday Horizon (0.50 / 1.0 / 1.5 ATR_D1)"
     elif h_mode == "swing":
@@ -2417,10 +2431,14 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         z_label = "z60"
         sma200_ok = True if sma200_val <= 0 else ((live_ref_px >= sma200_val) if z_eff > 0 else (live_ref_px <= sma200_val))
         squeeze_against = (z_eff < 0 and z_m15_1h >= 1.50) or (z_eff > 0 and z_m15_1h <= -1.50)
-        if squeeze_against:
+        real_yield_surge = (tips_real_proxy > 2.20 and z_eff > 0)
+        if real_yield_surge:
+            exhaustion_ok = False
+            exhaustion_reason = f"REAL YIELD SURGE (TIPS {tips_real_proxy:+.2f}%) BLOCKS GOLD SWING LONG"
+        elif squeeze_against:
             exhaustion_ok = False
             exhaustion_reason = f"LIVE M15 SQUEEZE AGAINST SWING ({z_m15_1h:+.2f}σ) — WAIT FOR PULLBACK"
-        drift_ok = (abs(z_eff) >= 0.70) and (vrp_ann > 0.0) and (z_eff * dxy_z < 0.20) and sma200_ok
+        drift_ok = (abs(z_eff) >= 0.70) and (vrp_ann > 0.0) and (z_eff * dxy_z < 0.20) and sma200_ok and (not real_yield_surge)
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = (vpin_now < 0.75)
         conviction_str = "SWING MACRO (1:2.0 RR CYCLE RUNNER)"

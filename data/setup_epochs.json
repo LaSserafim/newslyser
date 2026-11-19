@@ -4,12 +4,12 @@
     "expires_at": 1795068252
   },
   "intraday": {
-    "created_at": 1795062849,
-    "expires_at": 1795077249
+    "created_at": 1795089784,
+    "expires_at": 1795104184
   },
   "scalping": {
-    "created_at": 1795074350,
-    "expires_at": 1795077950
+    "created_at": 1795089781,
+    "expires_at": 1795093381
   },
   "swing": {
     "created_at": 1795005633,
