@@ -13,6 +13,10 @@ Features:
 Strictly empirical. Calibrated econometric formulations. Zero fake data.
 """
 
+import os
+for _k in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]:
+    os.environ.pop(_k, None)
+
 import json
 import math
 import numpy as np
@@ -344,11 +348,13 @@ def fetch_live_prenews_overlay(ttl_seconds=10.0):
     out = {}
     try:
         cmd = [
-            "curl", "-sf", "-m", "2", "-X", "POST", "https://scanner.tradingview.com/global/scan",
+            "curl", "--noproxy", "*", "-sf", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
             "-H", "Content-Type: application/json",
+            "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
             "-d", json.dumps({"symbols": {"tickers": tickers}, "columns": ["close", "change"]})
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        clean_env = {k: v for k, v in os.environ.items() if "proxy" not in k.lower()}
+        res = subprocess.run(cmd, capture_output=True, text=True, env=clean_env)
         if res.returncode == 0 and res.stdout:
             for row in json.loads(res.stdout).get("data", []):
                 s = row.get("s")
@@ -568,19 +574,170 @@ def calculate_pre_news_bayesian_model(tomorrow_meta, current_price=4069.40, atr_
     }
 # -------------------------------------------------------------
 # -------------------------------------------------------------
+# MULTI-ASSET SPECIFICATIONS & DEDICATED CALIBRATION PROFILES
+# -------------------------------------------------------------
+INSTRUMENT_SPECS = {
+    "XAUUSD": {
+        "symbol": "XAUUSD",
+        "name": "Gold Spot / US Dollar",
+        "ticker": "FX_IDC:XAUUSD",
+        "contract": 100.0,
+        "pip": 0.10,
+        "pip_value_001": 1.00,
+        "spread_usd": 0.35,
+        "price_decimals": 2,
+        "min_risk_floor": 0.50,
+        "kou_mean_up_jump": 0.0065,
+        "kou_mean_down_jump": 0.0065,
+        "kou_lambda_daily": 0.20,
+        "kou_p_up_jump_coeff": 0.45,
+        "default_price": 4036.17,
+        "default_atr_m30": 12.50,
+        "default_atr_d1": 35.0,
+        "daily_sd_pct": 1.15,
+        "unit": "oz",
+        "margin_lev100_001": 37.50,
+    },
+    "EURUSD": {
+        "symbol": "EURUSD",
+        "name": "Euro / US Dollar",
+        "ticker": "FX_IDC:EURUSD",
+        "contract": 100000.0,
+        "pip": 0.0001,
+        "pip_value_001": 0.10,
+        "spread_usd": 0.00003,  # 0.3 pips ECN raw half-spread friction
+        "price_decimals": 5,
+        "min_risk_floor": 0.0005,  # 5 pips minimum risk floor
+        "kou_mean_up_jump": 0.0020,
+        "kou_mean_down_jump": 0.0020,
+        "kou_lambda_daily": 0.10,
+        "kou_p_up_jump_coeff": 0.30,
+        "default_price": 1.08500,
+        "default_atr_m30": 0.0012,  # 12 pips M30 ATR
+        "default_atr_d1": 0.0065,   # 65 pips D1 ATR
+        "daily_sd_pct": 0.45,       # ~7.1% annualized realized volatility
+        "unit": "EUR",
+        "margin_lev100_001": 10.85,
+    },
+    "GBPUSD": {
+        "symbol": "GBPUSD",
+        "name": "British Pound / US Dollar",
+        "ticker": "FX_IDC:GBPUSD",
+        "contract": 100000.0,
+        "pip": 0.0001,
+        "pip_value_001": 0.10,
+        "spread_usd": 0.00004,
+        "price_decimals": 5,
+        "min_risk_floor": 0.0005,
+        "kou_mean_up_jump": 0.0025,
+        "kou_mean_down_jump": 0.0025,
+        "kou_lambda_daily": 0.12,
+        "kou_p_up_jump_coeff": 0.35,
+        "default_price": 1.29500,
+        "default_atr_m30": 0.0015,
+        "default_atr_d1": 0.0080,
+        "daily_sd_pct": 0.55,
+        "unit": "GBP",
+        "margin_lev100_001": 12.95,
+    },
+    "US30": {
+        "symbol": "US30",
+        "name": "Dow Jones Industrial Average",
+        "ticker": "TVC:DJI",
+        "contract": 10.0,
+        "pip": 1.0,
+        "pip_value_001": 0.10,
+        "spread_usd": 2.0,
+        "price_decimals": 1,
+        "min_risk_floor": 10.0,
+        "kou_mean_up_jump": 0.0040,
+        "kou_mean_down_jump": 0.0040,
+        "kou_lambda_daily": 0.15,
+        "kou_p_up_jump_coeff": 0.40,
+        "default_price": 43500.0,
+        "default_atr_m30": 120.0,
+        "default_atr_d1": 350.0,
+        "daily_sd_pct": 0.85,
+        "unit": "pts",
+        "margin_lev100_001": 43.50,
+    },
+    "CL": {
+        "symbol": "CL",
+        "name": "WTI Crude Oil",
+        "ticker": "NYMEX:CL1!",
+        "contract": 1000.0,
+        "pip": 0.01,
+        "pip_value_001": 0.10,
+        "spread_usd": 0.03,
+        "price_decimals": 2,
+        "min_risk_floor": 0.10,
+        "kou_mean_up_jump": 0.0080,
+        "kou_mean_down_jump": 0.0080,
+        "kou_lambda_daily": 0.25,
+        "kou_p_up_jump_coeff": 0.45,
+        "default_price": 70.00,
+        "default_atr_m30": 0.65,
+        "default_atr_d1": 1.80,
+        "daily_sd_pct": 1.85,
+        "unit": "bbl",
+        "margin_lev100_001": 7.00,
+    },
+    "BTCUSD": {
+        "symbol": "BTCUSD",
+        "name": "Bitcoin / US Dollar",
+        "ticker": "BINANCE:BTCUSDT",
+        "contract": 1.0,
+        "pip": 1.0,
+        "pip_value_001": 0.01,
+        "spread_usd": 20.00,  # $20.00 raw ECN spread
+        "price_decimals": 2,
+        "min_risk_floor": 250.00,  # $250.00 structural risk distance
+        "kou_mean_up_jump": 0.030,   # +3.0% upside jump
+        "kou_mean_down_jump": 0.038, # -3.8% liquidation flush jump
+        "kou_lambda_daily": 0.40,    # 0.40 jumps/day (~2.8/week)
+        "kou_p_up_jump_coeff": 0.44, # Asymmetric downside liquidation bias
+        "default_price": 91500.00,
+        "default_atr_m30": 450.00,   # $450 M30 ATR
+        "default_atr_d1": 3200.00,   # $3,200 D1 ATR
+        "daily_sd_pct": 3.80,        # ~60.3% annualized volatility
+        "unit": "BTC",
+        "default_leverage": 200,     # User-configured 1:200 leverage
+        "margin_lev200_001": 4.58,   # At $91.5k: 0.01 * 91500 / 200 = $4.58
+        "margin_lev100_001": 9.15,
+    }
+}
+
+
+def get_instrument_spec(instrument: str = "XAUUSD") -> dict:
+    inst = (instrument or "XAUUSD").upper().strip()
+    if inst in ("GOLD", "XAU"):
+        inst = "XAUUSD"
+    elif inst in ("EUR", "EURO"):
+        inst = "EURUSD"
+    elif inst in ("BTC", "BITCOIN", "BTCUSD", "BTCUSDT", "BTC/USD"):
+        inst = "BTCUSD"
+    elif inst in ("GBP", "CABLE"):
+        inst = "GBPUSD"
+    elif inst in ("OIL", "CRUDE", "WTI"):
+        inst = "CL"
+    return INSTRUMENT_SPECS.get(inst, INSTRUMENT_SPECS["XAUUSD"]).copy()
+
+
+# -------------------------------------------------------------
 # ADVANCED MATHEMATICAL ENGINES: FIRST-PASSAGE MC, GARCH-X, TTL & FOOTPRINT
 # -------------------------------------------------------------
-def calculate_first_passage_win_probability(current_price, entry_price, sl_price, tp_price, drift_pct=0.0, atr_m30=12.50, is_buy=True, n_paths=10000, steps=24):
+def calculate_first_passage_win_probability(current_price, entry_price, sl_price, tp_price, drift_pct=0.0, atr_m30=12.50, is_buy=True, n_paths=10000, steps=24, instrument="XAUUSD"):
     """
     Vectorized 10,000-Path Monte Carlo First-Passage Time Simulation Engine:
     Computes unconditional first-passage P(TP before SL) across n_paths without
-    excluding undecided paths or mutating global RNG state.
+    excluding undecided paths or mutating global RNG state. Supports multi-asset calibration.
     """
+    spec = get_instrument_spec(instrument)
     rng = np.random.default_rng(42)
     paths = np.zeros((n_paths, steps + 1))
     paths[:, 0] = entry_price if entry_price else current_price
 
-    step_vol = (atr_m30 / max(1.0, current_price)) * 0.70
+    step_vol = (atr_m30 / max(spec.get("min_risk_floor", 1e-4), current_price)) * 0.70
     drift_step = (drift_pct / 100.0) / steps
 
     z = rng.normal(0, 1, (n_paths, steps))
@@ -590,7 +747,7 @@ def calculate_first_passage_win_probability(current_price, entry_price, sl_price
     sub = paths[:, 1:]
     p0 = paths[:, :-1]
     p1 = paths[:, 1:]
-    spread_usd = 0.35
+    spread_usd = spec["spread_usd"]
     eff_tp = (tp_price + 0.5 * spread_usd) if is_buy else (tp_price - 0.5 * spread_usd)
     eff_sl = (sl_price + 0.5 * spread_usd) if is_buy else (sl_price - 0.5 * spread_usd)
 
@@ -1259,10 +1416,17 @@ class SetupLifecycleManager:
             }
 
         cur_p = float(current_price)
+        asset_raw = payload.get("asset") or payload.get("instrument") or "XAUUSD"
+        spec = get_instrument_spec(asset_raw)
+        price_dec = spec["price_decimals"]
+        cur_p = round(cur_p, price_dec)
         entry_zone = self._parse_entry_zone(payload.get("entry_zone"), cur_p)
-        sl_val = self._parse_price(payload.get("stop_loss"), cur_p - 15.0 if direction == "BUY" else cur_p + 15.0)
-        tp1_val = self._parse_price(payload.get("take_profit_1"), cur_p + 30.0 if direction == "BUY" else cur_p - 30.0)
-        tp2_val = self._parse_price(payload.get("take_profit_2"), cur_p + 45.0 if direction == "BUY" else cur_p - 45.0)
+        default_sl_offset = 1500.0 if spec["symbol"] == "BTCUSD" else (15.0 if spec["symbol"] == "XAUUSD" else (20 * spec["pip"]))
+        default_tp1_offset = 3000.0 if spec["symbol"] == "BTCUSD" else (30.0 if spec["symbol"] == "XAUUSD" else (50 * spec["pip"]))
+        default_tp2_offset = 5000.0 if spec["symbol"] == "BTCUSD" else (45.0 if spec["symbol"] == "XAUUSD" else (80 * spec["pip"]))
+        sl_val = self._parse_price(payload.get("stop_loss"), cur_p - default_sl_offset if direction == "BUY" else cur_p + default_sl_offset)
+        tp1_val = self._parse_price(payload.get("take_profit_1"), cur_p + default_tp1_offset if direction == "BUY" else cur_p - default_tp1_offset)
+        tp2_val = self._parse_price(payload.get("take_profit_2"), cur_p + default_tp2_offset if direction == "BUY" else cur_p - default_tp2_offset)
         lot_val = float(payload.get("recommended_lot") or payload.get("recommended_lot_size_1000_equity") or 0.01)
 
         ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 86400, "swing": 432000, "news": 3600}
@@ -1275,7 +1439,7 @@ class SetupLifecycleManager:
             "setup_id": setup_id,
             "horizon": h_key,
             "event_type": f"A*_{h_key.upper()}",
-            "asset": "XAUUSD",
+            "asset": spec["symbol"],
             "added_by_user": True,
             "created_at_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts)),
             "created_epoch": now_ts,
@@ -1284,17 +1448,17 @@ class SetupLifecycleManager:
             "action": action_str or f"A* {direction} ({h_key.upper()})",
             "ticket_type": payload.get("ticket_type", f"{direction}_{h_key.upper()}"),
             "entry_zone": entry_zone,
-            "stop_loss": round(sl_val, 2),
-            "take_profit_1": round(tp1_val, 2),
-            "take_profit_2": round(tp2_val, 2),
+            "stop_loss": round(sl_val, price_dec),
+            "take_profit_1": round(tp1_val, price_dec),
+            "take_profit_2": round(tp2_val, price_dec),
             "planned_rr": payload.get("planned_rr") or payload.get("risk_reward_ratio") or "1:2.00",
             "recommended_lot": round(max(0.01, lot_val), 2),
             "status": "TRIGGERED_RUNNING" if in_zone else "PENDING_TRIGGER",
-            "fill_price": round(cur_p, 2) if in_zone else None,
+            "fill_price": round(cur_p, price_dec) if in_zone else None,
             "fill_timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts)) if in_zone else None,
             "trailed_sl": None,
-            "highest_seen": round(cur_p, 2),
-            "lowest_seen": round(cur_p, 2),
+            "highest_seen": round(cur_p, price_dec),
+            "lowest_seen": round(cur_p, price_dec),
             "floating_pnl_usd": 0.0,
             "floating_r": 0.0,
             "realized_r": None,
@@ -1372,8 +1536,15 @@ class SetupLifecycleManager:
         if not active or active.get("status") in terminal:
             return active, False
 
-        active["highest_seen"] = round(max(float(active.get("highest_seen") or live_price), p_high), 2)
-        active["lowest_seen"] = round(min(float(active.get("lowest_seen") or live_price), p_low), 2)
+        asset_key = active.get("asset", "XAUUSD")
+        spec = get_instrument_spec(asset_key)
+        contract_val = spec["contract"]
+        price_dec = spec["price_decimals"]
+        be_buffer = 15.0 if spec["symbol"] == "BTCUSD" else (0.5 * spec["pip"])  # $15 shield on BTC, 0.5 pip breakeven shield on FX/Gold
+        default_risk = 1500.0 if spec["symbol"] == "BTCUSD" else (6.0 if spec["symbol"] == "XAUUSD" else (20 * spec["pip"]))
+
+        active["highest_seen"] = round(max(float(active.get("highest_seen") or live_price), p_high), price_dec)
+        active["lowest_seen"] = round(min(float(active.get("lowest_seen") or live_price), p_low), price_dec)
 
         direction = active.get("direction", "BUY")
         h_key = active.get("horizon", "daily")
@@ -1397,37 +1568,38 @@ class SetupLifecycleManager:
                 return active, True
             if (direction == "BUY" and p_low <= e_high and p_high >= e_low) or (direction == "SELL" and p_high >= e_low and p_low <= e_high):
                 active["status"] = "TRIGGERED_RUNNING"
-                active["fill_price"] = round(float(live_price), 2)
+                active["fill_price"] = round(float(live_price), price_dec)
                 active["fill_timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
 
         # 2. TRIGGERED_RUNNING or PARTIAL_TP_HIT
         if active["status"] in ("TRIGGERED_RUNNING", "PARTIAL_TP_HIT"):
             fill_p = float(active.get("fill_price") or ((e_low + e_high) / 2.0))
-            risk_dist = abs(fill_p - float(active.get("stop_loss", fill_p - 6.0))) or 6.0
+            risk_dist = abs(fill_p - float(active.get("stop_loss", fill_p - default_risk))) or default_risk
             lot = float(active.get("recommended_lot", 0.01))
 
             # Holding TTL check (only auto-expire non-user-managed or unverified slots; user-opted trades run until SL/TP/Manual close)
             if not active.get("added_by_user") and active.get("expires_epoch", 0) > 0 and now_ts >= active.get("expires_epoch", 0):
                 delta = (live_price - fill_p) if direction == "BUY" else (fill_p - live_price)
                 realized_r = round(delta / risk_dist, 2)
-                realized_pnl = round(delta * lot * 100.0, 2)
+                realized_pnl = round(delta * lot * contract_val, 2)
                 active["status"] = "CLOSED_TIME_LIMIT"
                 active["realized_r"] = realized_r
                 active["realized_pnl_usd"] = realized_pnl
-                active["exit_price"] = round(float(live_price), 2)
-                active["resolution"] = f"Holding time limit reached ({h_key.upper()} TTL). Closed at ${live_price:.2f} ({realized_r:+.2f}R)."
+                active["exit_price"] = round(float(live_price), price_dec)
+                active["resolution"] = f"Holding time limit reached ({h_key.upper()} TTL). Closed at ${live_price:.{price_dec}f} ({realized_r:+.2f}R)."
                 active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                 return active, True
 
             delta = (live_price - fill_p) if direction == "BUY" else (fill_p - live_price)
-            active["floating_pnl_usd"] = round(delta * lot * 100.0, 2)
+            active["floating_pnl_usd"] = round(delta * lot * contract_val, 2)
             active["floating_r"] = round(delta / risk_dist, 2)
 
             # Dynamic Breakeven Shield at +1.0R floating gain
             if active["status"] == "TRIGGERED_RUNNING" and active["floating_r"] >= 1.0 and active.get("trailed_sl") is None:
-                be_sl = round(fill_p + 0.35 if direction == "BUY" else fill_p - 0.35, 2)
+                be_sl = round(fill_p + be_buffer if direction == "BUY" else fill_p - be_buffer, price_dec)
                 active["trailed_sl"] = be_sl
-                active["resolution"] = f"Mark-to-market reached +1.0R. Dynamic Breakeven Shield engaged at ${be_sl:.2f}."
+                sl = be_sl
+                active["resolution"] = f"Mark-to-market reached +1.0R. Dynamic Breakeven Shield engaged at ${be_sl:.{price_dec}f}."
 
             sl_hit = (p_low <= sl) if direction == "BUY" else (p_high >= sl)
             tp1_hit = (p_high >= tp1) if direction == "BUY" else (p_low <= tp1)
@@ -1435,24 +1607,25 @@ class SetupLifecycleManager:
 
             # Worst-case conservative: check SL first
             if sl_hit:
-                if active["status"] == "PARTIAL_TP_HIT":
+                if active["status"] == "PARTIAL_TP_HIT" or active.get("trailed_sl") is not None:
                     active["status"] = "BREAKEVEN_EXIT"
-                    active["realized_r"] = round(0.5 * abs(tp1 - fill_p) / risk_dist, 2)
-                    active["realized_pnl_usd"] = round(lot * 100.0 * abs(tp1 - fill_p) * 0.5, 2)
-                    active["resolution"] = "Closed at trailed Breakeven SL after TP1 lock."
+                    delta_be = (sl - fill_p) if direction == "BUY" else (fill_p - sl)
+                    active["realized_r"] = round(delta_be / risk_dist, 2)
+                    active["realized_pnl_usd"] = round(lot * contract_val * delta_be, 2)
+                    active["resolution"] = f"Closed at Dynamic Breakeven Shield (${sl:.{price_dec}f}, locked entry +/- 0.5 pips)."
                 else:
                     active["status"] = "SL_TOUCHED_LOSS"
                     active["realized_r"] = -1.0
-                    active["realized_pnl_usd"] = -round(lot * 100.0 * risk_dist, 2)
-                    active["resolution"] = f"Stop loss touched at ${sl:.2f}. Defined -1.0R loss."
-                active["exit_price"] = round(float(sl), 2)
+                    active["realized_pnl_usd"] = -round(lot * contract_val * risk_dist, 2)
+                    active["resolution"] = f"Stop loss touched at ${sl:.{price_dec}f}. Defined -1.0R loss."
+                active["exit_price"] = round(float(sl), price_dec)
                 active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                 return active, True
 
             if active["status"] == "TRIGGERED_RUNNING" and tp1_hit:
                 active["status"] = "PARTIAL_TP_HIT"
-                active["trailed_sl"] = round(fill_p, 2)
-                active["resolution"] = f"TP1 touched at ${tp1:.2f}. 50% locked, SL trailed to BE (${fill_p:.2f})."
+                active["trailed_sl"] = round(fill_p, price_dec)
+                active["resolution"] = f"TP1 touched at ${tp1:.{price_dec}f}. 50% locked, SL trailed to BE (${fill_p:.{price_dec}f})."
 
             if tp2_hit:
                 was_partial = (active["status"] == "PARTIAL_TP_HIT")
@@ -1461,21 +1634,42 @@ class SetupLifecycleManager:
                 avg_gain = (0.5 * gain_tp1 + 0.5 * gain_tp2) if was_partial else gain_tp2
                 active["status"] = "FULL_TP_HIT"
                 active["realized_r"] = round(avg_gain / risk_dist, 2)
-                active["realized_pnl_usd"] = round(lot * 100.0 * avg_gain, 2)
-                active["exit_price"] = round(float(tp2), 2)
-                active["resolution"] = f"Full TP2 hit at ${tp2:.2f} (+{active['realized_r']:.2f}R captured)."
+                active["realized_pnl_usd"] = round(lot * contract_val * avg_gain, 2)
+                active["exit_price"] = round(float(tp2), price_dec)
+                active["resolution"] = f"Full TP2 hit at ${tp2:.{price_dec}f} (+{active['realized_r']:.2f}R captured)."
                 active["resolved_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now_ts))
                 return active, True
 
         return active, False
 
-    def evaluate_all_live_ticks(self, live_price, current_epoch=None):
-        """Evaluates ALL running trades and active horizon slots against live tick price (no stale session extrema)."""
+    def evaluate_all_live_ticks(self, live_price=None, current_epoch=None, live_prices=None):
+        """Evaluates ALL running trades and active horizon slots against live tick price without cross-asset contamination."""
         import time
         data = self._load()
         now_ts = int(current_epoch) if current_epoch else int(time.time())
-        lp = float(live_price)
+        lp = float(live_price) if live_price is not None else None
         changed = False
+
+        def _resolve_price_for_item(item):
+            asset = item.get("asset", "XAUUSD")
+            if live_prices and asset in live_prices:
+                return float(live_prices[asset])
+            if live_prices and asset == "BTCUSD" and ("BTC-USD" in live_prices or "BTCUSD" in live_prices):
+                return float(live_prices.get("BTC-USD", live_prices.get("BTCUSD")))
+            if live_prices and asset == "EURUSD" and "EURUSD=X" in live_prices:
+                return float(live_prices["EURUSD=X"])
+            if live_prices and asset == "XAUUSD" and "GC=F" in live_prices:
+                return float(live_prices["GC=F"])
+            if lp is not None:
+                # Disallow cross-asset contamination (e.g. Gold price 3500 used for EURUSD 1.09 or BTC 90000)
+                if asset == "EURUSD" and lp > 5.0:
+                    return None
+                if asset == "BTCUSD" and lp < 1000.0:
+                    return None
+                if asset == "XAUUSD" and (lp < 100.0 or lp > 20000.0):
+                    return None
+                return lp
+            return None
 
         # 1. Evaluate user running_trades list
         still_running = []
@@ -1485,7 +1679,11 @@ class SetupLifecycleManager:
             if sid in seen_ids:
                 continue
             seen_ids.add(sid)
-            upd, done = self._evaluate_single_trade(item, lp, lp, lp, now_ts)
+            target_lp = _resolve_price_for_item(item)
+            if target_lp is None:
+                still_running.append(item)
+                continue
+            upd, done = self._evaluate_single_trade(item, target_lp, target_lp, target_lp, now_ts)
             changed = True
             if done:
                 data.setdefault("completed_setups", []).insert(0, upd)
@@ -1503,7 +1701,10 @@ class SetupLifecycleManager:
         for h_k in ("scalping", "intraday", "daily", "swing", "news"):
             act = data.get("active_setups", {}).get(h_k)
             if act and act.get("setup_id") not in seen_ids:
-                upd, done = self._evaluate_single_trade(act, lp, lp, lp, now_ts)
+                target_lp = _resolve_price_for_item(act)
+                if target_lp is None:
+                    continue
+                upd, done = self._evaluate_single_trade(act, target_lp, target_lp, target_lp, now_ts)
                 changed = True
                 if done:
                     data.setdefault("completed_setups", []).insert(0, upd)
@@ -1515,9 +1716,9 @@ class SetupLifecycleManager:
             self._save(data)
         return data
 
-    def get_categorized_ledger(self, live_price=None):
+    def get_categorized_ledger(self, live_price=None, live_prices=None):
         """Returns ledger cleanly divided into Active/Running, Hit TP, SL Touched, and Archived."""
-        data = self.evaluate_all_live_ticks(live_price) if live_price is not None else self._load()
+        data = self.evaluate_all_live_ticks(live_price, live_prices=live_prices) if (live_price is not None or live_prices is not None) else self._load()
 
         # Deduplicated Active & Running list
         active_running = []
@@ -1860,7 +2061,7 @@ def calculate_lot_and_risk(
     risk_mode="pct",
     risk_pct=2.0,
     max_risk_usd=None,
-    leverage=100,
+    leverage=None,
     entry_price=3925.0,
     sl_price=None,
     sl_pips=None,
@@ -1882,22 +2083,14 @@ def calculate_lot_and_risk(
     Auto-synchronizes Price levels and Pip distances.
     """
     inst = (instrument or "XAUUSD").upper()
-    inst_specs = {
-        "XAUUSD": {"contract": 100.0, "pip": 0.10, "unit": "oz"},
-        "GOLD": {"contract": 100.0, "pip": 0.10, "unit": "oz"},
-        "EURUSD": {"contract": 100000.0, "pip": 0.0001, "unit": "EUR"},
-        "GBPUSD": {"contract": 100000.0, "pip": 0.0001, "unit": "GBP"},
-        "US30": {"contract": 10.0, "pip": 1.0, "unit": "pts"},
-        "CL": {"contract": 1000.0, "pip": 0.01, "unit": "bbl"}
-    }
-    spec = inst_specs.get(inst, inst_specs["XAUUSD"])
+    spec = get_instrument_spec(inst)
     c_size = contract_size if (contract_size and contract_size != 100.0) else spec["contract"]
     pip_val = spec["pip"]
-    price_dec = 4 if pip_val < 0.01 else 2
+    price_dec = spec["price_decimals"]
     pip_value_per_lot = c_size * pip_val
 
     eq = max(10.0, float(equity))
-    lev = max(1, int(leverage))
+    lev = int(leverage) if (leverage is not None and int(leverage) > 0) else spec.get("default_leverage", 100)
     entry = float(entry_price)
     is_buy = str(direction).upper() == "BUY"
 
@@ -2215,44 +2408,71 @@ def _get_daily_prob_regime():
         }
 
 
-def _get_intraday_momentum_regime():
+def _get_intraday_momentum_regime(instrument="XAUUSD"):
     """
     Live M15 & H1 intraday momentum and daily range exhaustion sensor (cached 60s).
-    Prevents Scalping/Intraday from blindly inheriting D1 20-day drift into live short-squeezes
-    and prevents Daily/Swing from chasing exhausted (>0.75x ATR) single-day moves.
+    Supports multi-asset telemetry (GC=F for Gold, EURUSD=X for EUR/USD).
+    Computes H1 EMA 50 & EMA 200 for institutional Pure-Trend deduction.
     """
     now = time.time()
-    if _INTRADAY_MOM_CACHE["data"] is not None and (now - _INTRADAY_MOM_CACHE["ts"] < 60.0):
-        return _INTRADAY_MOM_CACHE["data"]
+    inst = (instrument or "XAUUSD").upper()
+    cached = _INTRADAY_MOM_CACHE.get(inst) if isinstance(_INTRADAY_MOM_CACHE, dict) else None
+    if cached is not None and (now - cached.get("ts", 0) < 60.0):
+        return cached.get("data")
     try:
         import yfinance as yf
-        df_15m = yf.download("GC=F", period="5d", interval="15m", progress=False, auto_adjust=False)
+        if inst in ("BTCUSD", "BTC", "BITCOIN", "BTCUSDT", "BTC/USD"):
+            ticker = "BTC-USD"
+            price_dec = 2
+        elif inst in ("EURUSD", "EUR"):
+            ticker = "EURUSD=X"
+            price_dec = 5
+        else:
+            ticker = "GC=F"
+            price_dec = 2
+
+        df_15m = yf.download(ticker, period="5d", interval="15m", progress=False, auto_adjust=False)
         if isinstance(df_15m.columns, pd.MultiIndex):
             df_15m.columns = df_15m.columns.get_level_values(0)
         c15 = df_15m["Close"].dropna()
         r15 = np.log(c15 / c15.shift(1)).dropna() * 100.0
-        sd15 = max(0.05, float(r15.iloc[-60:].std(ddof=1)))
+        sd15 = max(0.01, float(r15.iloc[-60:].std(ddof=1)))
         r_1h_pct = float(r15.iloc[-4:].sum())
         r_4h_m15 = float(r15.iloc[-16:].sum())
-        z_m15_1h = round(r_1h_pct / max(0.05, sd15 * math.sqrt(4.0)), 3)
-        z_m15_4h = round(r_4h_m15 / max(0.10, sd15 * math.sqrt(16.0)), 3)
+        z_m15_1h = round(r_1h_pct / max(0.02, sd15 * math.sqrt(4.0)), 3)
+        z_m15_4h = round(r_4h_m15 / max(0.05, sd15 * math.sqrt(16.0)), 3)
 
-        df_1h = yf.download("GC=F", period="1mo", interval="1h", progress=False, auto_adjust=False)
+        df_1h = yf.download(ticker, period="1mo", interval="1h", progress=False, auto_adjust=False)
         if isinstance(df_1h.columns, pd.MultiIndex):
             df_1h.columns = df_1h.columns.get_level_values(0)
         c1h = df_1h["Close"].dropna()
         r1h = np.log(c1h / c1h.shift(1)).dropna() * 100.0
-        sd1h = max(0.10, float(r1h.iloc[-60:].std(ddof=1)))
+        sd1h = max(0.02, float(r1h.iloc[-60:].std(ddof=1)))
         r_4h_pct = float(r1h.iloc[-4:].sum())
         r_12h_pct = float(r1h.iloc[-12:].sum())
-        z_h1_4h = round(r_4h_pct / max(0.10, sd1h * math.sqrt(4.0)), 3)
-        z_h1_12h = round(r_12h_pct / max(0.15, sd1h * math.sqrt(12.0)), 3)
+        z_h1_4h = round(r_4h_pct / max(0.05, sd1h * math.sqrt(4.0)), 3)
+        z_h1_12h = round(r_12h_pct / max(0.08, sd1h * math.sqrt(12.0)), 3)
 
         today_bars = df_1h[df_1h.index.date == df_1h.index[-1].date()]
-        day_open = round(float(today_bars["Open"].iloc[0]), 2) if len(today_bars) else round(float(c1h.iloc[-1]), 2)
-        day_high = round(float(today_bars["High"].max()), 2) if len(today_bars) else day_open
-        day_low = round(float(today_bars["Low"].min()), 2) if len(today_bars) else day_open
-        live_px = round(float(c15.iloc[-1]), 2)
+        day_open = round(float(today_bars["Open"].iloc[0]), price_dec) if len(today_bars) else round(float(c1h.iloc[-1]), price_dec)
+        day_high = round(float(today_bars["High"].max()), price_dec) if len(today_bars) else day_open
+        day_low = round(float(today_bars["Low"].min()), price_dec) if len(today_bars) else day_open
+        live_px = round(float(c15.iloc[-1]), price_dec)
+
+        # Candlestick pattern detection for SNR confirmation (Bullish/Bearish Engulfing)
+        is_eng_bull = False
+        is_eng_bear = False
+        if len(df_15m) >= 2 and "Open" in df_15m.columns:
+            o15 = df_15m["Open"].dropna()
+            if len(c15) >= 2 and len(o15) >= 2:
+                prev_c, prev_o = float(c15.iloc[-2]), float(o15.iloc[-2])
+                curr_c, curr_o = float(c15.iloc[-1]), float(o15.iloc[-1])
+                is_eng_bull = bool((prev_c < prev_o) and (curr_c > curr_o) and (curr_c >= prev_o) and (curr_o <= prev_c))
+                is_eng_bear = bool((prev_c > prev_o) and (curr_c < curr_o) and (curr_c <= prev_o) and (curr_o >= prev_c))
+
+        # Institutional EMA 50 & EMA 200 for Pure-Trend Deduction
+        ema50 = round(float(c1h.ewm(span=50, adjust=False).mean().iloc[-1]), price_dec) if len(c1h) >= 50 else round(float(c1h.mean()), price_dec)
+        ema200 = round(float(c1h.ewm(span=200, adjust=False).mean().iloc[-1]), price_dec) if len(c1h) >= 200 else round(float(c1h.mean()), price_dec)
 
         # Bayesian-shrunk daily-equivalent posterior drift for M15 & H1 horizons
         mu_m15_post = round(max(-1.2, min(1.2, (r_1h_pct * 4.0) * 0.45)), 4)
@@ -2260,6 +2480,7 @@ def _get_intraday_momentum_regime():
 
         res = {
             "source": "YAHOO_INTRADAY_LIVE",
+            "instrument": inst,
             "z_m15_1h": z_m15_1h,
             "z_m15_4h": z_m15_4h,
             "z_h1_4h": z_h1_4h,
@@ -2268,15 +2489,20 @@ def _get_intraday_momentum_regime():
             "day_high": day_high,
             "day_low": day_low,
             "live_px": live_px,
+            "ema50": ema50,
+            "ema200": ema200,
+            "is_engulfing_bull": is_eng_bull,
+            "is_engulfing_bear": is_eng_bear,
             "mu_m15_post_pct": mu_m15_post,
             "mu_h1_post_pct": mu_h1_post,
         }
-        _INTRADAY_MOM_CACHE["ts"] = now
-        _INTRADAY_MOM_CACHE["data"] = res
+        if isinstance(_INTRADAY_MOM_CACHE, dict):
+            _INTRADAY_MOM_CACHE[inst] = {"ts": now, "data": res}
         return res
     except Exception:
-        return {
+        fallback_res = {
             "source": "INTRADAY_FALLBACK",
+            "instrument": inst,
             "z_m15_1h": 0.0,
             "z_m15_4h": 0.0,
             "z_h1_4h": 0.0,
@@ -2285,11 +2511,322 @@ def _get_intraday_momentum_regime():
             "day_high": 0.0,
             "day_low": 0.0,
             "live_px": 0.0,
+            "ema50": 0.0,
+            "ema200": 0.0,
+            "is_engulfing_bull": False,
+            "is_engulfing_bear": False,
             "mu_m15_post_pct": 0.0,
             "mu_h1_post_pct": 0.0,
         }
+        return fallback_res
+        return fallback_res
 
-def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75, wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None, session_h=None, session_l=None, session_c=None, horizon="daily"):
+
+def evaluate_eurusd_snr_pure_trend(
+    current_price: float,
+    ema50: float = None,
+    ema200: float = None,
+    atr_m15: float = 0.0012,
+    anchor_support: float = None,
+    anchor_resistance: float = None,
+    is_engulfing_bull: bool = False,
+    is_engulfing_bear: bool = False
+) -> dict:
+    """
+    EUR/USD SNR Pure-Trend Compounding Playbook Engine:
+    1. Trend Deduction:
+       - Bullish Pure-Trend: Price > EMA 50 > EMA 200 (Longs strictly permitted, Shorts blocked)
+       - Bearish Pure-Trend: Price < EMA 50 < EMA 200 (Shorts strictly permitted, Longs blocked)
+       - Zero Counter-Trend Rule: Counter-trend trades are strictly locked out.
+    2. Sandwich Chop Zone Blackout:
+       - If min(EMA 50, EMA 200) <= Price <= max(EMA 50, EMA 200):
+         Price is trapped in compression. Hard-blocks execution as STAND ASIDE.
+    3. 3-Anchor Structural S/R Retest:
+       - Bullish Retest: Price pulls back to broken resistance (now support shelf) within 0.35x ATR
+       - Bearish Retest: Price pulls back to broken support (now resistance ceiling) within 0.35x ATR
+    4. 3-Anchor Structural + ATR Shield Stop Loss:
+       - Bullish SL = Anchor Support - (0.50 * ATR_M15)
+       - Bearish SL = Anchor Resistance + (0.50 * ATR_M15)
+    5. Dynamic Running-Equity Compounding (Minimum 1:2.50 RR Target) with Dynamic Breakeven Shield at +1.0R.
+    """
+    cp = float(current_price)
+    atr = max(0.0003, float(atr_m15))
+
+    # Fallback EMA levels if not provided
+    if ema50 is None or float(ema50) <= 0.0:
+        ema50 = round(cp + 0.0010, 5)
+    if ema200 is None or float(ema200) <= 0.0:
+        ema200 = round(float(ema50) + 0.0015, 5)
+
+    e50 = float(ema50)
+    e200 = float(ema200)
+
+    # 1. Sandwich Chop Zone Check
+    is_sandwich_chop = min(e50, e200) <= cp <= max(e50, e200)
+
+    # 2. Trend Deduction
+    if is_sandwich_chop:
+        trend_regime = "SANDWICH_CHOP_BLACKOUT"
+        is_bullish_trend = False
+        is_bearish_trend = False
+        allowed_direction = "STAND_ASIDE"
+        reason = f"SANDWICH CHOP BLACKOUT: Price {cp:.5f} trapped between EMA50 ({e50:.5f}) and EMA200 ({e200:.5f}) compression."
+    elif cp > e50 > e200:
+        trend_regime = "BULLISH_PURE_TREND"
+        is_bullish_trend = True
+        is_bearish_trend = False
+        allowed_direction = "BUY"
+        reason = f"BULLISH PURE-TREND: Price ({cp:.5f}) > EMA50 ({e50:.5f}) > EMA200 ({e200:.5f}). Longs strictly permitted."
+    elif cp < e50 < e200:
+        trend_regime = "BEARISH_PURE_TREND"
+        is_bullish_trend = False
+        is_bearish_trend = True
+        allowed_direction = "SELL"
+        reason = f"BEARISH PURE-TREND: Price ({cp:.5f}) < EMA50 ({e50:.5f}) < EMA200 ({e200:.5f}). Shorts strictly permitted."
+    else:
+        trend_regime = "EMA_TRANSITION_CHOP"
+        is_bullish_trend = False
+        is_bearish_trend = False
+        allowed_direction = "STAND_ASIDE"
+        reason = f"TRANSITION CHOP: EMA50 ({e50:.5f}) vs EMA200 ({e200:.5f}) not in pure directional alignment."
+
+    # 3. 3-Anchor Structural S/R Calculation
+    s_anchor = round(anchor_support if anchor_support is not None else (cp - 1.5 * atr), 5)
+    r_anchor = round(anchor_resistance if anchor_resistance is not None else (cp + 1.5 * atr), 5)
+
+    # Retest check (within 0.35x ATR of anchor level)
+    bullish_retest = abs(cp - s_anchor) <= (0.35 * atr)
+    bearish_retest = abs(cp - r_anchor) <= (0.35 * atr)
+
+    # 4. 3-Anchor Structural + ATR Shield Stop Loss
+    atr_shield = round(0.50 * atr, 5)
+    sl_long = round(s_anchor - atr_shield, 5)
+    sl_short = round(r_anchor + atr_shield, 5)
+
+    # Minimum 1:2.50 RR Compounding Targets
+    rr_min = 2.50
+    risk_long = max(0.0005, cp - sl_long)
+    risk_short = max(0.0005, sl_short - cp)
+    tp1_long = round(cp + rr_min * risk_long, 5)
+    tp2_long = round(cp + 4.00 * risk_long, 5)
+    tp1_short = round(cp - rr_min * risk_short, 5)
+    tp2_short = round(cp - 4.00 * risk_short, 5)
+
+    return {
+        "trend_regime": trend_regime,
+        "is_sandwich_chop": is_sandwich_chop,
+        "is_bullish_trend": is_bullish_trend,
+        "is_bearish_trend": is_bearish_trend,
+        "allowed_direction": allowed_direction,
+        "ema50": round(e50, 5),
+        "ema200": round(e200, 5),
+        "reason": reason,
+        "anchor_support": s_anchor,
+        "anchor_resistance": r_anchor,
+        "atr_shield": atr_shield,
+        "bullish_retest": bullish_retest,
+        "bearish_retest": bearish_retest,
+        "engulfing_bull_confirmed": is_engulfing_bull,
+        "engulfing_bear_confirmed": is_engulfing_bear,
+        "long_setup": {
+            "entry": cp,
+            "stop_loss": sl_long,
+            "take_profit_1": tp1_long,
+            "take_profit_2": tp2_long,
+            "planned_rr": rr_min,
+            "dynamic_be_shield_trigger": round(cp + risk_long, 5),
+            "dynamic_be_shield_sl": round(cp + 0.00005, 5)
+        },
+        "short_setup": {
+            "entry": cp,
+            "stop_loss": sl_short,
+            "take_profit_1": tp1_short,
+            "take_profit_2": tp2_short,
+            "planned_rr": rr_min,
+            "dynamic_be_shield_trigger": round(cp - risk_short, 5),
+            "dynamic_be_shield_sl": round(cp - 0.00005, 5)
+        }
+    }
+
+
+def evaluate_btc_a_star_regime(
+    current_price: float,
+    ema50: float = None,
+    ema200: float = None,
+    atr_m15: float = 450.0,
+    anchor_support: float = None,
+    anchor_resistance: float = None,
+    is_engulfing_bull: bool = False,
+    is_engulfing_bear: bool = False,
+    cme_gap_price: float = None,
+    funding_rate_8h: float = 0.0001,
+    macro_blackout_active: bool = False,
+    funding_rate_pct: float = None,
+    macro_event_in_window: bool = False
+) -> dict:
+    """
+    BITCOIN A* INSTITUTIONAL QUANTITATIVE CONFLUENCE ENGINE:
+    1. Trend Deduction & Multi-Timeframe Alignment:
+       - Bullish Pure-Trend: Price > EMA 50 > EMA 200 (Longs permitted, Shorts blocked)
+       - Bearish Pure-Trend: Price < EMA 50 < EMA 200 (Shorts permitted, Longs blocked)
+       - Zero Counter-Trend Gate: Counter-trend trades are strictly locked out.
+    2. Sandwich Chop Zone Blackout:
+       - If min(EMA 50, EMA 200) <= Price <= max(EMA 50, EMA 200):
+         Price is in chop compression. Hard-blocks execution as STAND ASIDE.
+    3. Macro Event Liquidity Blackout Firewall:
+       - If macro_blackout_active (within T-30m to T+15m of FOMC/CPI/NFP):
+         Hard-blocks execution as STAND ASIDE (avoids $100-$300 spread spikes & liquidation cascades).
+    4. Derivatives & Perp Funding Gate:
+       - Overheated Longs (> +0.035% per 8h): Warns/blocks Longs due to long squeeze liquidation hazard.
+       - Short Squeeze Fuel (< -0.015% per 8h): Warns/blocks Shorts due to short squeeze expansion.
+    5. Structural S/R Retest & 1:200 Broker Leverage Dynamics:
+       - Retest within 0.35x ATR_M15 of anchor support/resistance.
+       - Dynamic Breakeven Shield at +1.0R (ratchets stop loss to entry +/- $15.00).
+       - Minimum 1:2.00 RR Target.
+    """
+    cp = float(current_price)
+    atr = max(50.0, float(atr_m15))
+
+    # Fallback EMA levels if not provided
+    if ema50 is None or float(ema50) <= 0.0:
+        ema50 = round(cp + 500.0, 2)
+    if ema200 is None or float(ema200) <= 0.0:
+        ema200 = round(float(ema50) + 1000.0, 2)
+
+    e50 = float(ema50)
+    e200 = float(ema200)
+
+    # 1. Macro Event Blackout Check
+    is_macro_blackout = bool(macro_blackout_active or macro_event_in_window)
+
+    # 2. Sandwich Chop Zone Check
+    is_sandwich_chop = min(e50, e200) <= cp <= max(e50, e200)
+
+    # 3. Derivatives Funding Analysis
+    if funding_rate_pct is not None:
+        funding = float(funding_rate_pct) / 100.0 if abs(float(funding_rate_pct)) > 0.01 else float(funding_rate_pct)
+    else:
+        funding = float(funding_rate_8h)
+    funding_overheated_long = funding > 0.00035  # > +0.035% per 8h
+    funding_squeeze_short = funding < -0.00015    # < -0.015% per 8h
+    is_funding_overheated = funding_overheated_long or funding_squeeze_short
+    funding_warning = (
+        f"CAUTION: Overheated Perp Longs ({funding*100:.3f}%/8h) - Liquidation cascade hazard." if funding_overheated_long
+        else (f"CAUTION: Negative Perp Funding ({funding*100:.3f}%/8h) - Short squeeze expansion fuel." if funding_squeeze_short else "STABLE")
+    )
+
+    # 4. Trend Deduction
+    if is_macro_blackout:
+        trend_regime = "MACRO_EVENT_BLACKOUT"
+        is_bullish_trend = False
+        is_bearish_trend = False
+        allowed_direction = "STAND_ASIDE"
+        reason = "MACRO LIQUIDITY BLACKOUT: High-impact macro release imminent/active. Spreads elevated; execution gated."
+    elif is_sandwich_chop:
+        trend_regime = "SANDWICH_CHOP_BLACKOUT"
+        is_bullish_trend = False
+        is_bearish_trend = False
+        allowed_direction = "STAND_ASIDE"
+        reason = f"SANDWICH CHOP BLACKOUT: Price ${cp:.2f} trapped between EMA50 (${e50:.2f}) and EMA200 (${e200:.2f}) compression."
+    elif cp > e50 > e200:
+        if funding_overheated_long:
+            trend_regime = "FUNDING_OVERHEATED_CAUTION"
+            is_bullish_trend = False
+            is_bearish_trend = False
+            allowed_direction = "STAND_ASIDE"
+            reason = f"OVERHEATED PERP FUNDING ({funding*100:.3f}%): Elevated long liquidation cascade risk. Stand aside."
+        else:
+            trend_regime = "BULLISH_PURE_TREND"
+            is_bullish_trend = True
+            is_bearish_trend = False
+            allowed_direction = "BUY"
+            reason = f"BULLISH PURE-TREND: Price (${cp:.2f}) > EMA50 (${e50:.2f}) > EMA200 (${e200:.2f}). Longs strictly permitted."
+    elif cp < e50 < e200:
+        if funding_squeeze_short:
+            trend_regime = "FUNDING_SQUEEZE_CAUTION"
+            is_bullish_trend = False
+            is_bearish_trend = False
+            allowed_direction = "STAND_ASIDE"
+            reason = f"NEGATIVE PERP FUNDING ({funding*100:.3f}%): Short squeeze hazard detected. Stand aside."
+        else:
+            trend_regime = "BEARISH_PURE_TREND"
+            is_bullish_trend = False
+            is_bearish_trend = True
+            allowed_direction = "SELL"
+            reason = f"BEARISH PURE-TREND: Price (${cp:.2f}) < EMA50 (${e50:.2f}) < EMA200 (${e200:.2f}). Shorts strictly permitted."
+    else:
+        trend_regime = "EMA_TRANSITION_CHOP"
+        is_bullish_trend = False
+        is_bearish_trend = False
+        allowed_direction = "STAND_ASIDE"
+        reason = f"TRANSITION CHOP: EMA50 (${e50:.2f}) vs EMA200 (${e200:.2f}) not in pure directional alignment."
+
+    # 5. S/R Anchors & Retest Check
+    s_anchor = round(anchor_support if anchor_support is not None else (cp - 1.5 * atr), 2)
+    r_anchor = round(anchor_resistance if anchor_resistance is not None else (cp + 1.5 * atr), 2)
+    bullish_retest = abs(cp - s_anchor) <= (0.35 * atr)
+    bearish_retest = abs(cp - r_anchor) <= (0.35 * atr)
+
+    # 6. Stop Loss & Target Geometry (Min 1:2.00 RR, Dynamic Breakeven Shield at +1.0R)
+    atr_shield = round(0.50 * atr, 2)
+    sl_long = round(s_anchor - atr_shield, 2)
+    sl_short = round(r_anchor + atr_shield, 2)
+
+    risk_long = max(250.0, cp - sl_long)
+    risk_short = max(250.0, sl_short - cp)
+    rr_min = 2.00
+
+    tp1_long = round(cp + rr_min * risk_long, 2)
+    tp2_long = round(cp + 3.50 * risk_long, 2)
+    tp1_short = round(cp - rr_min * risk_short, 2)
+    tp2_short = round(cp - 3.50 * risk_short, 2)
+
+    return {
+        "trend_regime": trend_regime,
+        "is_macro_blackout": is_macro_blackout,
+        "is_sandwich_chop": is_sandwich_chop,
+        "is_bullish_trend": is_bullish_trend,
+        "is_bearish_trend": is_bearish_trend,
+        "allowed_direction": allowed_direction,
+        "ema50": round(e50, 2),
+        "ema200": round(e200, 2),
+        "funding_rate_8h": funding,
+        "is_funding_overheated": is_funding_overheated,
+        "funding_warning": funding_warning,
+        "reason": reason,
+        "anchor_support": s_anchor,
+        "anchor_resistance": r_anchor,
+        "atr_shield": atr_shield,
+        "bullish_retest": bullish_retest,
+        "bearish_retest": bearish_retest,
+        "engulfing_bull_confirmed": is_engulfing_bull,
+        "engulfing_bear_confirmed": is_engulfing_bear,
+        "long_setup": {
+            "entry": cp,
+            "stop_loss": sl_long,
+            "take_profit_1": tp1_long,
+            "take_profit_2": tp2_long,
+            "planned_rr": rr_min,
+            "dynamic_be_shield_trigger": round(cp + risk_long, 2),
+            "dynamic_be_shield_sl": round(cp + 15.00, 2)
+        },
+        "short_setup": {
+            "entry": cp,
+            "stop_loss": sl_short,
+            "take_profit_1": tp1_short,
+            "take_profit_2": tp2_short,
+            "planned_rr": rr_min,
+            "dynamic_be_shield_trigger": round(cp - risk_short, 2),
+            "dynamic_be_shield_sl": round(cp - 15.00, 2)
+        }
+    }
+
+def calculate_daily_a_star_setup(
+    current_price=None, atr_m30=None, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75,
+    wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None,
+    session_h=None, session_l=None, session_c=None, horizon="daily", instrument="XAUUSD",
+    de10y_val=None
+):
     """
     INSTITUTIONAL PURE-PROBABILITY A* SETUP ENGINE (NO VISUAL CHART PATTERNS, ZERO LOOKAHEAD):
     Multi-horizon quantitative execution (Intraday, Daily, Swing) anchored to mathematical gates:
@@ -2297,18 +2834,35 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
       2. Variance Risk Premium Regime (VRP = ^GVZ - RV22 > 0) & HAR-RV Non-Panic Filter (RV5 <= 1.15 * RV22).
       3. First-Passage Expected Value (EV_R > 0 on asymmetric barriers) & Fractional Quarter-Kelly sizing.
       4. Microstructure VPIN Toxicity Gate (< 0.65 Intraday, < 0.70 Daily, < 0.75 Swing) & White HC3 Macro Verification.
+      Supports multi-asset polymorphic execution (XAUUSD, EURUSD, GBPUSD, US30, CL).
     """
     h_mode = (horizon or "daily").lower()
-    if session_h is None or session_l is None or session_c is None or session_h <= session_l:
-        session_h = round(current_price + 1.8 * atr_m30, 2)
-        session_l = round(current_price - 1.8 * atr_m30, 2)
-        session_c = round(current_price, 2)
-    else:
-        session_h = round(float(session_h), 2)
-        session_l = round(float(session_l), 2)
-        session_c = round(float(session_c), 2)
+    spec = get_instrument_spec(instrument)
+    inst_key = spec["symbol"]
+    price_dec = spec["price_decimals"]
+    min_risk = spec["min_risk_floor"]
+    spread_usd = spec["spread_usd"]
 
-    PP = round((session_h + session_l + session_c) / 3.0, 2)
+    if current_price is None:
+        current_price = spec["default_price"]
+    else:
+        current_price = round(float(current_price), price_dec)
+
+    if atr_m30 is None:
+        atr_m30 = spec["default_atr_m30"]
+    else:
+        atr_m30 = round(float(atr_m30), price_dec)
+
+    if session_h is None or session_l is None or session_c is None or session_h <= session_l:
+        session_h = round(current_price + 1.8 * atr_m30, price_dec)
+        session_l = round(current_price - 1.8 * atr_m30, price_dec)
+        session_c = round(current_price, price_dec)
+    else:
+        session_h = round(float(session_h), price_dec)
+        session_l = round(float(session_l), price_dec)
+        session_c = round(float(session_c), price_dec)
+
+    PP = round((session_h + session_l + session_c) / 3.0, price_dec)
     # STRICT READ-ONLY: Never mutate setup_ledger.json from calculate_daily_a_star_setup (prevents test/fallback tick leakage)
     mgr = SetupLifecycleManager()
     _led = mgr.get_ledger()
@@ -2337,6 +2891,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     prob_reg = _get_daily_prob_regime()
 
     yield_spread = round(us10y_val - us2y_val, 3)
+    yield_spread_us_de = round(us10y_val - de10y_val, 3) if de10y_val is not None else None
     tips_real_proxy = round(us10y_val - t10yie_live, 2)
     dxy_z = round((dxy_val - prob_reg["dxy_mean_60"]) / max(0.20, prob_reg["dxy_sd_60"]), 2)
     oil_shift = round(((wti_val - 85.00) / 10.00) * 0.142, 3)
@@ -2349,13 +2904,20 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     rv5_ann = float(prob_reg["rv5_ann"])
     rv22_ann = float(prob_reg["rv22_ann"])
     gvz_now = float(prob_reg["gvz_last"])
-    atr_d1 = max(atr_m30, float(prob_reg["atr_d1"]))
-    daily_sd_pct = float(prob_reg["daily_sd_pct"])
+    if inst_key == "XAUUSD":
+        atr_d1 = max(atr_m30, float(prob_reg["atr_d1"]))
+        daily_sd_pct = float(prob_reg["daily_sd_pct"])
+    else:
+        atr_d1 = max(atr_m30, float(spec.get("default_atr_d1", atr_m30 * 2.8)))
+        daily_sd_pct = float(spec.get("daily_sd_pct", 0.45))
     mu_daily_post = float(prob_reg["mu_daily_post_pct"])
     macro_drift = (mu_daily_post * 5.0) / 100.0
 
     # Live Intraday Momentum & Daily Range Exhaustion Guard (eliminates blind D1 shorting into M15/H1 rallies)
-    intra_reg = _get_intraday_momentum_regime()
+    try:
+        intra_reg = _get_intraday_momentum_regime(inst_key)
+    except TypeError:
+        intra_reg = _get_intraday_momentum_regime()
     z_m15_1h = float(intra_reg.get("z_m15_1h", 0.0))
     z_m15_4h = float(intra_reg.get("z_m15_4h", 0.0))
     z_h1_4h = float(intra_reg.get("z_h1_4h", 0.0))
@@ -2364,6 +2926,12 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     day_low_px = float(intra_reg.get("day_low", 0.0))
     day_high_px = float(intra_reg.get("day_high", 0.0))
     live_ref_px = float(intra_reg.get("live_px", 0.0)) or current_price
+    if inst_key != "XAUUSD" or (day_open_px > 0 and abs(day_open_px - current_price) / max(0.01, current_price) > 0.50):
+        day_open_px = current_price
+        day_low_px = current_price - 0.5 * atr_m30
+        day_high_px = current_price + 0.5 * atr_m30
+        live_ref_px = current_price
+        sma200_val = current_price
     mu_m15_post = float(intra_reg.get("mu_m15_post_pct", 0.0))
     mu_h1_post = float(intra_reg.get("mu_h1_post_pct", 0.0))
 
@@ -2485,11 +3053,138 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = not bool(m5_flow.get("vpin_toxic_gate", False))
 
+    # EUR/USD Institutional Pure-Trend Compounding Playbook Engine
+    snr_eval = None
+    if inst_key == "EURUSD":
+        ema50_val = float(intra_reg.get("ema50", 0.0))
+        ema200_val = float(intra_reg.get("ema200", 0.0))
+        is_eng_bull = bool(intra_reg.get("is_engulfing_bull", False))
+        is_eng_bear = bool(intra_reg.get("is_engulfing_bear", False))
+        snr_eval = evaluate_eurusd_snr_pure_trend(
+            current_price=current_price,
+            ema50=ema50_val if ema50_val > 0 else None,
+            ema200=ema200_val if ema200_val > 0 else None,
+            atr_m15=atr_m30,
+            is_engulfing_bull=is_eng_bull,
+            is_engulfing_bear=is_eng_bear
+        )
+        # 1. Enforce minimum compounding 1:2.50 RR
+        rr_base = max(2.50, rr_base)
+
+        # 2. Sandwich Chop Zone Blackout
+        if snr_eval["is_sandwich_chop"]:
+            drift_ok = False
+            exhaustion_ok = False
+            exhaustion_reason = snr_eval["reason"]
+            bias = "SANDWICH_CHOP_BLACKOUT"
+            conviction_str = "SANDWICH CHOP BLACKOUT // STAND ASIDE"
+        # 3. Transition Chop
+        elif snr_eval["trend_regime"] == "EMA_TRANSITION_CHOP":
+            drift_ok = False
+            exhaustion_ok = False
+            exhaustion_reason = snr_eval["reason"]
+            bias = "EMA_TRANSITION_CHOP"
+            conviction_str = "EMA TRANSITION CHOP // STAND ASIDE"
+        # 4. Zero Counter-Trend Gate
+        elif snr_eval["is_bullish_trend"]:
+            if z_eff < 0:
+                drift_ok = False
+                exhaustion_ok = False
+                exhaustion_reason = f"COUNTER-TREND SHORT BLOCKED BY BULLISH PURE-TREND (Price {current_price:.5f} > EMA50 {snr_eval['ema50']:.5f} > EMA200 {snr_eval['ema200']:.5f})"
+                bias = "COUNTER_TREND_BLOCKED"
+                conviction_str = "COUNTER-TREND BLOCKED // STAND ASIDE"
+            else:
+                bias = "BULLISH_PURE_TREND"
+                conviction_str = "BULLISH PURE-TREND COMPOUNDING (MIN 1:2.50 RR)"
+        elif snr_eval["is_bearish_trend"]:
+            if z_eff > 0:
+                drift_ok = False
+                exhaustion_ok = False
+                exhaustion_reason = f"COUNTER-TREND LONG BLOCKED BY BEARISH PURE-TREND (Price {current_price:.5f} < EMA50 {snr_eval['ema50']:.5f} < EMA200 {snr_eval['ema200']:.5f})"
+                bias = "COUNTER_TREND_BLOCKED"
+                conviction_str = "COUNTER-TREND BLOCKED // STAND ASIDE"
+            else:
+                bias = "BEARISH_PURE_TREND"
+                conviction_str = "BEARISH PURE-TREND COMPOUNDING (MIN 1:2.50 RR)"
+
+    # Bitcoin A* Institutional Quantitative Confluence Engine
+    btc_eval = None
+    if inst_key == "BTCUSD":
+        ema50_val = float(intra_reg.get("ema50", 0.0))
+        ema200_val = float(intra_reg.get("ema200", 0.0))
+        is_eng_bull = bool(intra_reg.get("is_engulfing_bull", False))
+        is_eng_bear = bool(intra_reg.get("is_engulfing_bear", False))
+        macro_blackout = False
+        try:
+            import os
+            cal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "high_impact_calendar.json")
+            if os.path.exists(cal_path):
+                with open(cal_path) as f:
+                    cal_data = json.load(f)
+                now_ts = int(time.time())
+                for ev in cal_data.get("events", []):
+                    ev_epoch = int(ev.get("epoch", 0))
+                    if ev_epoch > 0 and abs(ev_epoch - now_ts) <= 1800:
+                        macro_blackout = True
+                        break
+        except Exception:
+            pass
+
+        btc_eval = evaluate_btc_a_star_regime(
+            current_price=current_price,
+            ema50=ema50_val if ema50_val > 0 else None,
+            ema200=ema200_val if ema200_val > 0 else None,
+            atr_m15=atr_m30,
+            is_engulfing_bull=is_eng_bull,
+            is_engulfing_bear=is_eng_bear,
+            macro_blackout_active=macro_blackout
+        )
+        rr_base = max(2.00, rr_base)
+
+        if btc_eval["is_macro_blackout"]:
+            drift_ok = False
+            exhaustion_ok = False
+            exhaustion_reason = btc_eval["reason"]
+            bias = "MACRO_EVENT_BLACKOUT"
+            conviction_str = "MACRO BLACKOUT // STAND ASIDE"
+        elif btc_eval["is_sandwich_chop"]:
+            drift_ok = False
+            exhaustion_ok = False
+            exhaustion_reason = btc_eval["reason"]
+            bias = "SANDWICH_CHOP_BLACKOUT"
+            conviction_str = "SANDWICH CHOP BLACKOUT // STAND ASIDE"
+        elif btc_eval["trend_regime"] in ("EMA_TRANSITION_CHOP", "FUNDING_OVERHEATED_CAUTION", "FUNDING_SQUEEZE_CAUTION"):
+            drift_ok = False
+            exhaustion_ok = False
+            exhaustion_reason = btc_eval["reason"]
+            bias = btc_eval["trend_regime"]
+            conviction_str = f"{btc_eval['trend_regime']} // STAND ASIDE"
+        elif btc_eval["is_bullish_trend"]:
+            if z_eff < 0:
+                drift_ok = False
+                exhaustion_ok = False
+                exhaustion_reason = f"COUNTER-TREND SHORT BLOCKED BY BULLISH PURE-TREND (Price ${current_price:.2f} > EMA50 ${btc_eval['ema50']:.2f} > EMA200 ${btc_eval['ema200']:.2f})"
+                bias = "COUNTER_TREND_BLOCKED"
+                conviction_str = "COUNTER-TREND BLOCKED // STAND ASIDE"
+            else:
+                bias = "BULLISH_PURE_TREND"
+                conviction_str = "BULLISH PURE-TREND (MIN 1:2.00 RR)"
+        elif btc_eval["is_bearish_trend"]:
+            if z_eff > 0:
+                drift_ok = False
+                exhaustion_ok = False
+                exhaustion_reason = f"COUNTER-TREND LONG BLOCKED BY BEARISH PURE-TREND (Price ${current_price:.2f} < EMA50 ${btc_eval['ema50']:.2f} < EMA200 ${btc_eval['ema200']:.2f})"
+                bias = "COUNTER_TREND_BLOCKED"
+                conviction_str = "COUNTER-TREND BLOCKED // STAND ASIDE"
+            else:
+                bias = "BEARISH_PURE_TREND"
+                conviction_str = "BEARISH PURE-TREND (MIN 1:2.00 RR)"
+
     p_drift_bull = round(_ncdf(z_eff) * 100.0, 1)
     p_drift_bear = round(100.0 - p_drift_bull, 1)
 
-    rr_target = rr_base
-    eff_sl_dist = round(barrier_sl_scale * atr_d1, 2)
+    rr_target = max(2.50, rr_base) if inst_key == "EURUSD" else rr_base
+    eff_sl_dist = round(barrier_sl_scale * atr_d1, price_dec)
 
     # 3. 10,000-Path Causal Compensated Jump-Diffusion Simulation (Horizon-Native Drift & Volatility)
     rng = np.random.default_rng(42)
@@ -2500,13 +3195,13 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     drift_step = (mu_eff / 100.0) * dt
 
     dir_sign = 1.0 if z_eff > 0 else (-1.0 if z_eff < 0 else 0.0)
-    p_up_jump = float(1.0 / (1.0 + np.exp(-0.45 * dir_sign * abs(float(z_eff))))) if dir_sign != 0.0 else 0.50
-    mean_up_jump = 0.0065
-    mean_down_jump = 0.0065
+    p_up_jump = float(1.0 / (1.0 + np.exp(-spec.get("kou_p_up_jump_coeff", 0.45) * dir_sign * abs(float(z_eff))))) if dir_sign != 0.0 else 0.50
+    mean_up_jump = spec.get("kou_mean_up_jump", 0.0065)
+    mean_down_jump = spec.get("kou_mean_down_jump", 0.0065)
     eta1 = 1.0 / mean_up_jump
     eta2 = 1.0 / mean_down_jump
     kappa_j = (p_up_jump * eta1 / max(1.0001, eta1 - 1.0)) + ((1.0 - p_up_jump) * eta2 / (eta2 + 1.0)) - 1.0
-    lambda_step = 0.20 * dt
+    lambda_step = spec.get("kou_lambda_daily", 0.20) * dt
 
     z_mat = rng.normal(0, 1, (n_paths, steps))
     n_jumps = rng.poisson(lambda_step, (n_paths, steps))
@@ -2536,53 +3231,74 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     p_down = round(float(np.mean(terminal_rets < 0) * 100.0), 1)
     var_95_pct = round(float(np.percentile(terminal_rets, 5)), 2)
     cvar_95_pct = round(float(np.mean(terminal_rets[terminal_rets <= var_95_pct])), 2)
-    median_terminal = round(float(p50[-1]), 2)
+    median_terminal = round(float(p50[-1]), price_dec)
 
     # 4. Pure-Probability Live Candidate Setup Evaluation (Always calculated on current live price)
-    band = round(0.10 * atr_m30, 2)
-    entry_low = round(current_price - band, 2)
-    entry_high = round(current_price + band, 2)
+    band = round(0.10 * atr_m30, price_dec)
+    entry_low = round(current_price - band, price_dec)
+    entry_high = round(current_price + band, price_dec)
     mid_entry = current_price
 
     if not drift_ok:
         is_bullish = None
         raw_action = f"STAND ASIDE // NO CAUSAL DRIFT ({h_mode.upper()} |{z_label}|={abs(z_eff):.2f})"
         ticket_type = f"NEUTRAL_DRIFT_{h_mode.upper()}_STAND_ASIDE"
-        sl_val = round(mid_entry - eff_sl_dist, 2)
-        tp1_val = round(mid_entry + eff_sl_dist, 2)
-        tp2_val = round(mid_entry + 2.0 * eff_sl_dist, 2)
-        bias = "NEUTRAL_EQUILIBRIUM_CHOP"
+        if inst_key == "EURUSD" and snr_eval is not None:
+            raw_action = f"STAND ASIDE // {snr_eval['reason']}"
+            ticket_type = f"EURUSD_{snr_eval['trend_regime']}_STAND_ASIDE"
+            sl_val = snr_eval["long_setup"]["stop_loss"]
+            tp1_val = snr_eval["long_setup"]["take_profit_1"]
+            tp2_val = snr_eval["long_setup"]["take_profit_2"]
+        else:
+            sl_val = round(mid_entry - eff_sl_dist, price_dec)
+            tp1_val = round(mid_entry + eff_sl_dist, price_dec)
+            tp2_val = round(mid_entry + 2.0 * eff_sl_dist, price_dec)
+            bias = "NEUTRAL_EQUILIBRIUM_CHOP"
     else:
         is_bullish = (z_eff > 0.0)
         if is_bullish:
             raw_action = f"BAYESIAN PROBABILITY LONG ({h_mode.upper()}, {z_label}={z_eff:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
             ticket_type = f"BULLISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
-            sl_val = round(mid_entry - eff_sl_dist, 2)
-            tp1_mult = 2.0 if h_mode == "news" else rr_target
-            tp2_mult = 4.0 if h_mode == "news" else (rr_target + (0.5 if h_mode != 'daily' else 1.0))
-            tp1_val = round(mid_entry + tp1_mult * eff_sl_dist, 2)
-            tp2_val = round(mid_entry + tp2_mult * eff_sl_dist, 2)
-            bias = f"BULLISH_BAYESIAN_{h_mode.upper()}"
+            if inst_key == "EURUSD" and snr_eval is not None:
+                sl_val = snr_eval["long_setup"]["stop_loss"]
+                risk_eur = max(min_risk, mid_entry - sl_val)
+                tp1_val = round(mid_entry + rr_target * risk_eur, price_dec)
+                tp2_val = round(mid_entry + 4.0 * risk_eur, price_dec)
+                bias = "BULLISH_PURE_TREND"
+            else:
+                sl_val = round(mid_entry - eff_sl_dist, price_dec)
+                tp1_mult = 2.0 if h_mode == "news" else rr_target
+                tp2_mult = 4.0 if h_mode == "news" else (rr_target + (0.5 if h_mode != 'daily' else 1.0))
+                tp1_val = round(mid_entry + tp1_mult * eff_sl_dist, price_dec)
+                tp2_val = round(mid_entry + tp2_mult * eff_sl_dist, price_dec)
+                bias = f"BULLISH_BAYESIAN_{h_mode.upper()}"
         else:
             raw_action = f"BAYESIAN PROBABILITY SHORT ({h_mode.upper()}, {z_label}={z_eff:+.2f}σ, VRP={vrp_ann:+.1f}%, {conviction_str})"
             ticket_type = f"BEARISH_{h_mode.upper()}_DRIFT_{int(rr_target)}R"
-            sl_val = round(mid_entry + eff_sl_dist, 2)
-            tp1_mult = 2.0 if h_mode == "news" else rr_target
-            tp2_mult = 4.0 if h_mode == "news" else (rr_target + (0.5 if h_mode != 'daily' else 1.0))
-            tp1_val = round(mid_entry - tp1_mult * eff_sl_dist, 2)
-            tp2_val = round(mid_entry - tp2_mult * eff_sl_dist, 2)
-            bias = f"BEARISH_BAYESIAN_{h_mode.upper()}"
+            if inst_key == "EURUSD" and snr_eval is not None:
+                sl_val = snr_eval["short_setup"]["stop_loss"]
+                risk_eur = max(min_risk, sl_val - mid_entry)
+                tp1_val = round(mid_entry - rr_target * risk_eur, price_dec)
+                tp2_val = round(mid_entry - 4.0 * risk_eur, price_dec)
+                bias = "BEARISH_PURE_TREND"
+            else:
+                sl_val = round(mid_entry + eff_sl_dist, price_dec)
+                tp1_mult = 2.0 if h_mode == "news" else rr_target
+                tp2_mult = 4.0 if h_mode == "news" else (rr_target + (0.5 if h_mode != 'daily' else 1.0))
+                tp1_val = round(mid_entry - tp1_mult * eff_sl_dist, price_dec)
+                tp2_val = round(mid_entry - tp2_mult * eff_sl_dist, price_dec)
+                bias = f"BEARISH_BAYESIAN_{h_mode.upper()}"
 
-    risk = max(1.0, abs(mid_entry - sl_val))
+    risk = max(min_risk, abs(mid_entry - sl_val))
     reward = abs(tp1_val - mid_entry)
     rr = round(reward / risk, 2)
-    sl_d = max(1.0, abs(mid_entry - sl_val))
+    sl_d = max(min_risk, abs(mid_entry - sl_val))
     tp_d = abs(tp1_val - mid_entry)
 
     sub = paths[:, 1:]
     p0 = paths[:, :-1]
     p1 = paths[:, 1:]
-    spread_usd = 0.35
+    spread_usd = spec["spread_usd"]
     var_step = max(1e-8, step_vol ** 2)
 
     if is_bullish is True:
@@ -2733,15 +3449,32 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
     total_confluence = round(macro_score + mc_prob_score + vol_score + cross_score, 1)
 
-    is_a_star = bool(drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0))
+    if inst_key == "EURUSD" and snr_eval is not None:
+        pure_trend_pass = (not snr_eval["is_sandwich_chop"]) and (snr_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
+        is_a_star = bool(
+            drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and
+            (rr >= 2.50) and pure_trend_pass
+        )
+    elif inst_key == "BTCUSD" and btc_eval is not None:
+        pure_trend_pass = (not btc_eval["is_sandwich_chop"]) and (not btc_eval["is_macro_blackout"]) and (btc_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
+        is_a_star = bool(
+            drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and
+            (rr >= 2.00) and pure_trend_pass
+        )
+    else:
+        is_a_star = bool(drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0))
     grade = f"A* GRADE ({conviction_str})" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70.0 else "C-GRADE (NO EDGE / STAND ASIDE)")
 
-    risk_dist_dollars = max(1.0, abs(mid_entry - sl_val))
+    risk_dist_dollars = max(min_risk, abs(mid_entry - sl_val))
+    contract_val = spec["contract"]
+    risk_per_lot = risk_dist_dollars * contract_val
     target_risk_usd = round(20.0 * vol_target_scalar * (quarter_kelly_pct / 2.0), 2)
-    computed_lot = round(max(0.01, min(0.05, target_risk_usd / (risk_dist_dollars * 100.0))), 2)
-    standard_leverage = 2000
-    req_margin = round((computed_lot * 100.0 * current_price) / standard_leverage, 2)
+    max_lot_cap = 0.10 if inst_key == "BTCUSD" else (1.00 if inst_key == "EURUSD" else 0.05)
+    computed_lot = round(max(0.01, min(max_lot_cap, target_risk_usd / max(0.01, risk_per_lot))), 2)
+    standard_leverage = 200 if inst_key == "BTCUSD" else (2000 if inst_key == "XAUUSD" else 500)
+    req_margin = round((computed_lot * contract_val * current_price) / standard_leverage, 2)
 
+    min_rr_threshold = 2.50 if inst_key == "EURUSD" else (2.00 if inst_key == "BTCUSD" else 1.0)
     gate_checks = {
         "bayesian_drift_z20": {"status": "PASS" if drift_ok else "UNMET", "detail": f"{z_label}={z_eff:+.2f}σ | D1 z20={z_20:+.2f}σ, M15(1H)={z_m15_1h:+.2f}σ (P_bull={p_drift_bull}%, P_bear={p_drift_bear}%)"},
         "intraday_exhaustion_squeeze_gate": {"status": "PASS" if exhaustion_ok else "BLOCKED", "detail": "Intraday Tape Aligned (No Squeeze / Range Exhaustion)" if exhaustion_ok else exhaustion_reason},
@@ -2749,8 +3482,20 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
         "mark_to_market_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {win_rate}% | M2M EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}% | PF={pf}"},
         "vpin_order_flow_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"VPIN={vpin_now:.3f} ({'< 0.65 INTRADAY / < 0.70 DAILY SAFE' if vpin_ok else 'TOXIC ORDER FLOW'}) | Kyle λ={kyles_lambda:.4f}"},
-        "calculative_risk_reward": {"status": "VALID" if rr >= 1.0 else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} | Margin ${req_margin} (1:{standard_leverage})"}
+        "calculative_risk_reward": {"status": "VALID" if rr >= min_rr_threshold else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} | Margin ${req_margin} (1:{standard_leverage})"}
     }
+    if inst_key == "EURUSD" and snr_eval is not None:
+        pure_trend_pass = (not snr_eval["is_sandwich_chop"]) and (snr_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
+        gate_checks["eurusd_snr_pure_trend_gate"] = {
+            "status": "PASS" if pure_trend_pass else ("BLOCKED" if snr_eval["is_sandwich_chop"] else "UNMET"),
+            "detail": snr_eval["reason"]
+        }
+    if inst_key == "BTCUSD" and btc_eval is not None:
+        pure_trend_pass = (not btc_eval["is_sandwich_chop"]) and (not btc_eval["is_macro_blackout"]) and (btc_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
+        gate_checks["btc_pure_trend_macro_gate"] = {
+            "status": "PASS" if pure_trend_pass else ("BLOCKED" if (btc_eval["is_sandwich_chop"] or btc_eval["is_macro_blackout"]) else "UNMET"),
+            "detail": btc_eval["reason"]
+        }
 
     if ttl["is_expired"]:
         action = f"A* SETUP EXPIRED (TIME DECAY) // STAND ASIDE (LIMIT OF {ttl['max_validity_minutes']}m EXCEEDED)"
@@ -2779,15 +3524,15 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         action = f"A* GRADE NOT EXIST YET // STAND ASIDE ({reason_gate})"
         ticket_type = "NO_A_STAR_SETUP_STAND_ASIDE"
         ticket_title = f"STATUS: A* GRADE NOT EXIST YET // STAND ASIDE ({z_label}={z_eff:+.2f}σ, M15={z_m15_1h:+.2f}σ, {total_confluence}/100)"
-        entry_zone = f"${entry_low:.2f} - ${entry_high:.2f} (CANDIDATE // BLOCKED BY GATE)"
-        sl_val_str = f"${sl_val:.2f}"
-        tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
-        tp2_val_str = f"${tp2_val:.2f}"
+        entry_zone = f"${entry_low:.{price_dec}f} - ${entry_high:.{price_dec}f} (CANDIDATE // BLOCKED BY GATE)"
+        sl_val_str = f"${sl_val:.{price_dec}f}"
+        tp1_val_str = f"${tp1_val:.{price_dec}f} (1:{rr:.2f} RR)"
+        tp2_val_str = f"${tp2_val:.{price_dec}f}"
         rr_str = f"1:{rr:.2f}"
         safe_lot = 0.00
         max_risk_usd = "$0.00 (STAND ASIDE // CAPITAL PRESERVATION)"
         bias_reason = f"{grade} ({reason_gate}). Causal drift z={z_20:+.2f}σ, VRP={vrp_ann:+.2f}%, MC P(Win)={win_rate}% (BE {p_breakeven}%), EV={ev_r:+.3f}R."
-        entry_reason = f"Pure-probability candidate around spot ${current_price:.2f}; execution blocked until all 3Y-validated gates pass."
+        entry_reason = f"Pure-probability candidate around spot ${current_price:.{price_dec}f}; execution blocked until all 3Y-validated gates pass."
         sl_reason = "No capital at risk."
         tp_reason = "Targets suspended until A* gate passes."
     else:
@@ -2797,17 +3542,17 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         status_str = f"{len(running_trades_h)} RUNNING" if in_running_list else "CLICK [+ ADD TO RUNNING]"
         ticket_title = f"{setup_id_str} [{status_str}] // {total_confluence}/100 (EV={ev_r:+.3f}R, P(Win)={win_rate}%)"
         action = raw_action
-        sl_val_str = f"${sl_val:.2f}"
-        tp1_val_str = f"${tp1_val:.2f} (1:{rr:.2f} RR)"
-        tp2_val_str = f"${tp2_val:.2f}"
+        sl_val_str = f"${sl_val:.{price_dec}f}"
+        tp1_val_str = f"${tp1_val:.{price_dec}f} (1:{rr:.2f} RR)"
+        tp2_val_str = f"${tp2_val:.{price_dec}f}"
         rr_str = f"1:{rr:.2f}"
-        entry_zone = f"${entry_low:.2f} - ${entry_high:.2f}"
+        entry_zone = f"${entry_low:.{price_dec}f} - ${entry_high:.{price_dec}f}"
         safe_lot = computed_lot
-        max_risk_usd = f"${round(safe_lot * 100.0 * risk_dist_dollars, 2):.2f} (HAR-RV Cap ${target_risk_usd:.2f})"
+        max_risk_usd = f"${round(safe_lot * contract_val * risk_dist_dollars, 2):.2f} (HAR-RV Cap ${target_risk_usd:.2f})"
         bias_reason = f"{bias}: {z_label}={z_eff:+.2f}σ (D1 z20={z_20:+.2f}σ, M15={z_m15_1h:+.2f}σ), VRP={vrp_ann:+.1f}%, P(Win)={win_rate}% vs BE {p_breakeven}%, EV={ev_r:+.3f}R (Kelly/4={quarter_kelly_pct}%)."
-        entry_reason = f"Pure-probability execution around spot ${current_price:.2f} (no visual chart patterns)."
-        sl_reason = f"Stop loss ${sl_val:.2f} anchored to {barrier_sl_scale:.2f} ATR_D1 (${atr_d1:.2f})."
-        tp_reason = f"TP1 ${tp1_val:.2f} & TP2 ${tp2_val:.2f}."
+        entry_reason = f"Pure-probability execution around spot ${current_price:.{price_dec}f} (no visual chart patterns)."
+        sl_reason = f"Stop loss ${sl_val:.{price_dec}f} anchored to {barrier_sl_scale:.2f} ATR_D1 (${atr_d1:.{price_dec}f})."
+        tp_reason = f"TP1 ${tp1_val:.{price_dec}f} & TP2 ${tp2_val:.{price_dec}f}."
     rationale = {
         "bias_reason": bias_reason,
         "entry_reason": entry_reason,
@@ -2834,8 +3579,24 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
     }
     bt5 = bt_5y_map.get(h_mode, {"trades": 94, "win_rate_pct": 53.2, "profit_factor": 1.63, "t_stat": "+2.12", "p_val": "0.0367"})
     is_tracked = len(running_trades_h) > 0
+
+    dynamic_be_trigger = None
+    dynamic_be_sl = None
+    if inst_key == "EURUSD" and snr_eval is not None:
+        if is_bullish is True:
+            dynamic_be_trigger = snr_eval["long_setup"]["dynamic_be_shield_trigger"]
+            dynamic_be_sl = snr_eval["long_setup"]["dynamic_be_shield_sl"]
+        elif is_bullish is False:
+            dynamic_be_trigger = snr_eval["short_setup"]["dynamic_be_shield_trigger"]
+            dynamic_be_sl = snr_eval["short_setup"]["dynamic_be_shield_sl"]
+
     return {
         "horizon": h_mode,
+        "instrument": spec["name"],
+        "symbol": inst_key,
+        "contract_size": contract_val,
+        "pip_size": spec["pip"],
+        "pip_value_001": spec["pip_value_001"],
         "confluence_score": total_confluence,
         "confluence_moe_95": 3.8,
         "is_a_star": is_a_star,
@@ -2852,6 +3613,8 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         "algorithmic_footprint": footprint,
         "garch_predicted_shock": garch_shock,
         "time_to_live": ttl,
+        "snr_pure_trend": snr_eval,
+        "btc_regime": btc_eval,
         "probability_engine": {
             "z_20_drift": z_20,
             "z_eff": z_eff,
@@ -2875,6 +3638,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
         },
         "macro_metrics": {
             "yield_spread_10_2": f"{yield_spread:+.2f}%",
+            "transatlantic_yield_spread_us_de": f"{yield_spread_us_de:+.2f}%" if yield_spread_us_de is not None else None,
             "tips_real_rate": f"{tips_real_proxy:+.2f}%",
             "dxy_shock_z": f"{dxy_z:+.2f}σ",
             "wti_beta_shift": f"{oil_shift:+.3f}%",
@@ -2911,7 +3675,7 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "cross_asset_confirmation": {"score": cross_score, "max": 25, "status": f"VPIN={vpin_now:.3f} | 3Y Walk-Forward: {bt3['win_rate_pct']}% Win, PF {bt3['profit_factor']} (p={bt3['p_val']})"}
         },
         "trade_ticket": {
-            "asset": "XAUUSD (Gold Spot)",
+            "asset": f"{spec['name']} ({inst_key})",
             "is_a_star": is_a_star,
             "candidate_id": f"A*_{h_mode.upper()}_CANDIDATE",
             "setup_id": latest_running.get("setup_id", "A* CANDIDATE") if latest_running else "A* CANDIDATE",
@@ -2930,7 +3694,9 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
             "take_profit_2": tp2_val_str,
             "risk_reward_ratio": rr_str,
             "recommended_lot_size_1000_equity": safe_lot,
-            "max_risk_amount_usd": max_risk_usd
+            "max_risk_amount_usd": max_risk_usd,
+            "dynamic_be_shield_trigger": dynamic_be_trigger,
+            "dynamic_be_shield_sl": dynamic_be_sl
         },
         "setup_ledger": {
             "active_setup": latest_running,
@@ -2978,43 +3744,53 @@ def calculate_daily_a_star_setup(current_price=4036.17, atr_m30=12.50, dxy_val=1
 
 
 def calculate_multi_horizon_a_star_setup(
-    current_price=4036.17, atr_m30=12.50, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75,
-    wti_val=86.00, vix_val=None, n_paths=10000, session_h=None, session_l=None, session_c=None
+    current_price=None, atr_m30=None, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75,
+    wti_val=86.00, vix_val=None, n_paths=10000, session_h=None, session_l=None, session_c=None,
+    instrument="XAUUSD", de10y_val=None
 ):
     """
     Unified Multi-Horizon Institutional Quantitative Matrix:
     Evaluates Scalping, Intraday, Daily, and Swing A* setups concurrently without lookahead bias.
+    Supports multi-asset polymorphic execution (XAUUSD, EURUSD, etc.).
     """
+    spec = get_instrument_spec(instrument)
+    inst_key = spec["symbol"]
+    cur_p = current_price if current_price is not None else spec["default_price"]
+    atr_val = atr_m30 if atr_m30 is not None else spec["default_atr_m30"]
+
     scalping = calculate_daily_a_star_setup(
-        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="scalping"
+        horizon="scalping", instrument=instrument, de10y_val=de10y_val
     )
     intraday = calculate_daily_a_star_setup(
-        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="intraday"
+        horizon="intraday", instrument=instrument, de10y_val=de10y_val
     )
     daily = calculate_daily_a_star_setup(
-        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="daily"
+        horizon="daily", instrument=instrument, de10y_val=de10y_val
     )
     swing = calculate_daily_a_star_setup(
-        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="swing"
+        horizon="swing", instrument=instrument, de10y_val=de10y_val
     )
     news = calculate_daily_a_star_setup(
-        current_price=current_price, atr_m30=atr_m30, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
+        current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="news"
+        horizon="news", instrument=instrument, de10y_val=de10y_val
     )
 
     active_count = sum(1 for h in [scalping, intraday, daily, swing, news] if h.get("is_a_star"))
     return {
-        "asset": "XAUUSD (Spot Gold)",
-        "current_price": current_price,
+        "asset": f"{spec['name']} ({inst_key})",
+        "symbol": inst_key,
+        "current_price": cur_p,
+        "pip_size": spec["pip"],
+        "pip_value_001": spec["pip_value_001"],
         "active_a_star_count": active_count,
         "horizons": {
             "scalping": scalping,
@@ -3470,12 +4246,14 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
             valid_sl = (p0 > eff_sl) & (p1 > eff_sl)
             x0_sl = np.log(np.maximum(1e-6, p0 / eff_sl))
             x1_sl = np.log(np.maximum(1e-6, p1 / eff_sl))
-            prob_sl = np.where(valid_sl, np.exp(-2.0 * x0_sl * x1_sl / var_mat), 0.0)
+            exp_sl = np.clip(-2.0 * x0_sl * x1_sl / var_mat, -100.0, 0.0)
+            prob_sl = np.where(valid_sl, np.exp(exp_sl), 0.0)
 
             valid_tp = (p0 < eff_tp) & (p1 < eff_tp)
             x0_tp = np.log(np.maximum(1e-6, eff_tp / p0))
             x1_tp = np.log(np.maximum(1e-6, eff_tp / p1))
-            prob_tp = np.where(valid_tp, np.exp(-2.0 * x0_tp * x1_tp / var_mat), 0.0)
+            exp_tp = np.clip(-2.0 * x0_tp * x1_tp / var_mat, -100.0, 0.0)
+            prob_tp = np.where(valid_tp, np.exp(exp_tp), 0.0)
 
             u_b = rng.uniform(0, 1, (n_paths, steps))
             bridge_sl = valid_sl & (u_b < prob_sl)
@@ -3488,12 +4266,14 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
             valid_sl = (p0 < eff_sl) & (p1 < eff_sl)
             x0_sl = np.log(np.maximum(1e-6, eff_sl / p0))
             x1_sl = np.log(np.maximum(1e-6, eff_sl / p1))
-            prob_sl = np.where(valid_sl, np.exp(-2.0 * x0_sl * x1_sl / var_mat), 0.0)
+            exp_sl = np.clip(-2.0 * x0_sl * x1_sl / var_mat, -100.0, 0.0)
+            prob_sl = np.where(valid_sl, np.exp(exp_sl), 0.0)
 
             valid_tp = (p0 > eff_tp) & (p1 > eff_tp)
             x0_tp = np.log(np.maximum(1e-6, p0 / eff_tp))
             x1_tp = np.log(np.maximum(1e-6, p1 / eff_tp))
-            prob_tp = np.where(valid_tp, np.exp(-2.0 * x0_tp * x1_tp / var_mat), 0.0)
+            exp_tp = np.clip(-2.0 * x0_tp * x1_tp / var_mat, -100.0, 0.0)
+            prob_tp = np.where(valid_tp, np.exp(exp_tp), 0.0)
 
             u_b = rng.uniform(0, 1, (n_paths, steps))
             bridge_sl = valid_sl & (u_b < prob_sl)

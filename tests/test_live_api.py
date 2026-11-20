@@ -11,6 +11,15 @@ import json
 class TestLiveApiEndpoints(unittest.TestCase):
     BASE_URL = "http://127.0.0.1:8888"
 
+    @classmethod
+    def setUpClass(cls):
+        try:
+            req = urllib.request.Request(f"{cls.BASE_URL}/api/daily-a-star")
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                pass
+        except Exception:
+            raise unittest.SkipTest("Live API server not running on port 8888")
+
     def _get(self, path):
         req = urllib.request.Request(f"{self.BASE_URL}{path}", headers={"User-Agent": "NEWSLYSER_TEST"})
         with urllib.request.urlopen(req, timeout=10) as resp:

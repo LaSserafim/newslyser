@@ -41,6 +41,18 @@
       <span class="bbg-tick-val" id="tick-gold">--</span>
     </div>
     <div class="bbg-tick">
+      <span class="bbg-tick-sym">EUR1 (EURO SPOT)</span>
+      <span class="bbg-tick-val" id="tick-eur">--</span>
+    </div>
+    <div class="bbg-tick">
+      <span class="bbg-tick-sym">US-DE (10Y SPREAD)</span>
+      <span class="bbg-tick-val" id="tick-yield-spread-us-de" style="color:#00e5ff;">--</span>
+    </div>
+    <div class="bbg-tick">
+      <span class="bbg-tick-sym">BTC1 (BITCOIN SPOT)</span>
+      <span class="bbg-tick-val" id="tick-btc" style="color:#ff9900;">--</span>
+    </div>
+    <div class="bbg-tick">
       <span class="bbg-tick-sym">DXY (DOLLAR INDEX)</span>
       <span class="bbg-tick-val" id="tick-dxy">--</span>
     </div>
@@ -935,7 +947,12 @@
     <div style="padding:14px; display:flex; flex-direction:column; gap:12px;">
 
       <div class="cockpit-ribbon" style="justify-content:space-between; flex-wrap:wrap; gap:10px;">
-        <div style="display:flex; align-items:center; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="color:var(--amber-cmd); font-weight:800; font-size:10px;">[ ASSET: ]</span>
+          <button class="bbg-btn-mini astar-asset-btn active" data-asset="XAUUSD">GOLD (XAUUSD)</button>
+          <button class="bbg-btn-mini astar-asset-btn" data-asset="EURUSD">EURO (EURUSD)</button>
+          <button class="bbg-btn-mini astar-asset-btn" data-asset="BTCUSD" style="border-color:#ff9900; color:#ff9900;">BITCOIN (BTCUSD)</button>
+          <span style="color:#555; margin:0 4px;">|</span>
           <span style="color:var(--amber-cmd); font-weight:800; font-size:10px;">[ A* HORIZON: ]</span>
           <button class="bbg-btn-mini astar-horizon-btn" data-horizon="scalping">SCALPING (M5/M15 // 1:1.5 RR)</button>
           <button class="bbg-btn-mini astar-horizon-btn" data-horizon="intraday">INTRADAY (H1/4H // 1:2.0 RR)</button>
@@ -968,6 +985,9 @@
               <tr><td class="label">VARIANCE RISK PREMIUM (VRP):</td><td class="val" id="ast-vrp" style="color:#00e5ff; font-weight:800;">--</td></tr>
               <tr><td class="label">HAR-RV PANIC RATIO (RV5/RV22):</td><td class="val" id="ast-har-ratio">--</td></tr>
               <tr><td class="label">14D DAILY TRUE RANGE (ATR_D1):</td><td class="val" id="ast-atr-d1">--</td></tr>
+              <tr id="row-ast-yield-spread"><td class="label" id="lbl-ast-yield-spread">US 10Y-2Y YIELD SPREAD:</td><td class="val" id="ast-yield-spread" style="color:#00e5ff; font-weight:800;">--</td></tr>
+              <tr id="row-ast-pure-trend" style="display:none;"><td class="label" id="lbl-ast-pure-trend">SNR PURE-TREND &amp; EMA:</td><td class="val" id="ast-pure-trend" style="font-weight:800;">--</td></tr>
+              <tr id="row-ast-be-shield" style="display:none;"><td class="label" id="lbl-ast-be-shield">DYNAMIC BREAKEVEN SHIELD:</td><td class="val" id="ast-be-shield" style="color:#00e676; font-weight:800;">--</td></tr>
               <tr><td class="label">5Y WALK-FORWARD EVIDENCE:</td><td class="val" id="ast-bt5-summary" style="color:#00ff88; font-weight:700;">--</td></tr>
               <tr><td class="label">3Y WALK-FORWARD EVIDENCE:</td><td class="val" id="ast-bt-summary" style="color:var(--fg-bright); font-weight:700;">--</td></tr>
             </table>
@@ -1009,7 +1029,7 @@
               <tr><td class="label">4. ORDER FLOW &amp; HC3 (25 pts):</td><td class="val" id="ast-p4">--</td></tr>
               <tr><td class="label">KYLE'S LAMBDA (λ):</td><td class="val" id="ast-lambda">--</td></tr>
               <tr><td class="label">HAR-RV VOL TARGETING:</td><td class="val" id="ast-har-vol" style="color:#00e5ff;">--</td></tr>
-              <tr><td class="label">GLD GEX / O-U / VPIN:</td><td class="val" id="ast-q8-live">--</td></tr>
+              <tr><td class="label" id="lbl-ast-q8">GLD GEX / O-U / VPIN:</td><td class="val" id="ast-q8-live">--</td></tr>
             </table>
           </div>
         </section>
@@ -1031,6 +1051,7 @@
               <tr><td class="label">STOP LOSS:</td><td class="val" id="astar-sl" style="color:#ff4444; font-weight:700;">--</td></tr>
               <tr><td class="label">TAKE PROFIT 1:</td><td class="val" id="astar-tp1" style="color:#ffffff; font-weight:700;">--</td></tr>
               <tr><td class="label">TAKE PROFIT 2:</td><td class="val" id="astar-tp2" style="color:#ffffff; font-weight:700;">--</td></tr>
+              <tr id="row-astar-be-shield" style="display:none;"><td class="label">BREAKEVEN SHIELD:</td><td class="val" id="astar-be-shield" style="color:#00e676; font-weight:700;">--</td></tr>
               <tr><td class="label">POSITION SIZE:</td><td class="val" id="astar-lot" style="color:var(--amber-cmd); font-weight:800;"><span id="astar-lot-text">--</span> <button class="bbg-btn-mini btn-ticket-sizer" data-ev="astar" style="border-color:#00e5ff; color:#00e5ff; font-size:8.5px; padding:1px 5px; margin-left:6px; cursor:pointer;">⚡ SIZER &lt;GO&gt;</button></td></tr>
             </table>
 
@@ -1201,6 +1222,7 @@
                 <select id="calc-instrument" style="width:100%; background:#000; color:var(--amber-cmd); border:1px solid #333; padding:4px; font-family:var(--font-mono); font-size:10px;">
                   <option value="XAUUSD" selected>XAUUSD (Gold 100 oz)</option>
                   <option value="EURUSD">EURUSD (100k units)</option>
+                  <option value="BTCUSD">BTCUSD (Bitcoin 1 BTC // 1:200 CFD)</option>
                   <option value="GBPUSD">GBPUSD (100k units)</option>
                   <option value="US30">US30 (10x index)</option>
                   <option value="CL">CL (Crude Oil 1000 bbl)</option>

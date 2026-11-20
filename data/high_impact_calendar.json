@@ -218,6 +218,49 @@
     "forecast": "0.3%",
     "previous": "0.35%",
     "category": "INFLATION",
-    "effect_xauusd": "YEAR-END WHOLESALE COST TRANSMISSION"
+    "effect_xauusd": "YEAR-END WHOLESALE COST TRANSMISSION",
+    "effect_eurusd": "US WHOLESALE TRANSMISSION -> DXY RELATIVE VALUATION"
+  },
+  {
+    "event_id": "ecb_rate_dec26",
+    "title": "ECB Main Refinancing Rate Decision",
+    "country": "EUR",
+    "date": "2026-12-17",
+    "time": "08:15 AM EST (20:15 WIB)",
+    "impact": "MAXIMUM",
+    "actual": "",
+    "forecast": "3.25%",
+    "previous": "3.40%",
+    "category": "CENTRAL_BANK",
+    "effect_xauusd": "EURO LIQUIDITY TRANSMISSION -> GOLD DIRECTION",
+    "effect_eurusd": "CORE POLICY RATE DRIVER: TRANSATLANTIC YIELD SPREAD (US10Y - DE10Y) REPRICING"
+  },
+  {
+    "event_id": "eur_cpi_flash_nov26",
+    "title": "Eurozone Flash HICP Inflation YoY (Nov)",
+    "country": "EUR",
+    "date": "2026-11-28",
+    "time": "05:00 AM EST (17:00 WIB)",
+    "impact": "HIGH",
+    "actual": "",
+    "forecast": "2.1%",
+    "previous": "2.0%",
+    "category": "INFLATION",
+    "effect_xauusd": "GLOBAL REAL YIELD TRANSMISSION",
+    "effect_eurusd": "EURO INFLATION PULSE // DRIVES ECB RATE CUT PROBABILITY"
+  },
+  {
+    "event_id": "german_ifo_nov26",
+    "title": "German Ifo Business Climate Index (Nov)",
+    "country": "EUR",
+    "date": "2026-11-24",
+    "time": "04:00 AM EST (16:00 WIB)",
+    "impact": "MEDIUM",
+    "actual": "",
+    "forecast": "86.0",
+    "previous": "86.5",
+    "category": "GROWTH",
+    "effect_xauusd": "EUROZONE INDUSTRIAL RISK SENTIMENT",
+    "effect_eurusd": "EURO CYCLICAL SENTIMENT BAROMETER // GERMAN GROWTH BENCHMARK"
   }
 ]

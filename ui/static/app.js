@@ -20,6 +20,7 @@ let yoyDomain = "cpi";
 let yoyTimelineCache = null;
 let yoyActiveKeys = { headline_yoy: true, core_yoy: true, supercore_yoy: true, shelter_yoy: true };
 let ttlTimerInterval = null;
+let CURRENT_ASTAR_ASSET = "XAUUSD";
 
 async function init() {
   initClock();
@@ -412,6 +413,19 @@ function initAllControls() {
       document.querySelectorAll(`[data-ev="${ev}"][data-mc-toggle]`).forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       renderEventMcPane(ev);
+    });
+  });
+
+  // A* Multi-Asset 3-Way Switcher: Gold, Euro, Bitcoin
+  document.querySelectorAll(".astar-asset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const asset = btn.getAttribute("data-asset") || "XAUUSD";
+      CURRENT_ASTAR_ASSET = asset;
+      if (!EVENT_STATE.astar) EVENT_STATE.astar = {};
+      EVENT_STATE.astar.asset = asset;
+      document.querySelectorAll(".astar-asset-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      fetchAstarData();
     });
   });
 
@@ -808,6 +822,9 @@ async function fetchState() {
     const p = data.prices;
     if (p) {
       animateNumber(document.getElementById("tick-gold"), p["GC=F"], "$", "", 2);
+      animateNumber(document.getElementById("tick-eur"), p["EURUSD=X"], "", "", 5);
+      animateNumber(document.getElementById("tick-btc"), p["BTC-USD"], "$", "", 2);
+      if (p["BTC-USD"]) window._LAST_VERIFIED_BTC_PRICE = Number(p["BTC-USD"]);
       animateNumber(document.getElementById("tick-dxy"), p["DX-Y.NYB"], "", "", 2);
       animateNumber(document.getElementById("tick-2y"), p["ZT=F"], "", "%", 2);
       animateNumber(document.getElementById("tick-10y"), p["^TNX"], "", "%", 2);
@@ -1729,10 +1746,11 @@ function initTtlCountdown(serverExpiresAtEpoch, maxValSec = 5400) {
     const nowSec = Math.floor(Date.now() / 1000);
     const remaining = serverExpiresAtEpoch - nowSec;
     if (remaining <= 0) {
-      if (timerEl) { timerEl.innerText = "00m 00s (EXPIRED)"; timerEl.style.color = "#ff4444"; }
-      if (decayEl) { decayEl.innerText = "100% (ALPHA EXPIRED)"; decayEl.style.color = "#ff4444"; }
-      if (statusEl) { statusEl.innerText = "EXPIRED // ORDER CANCELLED"; statusEl.style.color = "#ff4444"; }
+      if (timerEl) { timerEl.innerText = "00m 00s (ROLLING OVER)"; timerEl.style.color = "var(--amber-cmd)"; }
+      if (decayEl) { decayEl.innerText = "100% (ALPHA RESET)"; decayEl.style.color = "var(--amber-cmd)"; }
+      if (statusEl) { statusEl.innerText = "REFRESHING FRESH SESSION..."; statusEl.style.color = "var(--amber-cmd)"; }
       clearInterval(ttlTimerInterval);
+      setTimeout(() => { fetchAstarData(); }, 1200);
       return;
     }
     const m = Math.floor(remaining / 60), s = remaining % 60;
@@ -1750,178 +1768,209 @@ function initTtlCountdown(serverExpiresAtEpoch, maxValSec = 5400) {
   ttlTimerInterval = setInterval(updateClock, 1000);
 }
 
+function applyAstarData(aStar) {
+  if (!aStar) return;
+  const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
+  const pe = aStar.probability_engine || {};
+  // Sync live horizon Z-score into Monte Carlo state so Pane 02 never uses stale -1.18
+  if (!EVENT_STATE.astar) EVENT_STATE.astar = { horizon: h, z: 0 };
+  EVENT_STATE.astar.z = Number(pe.z_eff !== undefined ? pe.z_eff : (pe.z_20_drift || 0));
+  window._LAST_ASTAR_DATA = aStar;
+
+  const bt3 = pe.backtest_3y_summary || {};
+  const bt5 = pe.backtest_5y_summary || {};
+  if (document.getElementById("ast-z20")) {
+    const zVal = Number(pe.z_eff !== undefined ? pe.z_eff : (pe.z_20_drift || 0));
+    const zLbl = pe.z_label || "z20";
+    const m15Str = pe.z_m15_1h !== undefined ? ` | M15(1H): ${pe.z_m15_1h >= 0 ? "+" : ""}${Number(pe.z_m15_1h).toFixed(2)}σ` : "";
+    document.getElementById("ast-z20").innerText = `${zLbl}=${zVal >= 0 ? "+" : ""}${zVal.toFixed(2)}σ${m15Str}`;
+    document.getElementById("ast-z20").style.color = Math.abs(zVal) >= 0.75 ? (zVal > 0 ? "#00e676" : "#ff4444") : "var(--amber-cmd)";
+  }
+  if (document.getElementById("ast-mu-post")) {
+    const muVal = Number(pe.mu_daily_post_pct || 0);
+    document.getElementById("ast-mu-post").innerText = `${muVal >= 0 ? "+" : ""}${muVal.toFixed(3)}%/day (5D Drift: ${(muVal * 5.0).toFixed(2)}%)`;
+  }
+  if (document.getElementById("ast-drift-prob")) {
+    document.getElementById("ast-drift-prob").innerText = `Bullish ${pe.p_drift_bull_pct || 50}% / Bearish ${pe.p_drift_bear_pct || 50}%`;
+  }
+  if (document.getElementById("ast-vrp")) {
+    const vrpVal = Number(pe.vrp_ann_pct || 0);
+    document.getElementById("ast-vrp").innerText = `${vrpVal >= 0 ? "+" : ""}${vrpVal.toFixed(1)}% (GVZ ${pe.gvz_iv_pct}% - RV22 ${pe.rv22_ann_pct}%)`;
+    document.getElementById("ast-vrp").style.color = vrpVal > 0 ? "#00e5ff" : "#ff4444";
+  }
+  if (document.getElementById("ast-har-ratio")) {
+    const ratio = Number(pe.rv5_ann_pct || 0) / Math.max(1.0, Number(pe.rv22_ann_pct || 1.0));
+    document.getElementById("ast-har-ratio").innerText = `${ratio.toFixed(2)}x (Threshold <= 1.15x Calm)`;
+    document.getElementById("ast-har-ratio").style.color = ratio <= 1.15 ? "#00e5ff" : "#ff4444";
+  }
+  if (document.getElementById("ast-atr-d1")) {
+    document.getElementById("ast-atr-d1").innerText = `$${Number(pe.atr_d1_usd || 0).toFixed(2)} (SL: 1.0 ATR / TP: 2.0 ATR)`;
+  }
+  if (document.getElementById("ast-bt5-summary") && bt5.trades) {
+    document.getElementById("ast-bt5-summary").innerText = `${bt5.trades} Trades | ${bt5.win_rate_pct}% Win | PF ${bt5.profit_factor} (t=${bt5.t_stat}, p=${bt5.p_val})`;
+  }
+  if (document.getElementById("ast-bt-summary") && bt3.trades) {
+    document.getElementById("ast-bt-summary").innerText = `${bt3.trades} Trades | ${bt3.win_rate_pct}% Win | PF ${bt3.profit_factor} (t=${bt3.t_stat}, p=${bt3.p_val})`;
+  }
+
+  // Pillars & Lo-MacKinlay VR
+  const pil = aStar.pillars || {};
+  const fp = aStar.algorithmic_footprint || {};
+  const fpa = aStar.first_passage_analysis || {};
+  const mcq = aStar.monte_carlo_quantiles || {};
+
+  if (document.getElementById("ast-score")) document.getElementById("ast-score").innerText = `${aStar.confluence_score}/100 (${aStar.grade})`;
+  if (document.getElementById("ast-p1") && pil.macro_trend_alignment) document.getElementById("ast-p1").innerText = `${pil.macro_trend_alignment.score}/25 (${pil.macro_trend_alignment.status})`;
+  if (document.getElementById("ast-p2") && pil.liquidity_sweep_status) document.getElementById("ast-p2").innerText = `${pil.liquidity_sweep_status.score}/25 (${pil.liquidity_sweep_status.status})`;
+  if (document.getElementById("ast-p3") && pil.volatility_band_status) document.getElementById("ast-p3").innerText = `${pil.volatility_band_status.score}/25 (${pil.volatility_band_status.status})`;
+  if (document.getElementById("ast-p4") && pil.cross_asset_confirmation) document.getElementById("ast-p4").innerText = `${pil.cross_asset_confirmation.score}/25 (${pil.cross_asset_confirmation.status})`;
+  if (document.getElementById("ast-vr5")) document.getElementById("ast-vr5").innerText = fp.footprint_verdict || `VR=${fp.lo_mackinlay_vr5}x (p=${fp.p_value})`;
+  if (document.getElementById("ast-lambda")) document.getElementById("ast-lambda").innerText = `λ = ${fp.kyles_lambda}% | Amihud = ${fp.amihud_illiq} (n=${fp.n_bars})`;
+  const q8p = aStar.quant_8_pillars || {};
+  if (document.getElementById("ast-har-vol")) {
+    document.getElementById("ast-har-vol").innerText = `${q8p.vol_targeting_scalar || 1.0}x Cap $${q8p.target_risk_usd || 30.0} (Fcst ${q8p.har_rv_forecast_pct || 1.19}%/d | t5 VaR99 ${q8p.var99_student_t5_pct || -3.52}%)`;
+  }
+  if (document.getElementById("ast-q8-live")) {
+    document.getElementById("ast-q8-live").innerText = `GEX $${q8p.net_gex_usd_m || 0}M (Flip $${q8p.gamma_flip_xau || 0}) | O-U s=${q8p.ou_fair_value_s_score >= 0 ? "+" : ""}${q8p.ou_fair_value_s_score || 0}σ | VPIN=${q8p.vpin_now || 0.44}`;
+  }
+  if (document.getElementById("val-ast-pwin")) document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (M2M EV: ${fpa.expected_value_r >= 0 ? "+" : ""}${fpa.expected_value_r}R / Kelly: ${fpa.quarter_kelly_pct}%)`;
+  if (document.getElementById("val-ast-var")) document.getElementById("val-ast-var").innerText = `${mcq.var_95_pct}% (CVaR: ${mcq.cvar_95_pct}% | ${(mcq.n_paths || 10000).toLocaleString()} paths)`;
+
+  const ticket = aStar.trade_ticket || {};
+  const scoreBadge = document.getElementById("astar-grade-badge");
+  const ticketLabel = document.getElementById("astar-ticket-label");
+  const ticketPane = document.getElementById("astar-ticket-pane");
+  const actionEl = document.getElementById("astar-action");
+  const isEur = aStar.symbol === "EURUSD";
+  const isBtc = aStar.symbol === "BTCUSD";
+  const pDec = isEur ? 5 : 2;
+  const pPfx = isEur ? "" : "$";
+
+  if (scoreBadge) scoreBadge.innerText = `${aStar.confluence_score}/100`;
+  if (actionEl) {
+    if (aStar.btc_regime?.is_macro_blackout) {
+      actionEl.innerHTML = `<span style="background:#ff4444; color:#000; padding:2px 6px; font-weight:900; margin-right:6px;">MACRO BLACKOUT</span> ACTION: STAND ASIDE — T-30m TO T+15m HIGH-IMPACT LIQUIDITY FIREWALL`;
+      actionEl.style.color = "#ff4444";
+    } else if (aStar.btc_regime?.is_sandwich_chop) {
+      actionEl.innerHTML = `<span style="background:var(--amber-cmd); color:#000; padding:2px 6px; font-weight:900; margin-right:6px;">SANDWICH CHOP</span> ACTION: STAND ASIDE — PRICE COMPRESSED BETWEEN EMA50 & EMA200`;
+      actionEl.style.color = "var(--amber-cmd)";
+    } else {
+      actionEl.innerText = `ACTION: ${ticket.action || "STAND ASIDE"}`;
+      actionEl.style.color = (ticket.action || "").includes("LONG") || (ticket.action || "").includes("BUY") ? "#00e676" : ((ticket.action || "").includes("SHORT") || (ticket.action || "").includes("SELL") ? "#ff4444" : "#ffffff");
+    }
+  }
+  if (ticketLabel) {
+    if (isBtc) {
+      ticketLabel.innerHTML = `[ BITCOIN CFD // 1:200 BROKER LEVERAGE ] <span style="color:#ff9900;">${ticket.ticket_title || 'BTC A* SETUP'}</span>`;
+    } else if (isEur) {
+      ticketLabel.innerHTML = `[ EURO FX // 1:500 LEVERAGE ] <span style="color:#00e5ff;">${ticket.ticket_title || 'EURUSD A* SETUP'}</span>`;
+    } else {
+      ticketLabel.innerText = ticket.ticket_title || `EXECUTION TICKET (${aStar.confluence_score}/100)`;
+    }
+  }
+  if (ticketPane) ticketPane.style.borderStyle = aStar.is_a_star ? "solid" : "dashed";
+
+  if (document.getElementById("astar-entry")) document.getElementById("astar-entry").innerText = ticket.entry_zone || "--";
+  if (document.getElementById("astar-sl")) document.getElementById("astar-sl").innerText = ticket.stop_loss || "--";
+  if (document.getElementById("astar-tp1")) document.getElementById("astar-tp1").innerText = ticket.take_profit_1 || "--";
+  if (document.getElementById("astar-tp2")) document.getElementById("astar-tp2").innerText = ticket.take_profit_2 || "--";
+  const lotTextEl = document.getElementById("astar-lot-text") || document.getElementById("astar-lot");
+  if (lotTextEl) lotTextEl.innerText = `${ticket.recommended_lot_size_1000_equity || 0.00} LOT (${ticket.max_risk_amount_usd || '$0.00'})`;
+
+  // Update Opt-In Add/Skip Buttons on Ticket Pane
+  const btnAdd = document.getElementById("btn-add-astar-running");
+  const btnSkip = document.getElementById("btn-skip-astar-setup");
+  const fbEl = document.getElementById("astar-optin-feedback");
+  const runningCount = Number(aStar.running_count || (aStar.in_running_list ? 1 : 0));
+  const isAStar = !!aStar.is_a_star;
+  const dirWord = (ticket.action || "").includes("LONG") ? "LONG" : "SHORT";
+
+  if (btnAdd) {
+    if (isAStar) {
+      btnAdd.disabled = false;
+      if (runningCount > 0) {
+        btnAdd.innerText = `+ SCALE IN / ADD NEW ${h.toUpperCase()} (${runningCount} ACTIVE) <GO>`;
+        btnAdd.style.background = "#092129";
+        btnAdd.style.borderColor = "#00e5ff";
+        btnAdd.style.color = "#00e5ff";
+      } else {
+        btnAdd.innerText = `+ ADD ${h.toUpperCase()} ${dirWord} TO RUNNING LIST <GO>`;
+        btnAdd.style.background = "#0b2414";
+        btnAdd.style.borderColor = "#00e676";
+        btnAdd.style.color = "#00e676";
+      }
+    } else {
+      btnAdd.disabled = true;
+      btnAdd.innerText = `STAND ASIDE — NOT A* GRADE (${h.toUpperCase()})`;
+      btnAdd.style.background = "#181414";
+      btnAdd.style.borderColor = "#553333";
+      btnAdd.style.color = "#996666";
+    }
+  }
+  if (btnSkip) {
+    btnSkip.disabled = false;
+    btnSkip.style.opacity = "1";
+  }
+  if (fbEl && !window._ASTAR_OPTIN_LOCK_MSG) {
+    if (runningCount > 0) {
+      fbEl.innerHTML = `ACTIVE POSITIONS: <strong style="color:#00e5ff;">${runningCount} ${h.toUpperCase()} trade(s)</strong> running in <a href="#astar-running-tbody" style="color:#00e5ff; text-decoration:underline;">[06A // RUNNING & ACTIVE]</a> below. Fresh live candidate shown above.`;
+    } else if (isAStar) {
+      fbEl.innerText = `READY FOR OPT-IN: Click [+ ADD] to track this ${h.toUpperCase()} A* setup live, or [× SKIP] to ignore.`;
+      fbEl.style.color = "#00e676";
+    } else {
+      fbEl.innerText = `GATE PROTECTED: ${h.toUpperCase()} is currently STAND ASIDE — wait for A* conditions.`;
+      fbEl.style.color = "#888";
+    }
+  }
+
+  // Visual Position Progress Gauge
+  const ls = aStar.locked_setup;
+  const curP = aStar.current_price || (isBtc ? 91500.0 : (isEur ? 1.08500 : 3800.0));
+  const gSl = document.getElementById("gauge-sl"), gEnt = document.getElementById("gauge-entry"), gLiv = document.getElementById("gauge-live"), gTp = document.getElementById("gauge-tp1");
+  const gUsd = document.getElementById("gauge-pnl-usd"), gR = document.getElementById("gauge-pnl-r"), gSt = document.getElementById("gauge-status-badge"), gPin = document.getElementById("gauge-cursor-pin");
+
+  if (ls) {
+    if (gSl) gSl.innerText = `${pPfx}${(ls.stop_loss || 0).toFixed(pDec)}`;
+    if (gEnt) gEnt.innerText = `${pPfx}${(ls.fill_price || (Array.isArray(ls.entry_zone) ? (ls.entry_zone[0] + ls.entry_zone[1]) / 2 : curP)).toFixed(pDec)}`;
+    if (gLiv) gLiv.innerText = `${pPfx}${curP.toFixed(pDec)}`;
+    if (gTp) gTp.innerText = `${pPfx}${(ls.take_profit_1 || 0).toFixed(pDec)}`;
+    const pUsd = ls.floating_pnl_usd || 0, pR = ls.floating_r || 0;
+    if (gUsd) { gUsd.innerText = `${pUsd >= 0 ? "+" : ""}$${pUsd.toFixed(2)} USD`; gUsd.style.color = pUsd >= 0 ? "#00e676" : "#ff4444"; }
+    if (gR) { gR.innerText = `${pR >= 0 ? "+" : ""}${pR.toFixed(2)} R`; gR.style.color = pR >= 0 ? "#00e676" : "#ff4444"; }
+    if (gSt) gSt.innerText = ls.status || "PENDING_TRIGGER";
+    const rng = Math.abs((ls.take_profit_1 || 0) - (ls.stop_loss || 0));
+    if (gPin && rng > 0) {
+      const pct = ls.direction === "BUY" ? ((curP - ls.stop_loss) / rng) * 100 : ((ls.stop_loss - curP) / rng) * 100;
+      gPin.style.left = `${Math.max(0, Math.min(100, pct))}%`;
+    }
+  } else {
+    if (gSl) gSl.innerText = ticket.stop_loss || "--";
+    if (gEnt) gEnt.innerText = ticket.entry_zone ? ticket.entry_zone.split("(")[0].trim() : "--";
+    if (gLiv) gLiv.innerText = `${pPfx}${curP.toFixed(pDec)}`;
+    if (gTp) gTp.innerText = ticket.take_profit_1 || "--";
+    if (gUsd) { gUsd.innerText = "$0.00 USD"; gUsd.style.color = "#888"; }
+    if (gR) { gR.innerText = "0.00 R"; gR.style.color = "#888"; }
+    if (gSt) gSt.innerText = aStar.is_a_star ? "OPT-IN READY" : (ticket.setup_status || "STAND_ASIDE");
+  }
+
+  if (aStar.time_to_live && aStar.time_to_live.expires_at_epoch) {
+    initTtlCountdown(aStar.time_to_live.expires_at_epoch, aStar.time_to_live.max_validity_seconds || 5400);
+  }
+
+  renderEventMcPane("astar");
+}
+
 async function fetchAstarData() {
   try {
     const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
-    const [aRes, dRes] = await Promise.all([fetch(`/api/daily-a-star?horizon=${h}`), fetch("/api/dynamic-levels")]);
+    const [aRes, dRes] = await Promise.all([
+      fetch(`/api/daily-a-star?horizon=${h}&instrument=${CURRENT_ASTAR_ASSET}`),
+      fetch("/api/dynamic-levels")
+    ]);
     const aStar = await aRes.json();
     const dyn = await dRes.json();
     if (!aStar) return;
-
-    const pe = aStar.probability_engine || {};
-    // Sync live horizon Z-score into Monte Carlo state so Pane 02 never uses stale -1.18
-    if (!EVENT_STATE.astar) EVENT_STATE.astar = { horizon: h, z: 0 };
-    EVENT_STATE.astar.z = Number(pe.z_eff !== undefined ? pe.z_eff : (pe.z_20_drift || 0));
-    window._LAST_ASTAR_DATA = aStar;
-
-    const bt3 = pe.backtest_3y_summary || {};
-    const bt5 = pe.backtest_5y_summary || {};
-    if (document.getElementById("ast-z20")) {
-      const zVal = Number(pe.z_eff !== undefined ? pe.z_eff : (pe.z_20_drift || 0));
-      const zLbl = pe.z_label || "z20";
-      const m15Str = pe.z_m15_1h !== undefined ? ` | M15(1H): ${pe.z_m15_1h >= 0 ? "+" : ""}${Number(pe.z_m15_1h).toFixed(2)}σ` : "";
-      document.getElementById("ast-z20").innerText = `${zLbl}=${zVal >= 0 ? "+" : ""}${zVal.toFixed(2)}σ${m15Str}`;
-      document.getElementById("ast-z20").style.color = Math.abs(zVal) >= 0.75 ? (zVal > 0 ? "#00e676" : "#ff4444") : "var(--amber-cmd)";
-    }
-    if (document.getElementById("ast-mu-post")) {
-      const muVal = Number(pe.mu_daily_post_pct || 0);
-      document.getElementById("ast-mu-post").innerText = `${muVal >= 0 ? "+" : ""}${muVal.toFixed(3)}%/day (5D Drift: ${(muVal * 5.0).toFixed(2)}%)`;
-    }
-    if (document.getElementById("ast-drift-prob")) {
-      document.getElementById("ast-drift-prob").innerText = `Bullish ${pe.p_drift_bull_pct || 50}% / Bearish ${pe.p_drift_bear_pct || 50}%`;
-    }
-    if (document.getElementById("ast-vrp")) {
-      const vrpVal = Number(pe.vrp_ann_pct || 0);
-      document.getElementById("ast-vrp").innerText = `${vrpVal >= 0 ? "+" : ""}${vrpVal.toFixed(1)}% (GVZ ${pe.gvz_iv_pct}% - RV22 ${pe.rv22_ann_pct}%)`;
-      document.getElementById("ast-vrp").style.color = vrpVal > 0 ? "#00e5ff" : "#ff4444";
-    }
-    if (document.getElementById("ast-har-ratio")) {
-      const ratio = Number(pe.rv5_ann_pct || 0) / Math.max(1.0, Number(pe.rv22_ann_pct || 1.0));
-      document.getElementById("ast-har-ratio").innerText = `${ratio.toFixed(2)}x (Threshold <= 1.15x Calm)`;
-      document.getElementById("ast-har-ratio").style.color = ratio <= 1.15 ? "#00e5ff" : "#ff4444";
-    }
-    if (document.getElementById("ast-atr-d1")) {
-      document.getElementById("ast-atr-d1").innerText = `$${Number(pe.atr_d1_usd || 0).toFixed(2)} (SL: 1.0 ATR / TP: 2.0 ATR)`;
-    }
-    if (document.getElementById("ast-bt5-summary") && bt5.trades) {
-      document.getElementById("ast-bt5-summary").innerText = `${bt5.trades} Trades | ${bt5.win_rate_pct}% Win | PF ${bt5.profit_factor} (t=${bt5.t_stat}, p=${bt5.p_val})`;
-    }
-    if (document.getElementById("ast-bt-summary") && bt3.trades) {
-      document.getElementById("ast-bt-summary").innerText = `${bt3.trades} Trades | ${bt3.win_rate_pct}% Win | PF ${bt3.profit_factor} (t=${bt3.t_stat}, p=${bt3.p_val})`;
-    }
-
-    // Pillars & Lo-MacKinlay VR
-    const pil = aStar.pillars || {};
-    const fp = aStar.algorithmic_footprint || {};
-    const fpa = aStar.first_passage_analysis || {};
-    const mcq = aStar.monte_carlo_quantiles || {};
-
-    if (document.getElementById("ast-score")) document.getElementById("ast-score").innerText = `${aStar.confluence_score}/100 (${aStar.grade})`;
-    if (document.getElementById("ast-p1") && pil.macro_trend_alignment) document.getElementById("ast-p1").innerText = `${pil.macro_trend_alignment.score}/25 (${pil.macro_trend_alignment.status})`;
-    if (document.getElementById("ast-p2") && pil.liquidity_sweep_status) document.getElementById("ast-p2").innerText = `${pil.liquidity_sweep_status.score}/25 (${pil.liquidity_sweep_status.status})`;
-    if (document.getElementById("ast-p3") && pil.volatility_band_status) document.getElementById("ast-p3").innerText = `${pil.volatility_band_status.score}/25 (${pil.volatility_band_status.status})`;
-    if (document.getElementById("ast-p4") && pil.cross_asset_confirmation) document.getElementById("ast-p4").innerText = `${pil.cross_asset_confirmation.score}/25 (${pil.cross_asset_confirmation.status})`;
-    if (document.getElementById("ast-vr5")) document.getElementById("ast-vr5").innerText = fp.footprint_verdict || `VR=${fp.lo_mackinlay_vr5}x (p=${fp.p_value})`;
-    if (document.getElementById("ast-lambda")) document.getElementById("ast-lambda").innerText = `λ = ${fp.kyles_lambda}% | Amihud = ${fp.amihud_illiq} (n=${fp.n_bars})`;
-    const q8p = aStar.quant_8_pillars || {};
-    if (document.getElementById("ast-har-vol")) {
-      document.getElementById("ast-har-vol").innerText = `${q8p.vol_targeting_scalar || 1.0}x Cap $${q8p.target_risk_usd || 30.0} (Fcst ${q8p.har_rv_forecast_pct || 1.19}%/d | t5 VaR99 ${q8p.var99_student_t5_pct || -3.52}%)`;
-    }
-    if (document.getElementById("ast-q8-live")) {
-      document.getElementById("ast-q8-live").innerText = `GEX $${q8p.net_gex_usd_m || 0}M (Flip $${q8p.gamma_flip_xau || 0}) | O-U s=${q8p.ou_fair_value_s_score >= 0 ? "+" : ""}${q8p.ou_fair_value_s_score || 0}σ | VPIN=${q8p.vpin_now || 0.44}`;
-    }
-    if (document.getElementById("val-ast-pwin")) document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (M2M EV: ${fpa.expected_value_r >= 0 ? "+" : ""}${fpa.expected_value_r}R / Kelly: ${fpa.quarter_kelly_pct}%)`;
-    if (document.getElementById("val-ast-var")) document.getElementById("val-ast-var").innerText = `${mcq.var_95_pct}% (CVaR: ${mcq.cvar_95_pct}% | ${(mcq.n_paths || 10000).toLocaleString()} paths)`;
-
-    const ticket = aStar.trade_ticket || {};
-    const scoreBadge = document.getElementById("astar-grade-badge");
-    const ticketLabel = document.getElementById("astar-ticket-label");
-    const ticketPane = document.getElementById("astar-ticket-pane");
-    const actionEl = document.getElementById("astar-action");
-
-    if (scoreBadge) scoreBadge.innerText = `${aStar.confluence_score}/100`;
-    if (actionEl) actionEl.innerText = `ACTION: ${ticket.action || "STAND ASIDE"}`;
-    if (ticketLabel) ticketLabel.innerText = ticket.ticket_title || `EXECUTION TICKET (${aStar.confluence_score}/100)`;
-    if (ticketPane) ticketPane.style.borderStyle = aStar.is_a_star ? "solid" : "dashed";
-
-    if (document.getElementById("astar-entry")) document.getElementById("astar-entry").innerText = ticket.entry_zone || "--";
-    if (document.getElementById("astar-sl")) document.getElementById("astar-sl").innerText = ticket.stop_loss || "--";
-    if (document.getElementById("astar-tp1")) document.getElementById("astar-tp1").innerText = ticket.take_profit_1 || "--";
-    if (document.getElementById("astar-tp2")) document.getElementById("astar-tp2").innerText = ticket.take_profit_2 || "--";
-    const lotTextEl = document.getElementById("astar-lot-text") || document.getElementById("astar-lot");
-    if (lotTextEl) lotTextEl.innerText = `${ticket.recommended_lot_size_1000_equity || 0.00} LOT (${ticket.max_risk_amount_usd || '$0.00'})`;
-
-    // Update Opt-In Add/Skip Buttons on Ticket Pane
-    const btnAdd = document.getElementById("btn-add-astar-running");
-    const btnSkip = document.getElementById("btn-skip-astar-setup");
-    const fbEl = document.getElementById("astar-optin-feedback");
-    const runningCount = Number(aStar.running_count || (aStar.in_running_list ? 1 : 0));
-    const isAStar = !!aStar.is_a_star;
-    const dirWord = (ticket.action || "").includes("LONG") ? "LONG" : "SHORT";
-
-    if (btnAdd) {
-      if (isAStar) {
-        btnAdd.disabled = false;
-        if (runningCount > 0) {
-          btnAdd.innerText = `+ SCALE IN / ADD NEW ${h.toUpperCase()} (${runningCount} ACTIVE) <GO>`;
-          btnAdd.style.background = "#092129";
-          btnAdd.style.borderColor = "#00e5ff";
-          btnAdd.style.color = "#00e5ff";
-        } else {
-          btnAdd.innerText = `+ ADD ${h.toUpperCase()} ${dirWord} TO RUNNING LIST <GO>`;
-          btnAdd.style.background = "#0b2414";
-          btnAdd.style.borderColor = "#00e676";
-          btnAdd.style.color = "#00e676";
-        }
-      } else {
-        btnAdd.disabled = true;
-        btnAdd.innerText = `STAND ASIDE — NOT A* GRADE (${h.toUpperCase()})`;
-        btnAdd.style.background = "#181414";
-        btnAdd.style.borderColor = "#553333";
-        btnAdd.style.color = "#996666";
-      }
-    }
-    if (btnSkip) {
-      btnSkip.disabled = false;
-      btnSkip.style.opacity = "1";
-    }
-    if (fbEl && !window._ASTAR_OPTIN_LOCK_MSG) {
-      if (runningCount > 0) {
-        fbEl.innerHTML = `ACTIVE POSITIONS: <strong style="color:#00e5ff;">${runningCount} ${h.toUpperCase()} trade(s)</strong> running in <a href="#astar-running-tbody" style="color:#00e5ff; text-decoration:underline;">[06A // RUNNING & ACTIVE]</a> below. Fresh live candidate shown above.`;
-      } else if (isAStar) {
-        fbEl.innerText = `READY FOR OPT-IN: Click [+ ADD] to track this ${h.toUpperCase()} A* setup live, or [× SKIP] to ignore.`;
-        fbEl.style.color = "#00e676";
-      } else {
-        fbEl.innerText = `GATE PROTECTED: ${h.toUpperCase()} is currently STAND ASIDE — wait for A* conditions.`;
-        fbEl.style.color = "#888";
-      }
-    }
-
-    // Visual Position Progress Gauge
-    const ls = aStar.locked_setup;
-    const curP = aStar.current_price || 3800.0;
-    const gSl = document.getElementById("gauge-sl"), gEnt = document.getElementById("gauge-entry"), gLiv = document.getElementById("gauge-live"), gTp = document.getElementById("gauge-tp1");
-    const gUsd = document.getElementById("gauge-pnl-usd"), gR = document.getElementById("gauge-pnl-r"), gSt = document.getElementById("gauge-status-badge"), gPin = document.getElementById("gauge-cursor-pin");
-
-    if (ls) {
-      if (gSl) gSl.innerText = `$${(ls.stop_loss || 0).toFixed(2)}`;
-      if (gEnt) gEnt.innerText = `$${(ls.fill_price || (Array.isArray(ls.entry_zone) ? (ls.entry_zone[0] + ls.entry_zone[1]) / 2 : curP)).toFixed(2)}`;
-      if (gLiv) gLiv.innerText = `$${curP.toFixed(2)}`;
-      if (gTp) gTp.innerText = `$${(ls.take_profit_1 || 0).toFixed(2)}`;
-      const pUsd = ls.floating_pnl_usd || 0, pR = ls.floating_r || 0;
-      if (gUsd) { gUsd.innerText = `${pUsd >= 0 ? "+" : ""}$${pUsd.toFixed(2)} USD`; gUsd.style.color = pUsd >= 0 ? "#00e676" : "#ff4444"; }
-      if (gR) { gR.innerText = `${pR >= 0 ? "+" : ""}${pR.toFixed(2)} R`; gR.style.color = pR >= 0 ? "#00e676" : "#ff4444"; }
-      if (gSt) gSt.innerText = ls.status || "PENDING_TRIGGER";
-      const rng = Math.abs((ls.take_profit_1 || 0) - (ls.stop_loss || 0));
-      if (gPin && rng > 0) {
-        const pct = ls.direction === "BUY" ? ((curP - ls.stop_loss) / rng) * 100 : ((ls.stop_loss - curP) / rng) * 100;
-        gPin.style.left = `${Math.max(0, Math.min(100, pct))}%`;
-      }
-    } else {
-      if (gSl) gSl.innerText = ticket.stop_loss || "--";
-      if (gEnt) gEnt.innerText = ticket.entry_zone ? ticket.entry_zone.split("(")[0].trim() : "--";
-      if (gLiv) gLiv.innerText = `$${curP.toFixed(2)}`;
-      if (gTp) gTp.innerText = ticket.take_profit_1 || "--";
-      if (gUsd) { gUsd.innerText = "$0.00 USD"; gUsd.style.color = "#888"; }
-      if (gR) { gR.innerText = "0.00 R"; gR.style.color = "#888"; }
-      if (gSt) gSt.innerText = aStar.is_a_star ? "OPT-IN READY" : (ticket.setup_status || "STAND_ASIDE");
-    }
-
-    if (aStar.time_to_live && aStar.time_to_live.expires_at_epoch) {
-      initTtlCountdown(aStar.time_to_live.expires_at_epoch, aStar.time_to_live.max_validity_seconds || 5400);
-    }
-
-    renderEventMcPane("astar");
+    applyAstarData(aStar);
     fetchGlobalMacroMatrix();
     fetchQuant8AuditTable();
     renderSetupLedgerTable();
@@ -1944,7 +1993,7 @@ async function addHorizonSetupToRunning(horizon) {
     const res = await fetch("/api/setup-ledger/add", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ horizon })
+      body: JSON.stringify({ horizon, asset: CURRENT_ASTAR_ASSET })
     });
     const out = await res.json();
     delete window._SKIPPED_ASTAR_HORIZONS[horizon];
@@ -1995,7 +2044,7 @@ async function renderMultiHorizonOptInMatrix() {
   const wrap = document.getElementById("astar-multi-optin-bar");
   if (!wrap) return;
   try {
-    const res = await fetch("/api/multi-horizon-a-star");
+    const res = await fetch(`/api/multi-horizon-a-star?instrument=${CURRENT_ASTAR_ASSET}`);
     const data = await res.json();
     const horizons = data.horizons || {};
     const order = ["scalping", "intraday", "daily", "swing", "news"];
@@ -2100,14 +2149,23 @@ async function renderSetupLedgerTable() {
     }
 
     const fmtEntry = s => {
-      if (s.fill_price) return `$${Number(s.fill_price).toFixed(2)}`;
-      if (Array.isArray(s.entry_zone)) return `$${Number(s.entry_zone[0]).toFixed(2)}–$${Number(s.entry_zone[1]).toFixed(2)}`;
+      const isE = (s.asset === "EURUSD");
+      const d = isE ? 5 : 2;
+      const p = isE ? "" : "$";
+      if (s.fill_price) return `${p}${Number(s.fill_price).toFixed(d)}`;
+      if (Array.isArray(s.entry_zone)) return `${p}${Number(s.entry_zone[0]).toFixed(d)}–${p}${Number(s.entry_zone[1]).toFixed(d)}`;
       return s.entry_zone || "N/A";
     };
     const calcPips = s => {
       const eRef = s.fill_price || (Array.isArray(s.entry_zone) ? (s.entry_zone[0] + s.entry_zone[1]) / 2.0 : null);
-      const xRef = s.exit_price || livePx;
-      if (eRef && xRef) return ((s.direction === "BUY" ? (xRef - eRef) : (eRef - xRef)) * 10.0);
+      const isE = (s.asset === "EURUSD");
+      const isB = (s.asset === "BTCUSD");
+      const lp = isE ? (data.live_prices?.EURUSD || 1.085) : (isB ? (data.live_prices?.BTCUSD || 91500) : livePx);
+      const xRef = s.exit_price || lp;
+      if (eRef && xRef) {
+        const mult = isE ? 10000.0 : (isB ? 1.0 : 10.0);
+        return ((s.direction === "BUY" ? (xRef - eRef) : (eRef - xRef)) * mult);
+      }
       return null;
     };
 
@@ -2122,16 +2180,22 @@ async function renderSetupLedgerTable() {
           const pnlCol = fu >= 0 ? "#00e676" : "#ff4444";
           const dirCol = s.direction === "BUY" ? "#00e676" : "#ff4444";
           const stCol = s.status === "PARTIAL_TP_HIT" ? "#00e676" : "#00e5ff";
-          const tpTxt = `${s.take_profit_1 ? `$${Number(s.take_profit_1).toFixed(2)}` : "--"} / ${s.take_profit_2 ? `$${Number(s.take_profit_2).toFixed(2)}` : "--"}`;
+          const isE = (s.asset === "EURUSD");
+          const isB = (s.asset === "BTCUSD");
+          const d = isE ? 5 : 2;
+          const p = isE ? "" : "$";
+          const assetBadge = s.asset ? `<span style="font-size:8px; border:1px solid ${isB ? '#ff9900' : (isE ? '#00e5ff' : '#ffd700')}; color:${isB ? '#ff9900' : (isE ? '#00e5ff' : '#ffd700')}; padding:1px 3px; margin-right:4px;">${s.asset}</span>` : "";
+          const lp = isE ? (data.live_prices?.EURUSD) : (isB ? (data.live_prices?.BTCUSD) : livePx);
+          const tpTxt = `${s.take_profit_1 ? `${p}${Number(s.take_profit_1).toFixed(d)}` : "--"} / ${s.take_profit_2 ? `${p}${Number(s.take_profit_2).toFixed(d)}` : "--"}`;
           return `
             <tr>
               <td>${s.created_at_utc || "LIVE"}</td>
               <td><strong style="color:var(--amber-cmd);">${s.setup_id}</strong></td>
-              <td><strong>${(s.horizon || "daily").toUpperCase()}</strong></td>
+              <td>${assetBadge}<strong>${(s.horizon || "daily").toUpperCase()}</strong></td>
               <td><strong style="color:${dirCol};">${s.direction}</strong></td>
               <td>${fmtEntry(s)}</td>
-              <td style="color:var(--amber-cmd); font-weight:800;">${livePx ? `$${Number(livePx).toFixed(2)}` : "--"}</td>
-              <td style="color:#ff4444;">${s.stop_loss ? `$${Number(s.stop_loss).toFixed(2)}` : "N/A"}</td>
+              <td style="color:var(--amber-cmd); font-weight:800;">${lp ? `${p}${Number(lp).toFixed(d)}` : "--"}</td>
+              <td style="color:#ff4444;">${s.stop_loss ? `${p}${Number(s.stop_loss).toFixed(d)}` : "N/A"}</td>
               <td style="color:#00e676;">${tpTxt}</td>
               <td><span style="color:${stCol}; border:1px solid ${stCol}; padding:1px 4px; font-size:8.5px;">${s.status}</span></td>
               <td style="color:${pnlCol}; font-weight:900;">${fu >= 0 ? "+" : ""}$${fu.toFixed(2)}</td>
@@ -2332,18 +2396,42 @@ function initAutoRefreshLoop() {
       checkScheduledReleaseFirewall();
       const mod = getActiveModuleId();
       const isAstar = mod === "mod-astar";
-      const res = await fetch(`/api/live-ticks?include_astar=${isAstar}`);
+      const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
+      const res = await fetch(`/api/live-ticks?include_astar=${isAstar}&horizon=${h}&instrument=${CURRENT_ASTAR_ASSET}`);
       const data = await res.json();
       if (data && data.prices) {
         const p = data.prices;
         animateNumber(document.getElementById("tick-gold"), p["GC=F"], "$", "", 2);
+        animateNumber(document.getElementById("tick-eur"), p["EURUSD=X"], "", "", 5);
+        animateNumber(document.getElementById("tick-btc"), p["BTC-USD"], "$", "", 2);
+        if (p["BTC-USD"]) window._LAST_VERIFIED_BTC_PRICE = Number(p["BTC-USD"]);
         animateNumber(document.getElementById("tick-dxy"), p["DX-Y.NYB"], "", "", 2);
         animateNumber(document.getElementById("tick-2y"), p["ZT=F"], "", "%", 2);
         animateNumber(document.getElementById("tick-10y"), p["^TNX"], "", "%", 2);
         animateNumber(document.getElementById("tick-oil"), p["CL=F"], "$", "", 2);
+
+        // Lively update position gauge and pin cursor
+        const isE = CURRENT_ASTAR_ASSET === "EURUSD";
+        const isB = CURRENT_ASTAR_ASSET === "BTCUSD";
+        const curPrice = isE ? p["EURUSD=X"] : (isB ? p["BTC-USD"] : p["GC=F"]);
+        const pDec = isE ? 5 : 2;
+        const pPfx = isE ? "" : "$";
+        if (curPrice && isAstar) {
+          const gLiv = document.getElementById("gauge-live");
+          if (gLiv) gLiv.innerText = `${pPfx}${curPrice.toFixed(pDec)}`;
+          const ls = window._LAST_ASTAR_DATA?.locked_setup;
+          if (ls && ls.stop_loss && ls.take_profit_1) {
+            const rng = Math.abs(ls.take_profit_1 - ls.stop_loss);
+            const gPin = document.getElementById("gauge-cursor-pin");
+            if (gPin && rng > 0) {
+              const pct = ls.direction === "BUY" ? ((curPrice - ls.stop_loss) / rng) * 100 : ((ls.stop_loss - curPrice) / rng) * 100;
+              gPin.style.left = `${Math.max(0, Math.min(100, pct))}%`;
+            }
+          }
+        }
       }
       if (isAstar && data && data.daily_a_star) {
-        fetchAstarData();
+        applyAstarData(data.daily_a_star);
       } else if (loopCount % 3 === 0 && ["mod-cpi", "mod-fomc", "mod-nfp", "mod-ppi"].includes(mod)) {
         const ev = mod.replace("mod-", "");
         if (EVENT_STATE[ev]?.mode === "PREMARKET") {
@@ -2353,7 +2441,7 @@ function initAutoRefreshLoop() {
         }
       }
     } catch (e) {}
-  }, 6000);
+  }, 2000);
   document.getElementById("btn-reset-astar-session")?.addEventListener("click", async () => {
     const b = document.getElementById("btn-reset-astar-session");
     b.innerText = "WAIT REFRESHING...";
@@ -2740,7 +2828,10 @@ async function fetchCalendarData() {
         <td style="color:${ev.actual ? '#00e5ff' : '#666'}; font-weight:800;">${ev.actual || 'PENDING'}</td>
         <td>${ev.forecast || '-'}</td>
         <td style="color:#777;">${ev.previous || '-'}</td>
-        <td style="color:#fff;">${ev.effect_xauusd}</td>
+        <td style="color:#fff;">
+          <div>${ev.effect_xauusd || '-'}</div>
+          ${ev.crypto_sensitivity ? `<div style="color:#ff9900; font-size:9px; margin-top:2px;">[BTC SENSITIVITY: <strong>${ev.crypto_sensitivity}</strong>] ${ev.effect_btcusd || ''}</div>` : ''}
+        </td>
       </tr>
     `).join("");
   } catch (e) {}
@@ -3030,11 +3121,12 @@ function initLotCalculator() {
   const tp2Input = document.getElementById("calc-tp2");
 
   const specs = {
-    "XAUUSD": { contract: 100.0, pip: 0.10, unit: "oz" },
-    "EURUSD": { contract: 100000.0, pip: 0.0001, unit: "EUR" },
-    "GBPUSD": { contract: 100000.0, pip: 0.0001, unit: "GBP" },
-    "US30": { contract: 10.0, pip: 1.0, unit: "pts" },
-    "CL": { contract: 1000.0, pip: 0.01, unit: "bbl" }
+    "XAUUSD": { contract: 100.0, pip: 0.10, unit: "oz", defaultLev: 100 },
+    "EURUSD": { contract: 100000.0, pip: 0.0001, unit: "EUR", defaultLev: 500 },
+    "BTCUSD": { contract: 1.0, pip: 1.0, unit: "BTC", defaultLev: 200 },
+    "GBPUSD": { contract: 100000.0, pip: 0.0001, unit: "GBP", defaultLev: 500 },
+    "US30": { contract: 10.0, pip: 1.0, unit: "pts", defaultLev: 100 },
+    "CL": { contract: 1000.0, pip: 0.01, unit: "bbl", defaultLev: 100 }
   };
 
   function getSpec() {
@@ -3247,10 +3339,33 @@ function initLotCalculator() {
   });
 
   [eqInput, cashInput].forEach(inp => inp?.addEventListener("input", recalculate));
-  [levSel, instSel].forEach(sel => sel?.addEventListener("change", () => {
+  levSel?.addEventListener("change", () => {
+    recalculate();
+  });
+  instSel?.addEventListener("change", () => {
+    const sym = instSel.value;
+    if (sym === "BTCUSD") {
+      if (levSel) levSel.value = "200";
+      if (entInput) entInput.value = (window._LAST_VERIFIED_BTC_PRICE || 91500.0).toFixed(2);
+      if (slPipsInput) slPipsInput.value = "1500.0";
+      if (tp1PipsInput) tp1PipsInput.value = "3000.0";
+      if (tp2PipsInput) tp2PipsInput.value = "5000.0";
+    } else if (sym === "EURUSD") {
+      if (levSel) levSel.value = "500";
+      if (entInput) entInput.value = "1.08500";
+      if (slPipsInput) slPipsInput.value = "20.0";
+      if (tp1PipsInput) tp1PipsInput.value = "50.0";
+      if (tp2PipsInput) tp2PipsInput.value = "80.0";
+    } else if (sym === "XAUUSD") {
+      if (levSel) levSel.value = "100";
+      if (entInput) entInput.value = "3925.00";
+      if (slPipsInput) slPipsInput.value = "100.0";
+      if (tp1PipsInput) tp1PipsInput.value = "200.0";
+      if (tp2PipsInput) tp2PipsInput.value = "350.0";
+    }
     syncPricesFromPips();
     recalculate();
-  }));
+  });
 
   rRange?.addEventListener("input", (e) => {
     if (rInput) rInput.value = parseFloat(e.target.value).toFixed(2);

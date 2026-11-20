@@ -246,7 +246,7 @@ class TestAStarSetupEngine(unittest.TestCase):
                 d["mu_daily_post_pct"] = -0.18
                 return d
 
-            def mock_intra():
+            def mock_intra(*args, **kwargs):
                 return {
                     "source": "YAHOO_INTRADAY_LIVE",
                     "z_m15_1h": 3.00,
@@ -558,6 +558,298 @@ class TestAStarSetupEngine(unittest.TestCase):
             self.assertIn("score", p_data)
             self.assertGreaterEqual(p_data["score"], 5.0)
             self.assertLessEqual(p_data["score"], 25.0)
+
+    def test_eurusd_instrument_calibration(self):
+        """Verifies EURUSD multi-asset polymorphic calibration in quant_model."""
+        # 1. Instrument profile lookup
+        eur_spec = qm.get_instrument_spec("EURUSD")
+        self.assertEqual(eur_spec["symbol"], "EURUSD")
+        self.assertEqual(eur_spec["contract"], 100000.0)
+        self.assertEqual(eur_spec["pip"], 0.0001)
+        self.assertEqual(eur_spec["pip_value_001"], 0.10)
+        self.assertEqual(eur_spec["price_decimals"], 5)
+        self.assertAlmostEqual(eur_spec["spread_usd"], 0.00003, places=6)
+
+        # 2. First-Passage Monte Carlo on EURUSD
+        fp_eur = qm.calculate_first_passage_win_probability(
+            current_price=1.08500,
+            entry_price=1.08500,
+            sl_price=1.08300,
+            tp_price=1.08800,
+            drift_pct=0.05,
+            atr_m30=0.0012,
+            is_buy=True,
+            n_paths=2000,
+            instrument="EURUSD"
+        )
+        self.assertIn("win_probability_pct", fp_eur)
+        self.assertIn("overall_win_rate_pct", fp_eur)
+        self.assertGreaterEqual(fp_eur["win_probability_pct"], 0.0)
+        self.assertLessEqual(fp_eur["win_probability_pct"], 100.0)
+
+        # 3. Daily A* Setup polymorphic execution on EURUSD
+        ast_eur = qm.calculate_daily_a_star_setup(
+            current_price=1.08500,
+            atr_m30=0.0012,
+            n_paths=2000,
+            instrument="EURUSD"
+        )
+        self.assertEqual(ast_eur["symbol"], "EURUSD")
+        self.assertEqual(ast_eur["contract_size"], 100000.0)
+        self.assertEqual(ast_eur["pip_size"], 0.0001)
+        self.assertAlmostEqual(ast_eur["current_price"], 1.08500, places=5)
+        self.assertIn("first_passage_analysis", ast_eur)
+        fp_a = ast_eur["first_passage_analysis"]
+        # Ensure SL and TP prices are in proper EURUSD decimal scale (~1.08)
+        self.assertGreater(fp_a["sl_price"], 1.05)
+        self.assertLess(fp_a["sl_price"], 1.12)
+
+        # 4. Multi-Horizon Matrix polymorphic execution on EURUSD
+        mh_eur = qm.calculate_multi_horizon_a_star_setup(
+            current_price=1.08500,
+            atr_m30=0.0012,
+            n_paths=1500,
+            instrument="EURUSD"
+        )
+        self.assertEqual(mh_eur["symbol"], "EURUSD")
+        self.assertIn("horizons", mh_eur)
+        self.assertIn("scalping", mh_eur["horizons"])
+        self.assertIn("intraday", mh_eur["horizons"])
+        self.assertIn("daily", mh_eur["horizons"])
+        self.assertIn("swing", mh_eur["horizons"])
+        self.assertIn("news", mh_eur["horizons"])
+
+    def test_eurusd_snr_pure_trend_playbook(self):
+        """
+        Verifies EUR/USD SNR Pure-Trend Playbook:
+        1. Trend Deduction (EMA 50 & 200).
+        2. Sandwich Chop Zone Blackout (Hard Stand Aside).
+        3. Zero Counter-Trend Lockout.
+        4. Minimum 1:2.50 RR Compounding targets.
+        5. Dynamic Breakeven Shield at +1.0R (locking Entry +/- 0.5 pips).
+        """
+        # 1. Bullish pure trend: Price > EMA 50 > EMA 200
+        snr_bull = qm.evaluate_eurusd_snr_pure_trend(
+            current_price=1.09500,
+            ema50=1.09200,
+            ema200=1.08800,
+            atr_m15=0.0010
+        )
+        self.assertEqual(snr_bull["trend_regime"], "BULLISH_PURE_TREND")
+        self.assertTrue(snr_bull["is_bullish_trend"])
+        self.assertFalse(snr_bull["is_sandwich_chop"])
+        self.assertEqual(snr_bull["allowed_direction"], "BUY")
+        self.assertGreaterEqual(snr_bull["long_setup"]["planned_rr"], 2.50)
+        self.assertEqual(snr_bull["long_setup"]["dynamic_be_shield_sl"], 1.09505)
+
+        # 2. Bearish pure trend: Price < EMA 50 < EMA 200
+        snr_bear = qm.evaluate_eurusd_snr_pure_trend(
+            current_price=1.08200,
+            ema50=1.08500,
+            ema200=1.09000,
+            atr_m15=0.0010
+        )
+        self.assertEqual(snr_bear["trend_regime"], "BEARISH_PURE_TREND")
+        self.assertTrue(snr_bear["is_bearish_trend"])
+        self.assertFalse(snr_bear["is_sandwich_chop"])
+        self.assertEqual(snr_bear["allowed_direction"], "SELL")
+        self.assertGreaterEqual(snr_bear["short_setup"]["planned_rr"], 2.50)
+        self.assertEqual(snr_bear["short_setup"]["dynamic_be_shield_sl"], 1.08195)
+
+        # 3. Sandwich Chop Zone Blackout: EMA 50 <= Price <= EMA 200
+        snr_chop = qm.evaluate_eurusd_snr_pure_trend(
+            current_price=1.08800,
+            ema50=1.08500,
+            ema200=1.09200,
+            atr_m15=0.0010
+        )
+        self.assertEqual(snr_chop["trend_regime"], "SANDWICH_CHOP_BLACKOUT")
+        self.assertTrue(snr_chop["is_sandwich_chop"])
+        self.assertEqual(snr_chop["allowed_direction"], "STAND_ASIDE")
+
+        # 4. In calculate_daily_a_star_setup: Sandwich Chop Blackout forces STAND ASIDE
+        orig_intra = qm._get_intraday_momentum_regime
+        try:
+            def mock_intra_chop(instrument="EURUSD"):
+                return {
+                    "source": "MOCK",
+                    "instrument": "EURUSD",
+                    "z_m15_1h": 1.20,
+                    "z_h1_12h": 1.10,
+                    "day_open": 1.08800,
+                    "day_high": 1.08900,
+                    "day_low": 1.08700,
+                    "live_px": 1.08800,
+                    "ema50": 1.08500,
+                    "ema200": 1.09200,  # Price trapped between 1.08500 and 1.09200
+                    "is_engulfing_bull": False,
+                    "is_engulfing_bear": False,
+                    "mu_m15_post_pct": 0.05,
+                    "mu_h1_post_pct": 0.05
+                }
+            qm._get_intraday_momentum_regime = mock_intra_chop
+            res_chop = qm.calculate_daily_a_star_setup(
+                current_price=1.08800,
+                atr_m30=0.0012,
+                n_paths=1000,
+                instrument="EURUSD"
+            )
+            self.assertFalse(res_chop["is_a_star"])
+            self.assertIn("SANDWICH CHOP BLACKOUT", res_chop["trade_ticket"]["action"])
+            self.assertEqual(
+                res_chop["data_validation_gate"]["checks"]["eurusd_snr_pure_trend_gate"]["status"],
+                "BLOCKED"
+            )
+        finally:
+            qm._get_intraday_momentum_regime = orig_intra
+
+        # 5. Dynamic Breakeven Shield test in SetupLifecycleManager
+        import tempfile
+        tmp_path = os.path.join(tempfile.gettempdir(), "test_eurusd_be_ledger.json")
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        try:
+            mgr = qm.SetupLifecycleManager(filepath=tmp_path)
+            # Add EURUSD BUY at 1.08500, SL at 1.08300 (risk = 20 pips), TP1 at 1.09000 (2.5R)
+            add_res = mgr.add_to_running_list({
+                "horizon": "intraday",
+                "direction": "BUY",
+                "asset": "EURUSD",
+                "entry_zone": "$1.08490 - $1.08510",
+                "stop_loss": "$1.08300",
+                "take_profit_1": "$1.09000",
+                "take_profit_2": "$1.09300",
+                "recommended_lot": 0.50,
+                "immediate_entry": True
+            }, 1.08500)
+            self.assertEqual(add_res["status"], "ADDED")
+
+            # Tick 1: Price advances to 1.08700 (+20 pips = +1.0R) -> triggers Dynamic Breakeven Shield
+            cat1 = mgr.get_categorized_ledger(live_price=1.08700)
+            running = cat1["active_running"]
+            self.assertEqual(len(running), 1)
+            trade = running[0]
+            self.assertIsNotNone(trade.get("trailed_sl"))
+            # 0.5 pip shield locks entry + 0.5 pips = 1.08505
+            self.assertEqual(trade.get("trailed_sl"), 1.08505)
+
+            # Tick 2: Price pulls back to 1.08500 (hits trailed SL at 1.08505) -> BREAKEVEN_EXIT
+            cat2 = mgr.get_categorized_ledger(live_price=1.08500)
+            self.assertEqual(cat2["summary"]["running_count"], 0)
+            self.assertEqual(cat2["summary"]["hit_tp_count"], 1)  # BREAKEVEN_EXIT categorized in protected wins
+            self.assertGreaterEqual(cat2["summary"]["hit_tp_total_r"], 0.0)
+            self.assertEqual(cat2["summary"]["sl_touched_count"], 0)  # NOT counted as loss!
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_eurusd_pipeline_macro_telemetry_and_endpoints(self):
+        """Verifies Phase 3: EUR/USD data pipeline, macro telemetry ingestion, and multi-asset endpoints."""
+        import app
+        from fastapi.testclient import TestClient
+
+        # 1. High Impact Calendar: Eurozone macro events & effect_eurusd verification
+        cal_path = os.path.join(app.DATA_DIR, "high_impact_calendar.json")
+        self.assertTrue(os.path.exists(cal_path))
+        with open(cal_path) as f:
+            calendar_events = json.load(f)
+        ecb_event = next((e for e in calendar_events if e.get("event_id") == "ecb_rate_dec26"), None)
+        self.assertIsNotNone(ecb_event, "ECB rate decision event must be registered in high_impact_calendar.json")
+        self.assertIn("effect_eurusd", ecb_event)
+        self.assertIn("US10Y - DE10Y", ecb_event["effect_eurusd"])
+
+        # 2. Live Macro Data: Verify EURUSD spot & DE10Y & Transatlantic Yield Spread ingestion
+        macro_data = app.fetch_live_macro_data()
+        self.assertIn("prices", macro_data)
+        prices = macro_data["prices"]
+        self.assertIn("EURUSD=X", prices)
+        self.assertIn("EURUSD_SPOT", prices)
+        self.assertIn("DE10Y", prices)
+        self.assertIn("^TNX", prices)
+        self.assertIn("YIELD_SPREAD_US_DE", prices)
+        self.assertAlmostEqual(prices["YIELD_SPREAD_US_DE"], round(prices["^TNX"] - prices["DE10Y"], 3), places=2)
+
+        # 3. TestClient: GET /api/live-ticks?instrument=EURUSD
+        client = TestClient(app.app)
+        res_ticks = client.get("/api/live-ticks?instrument=EURUSD")
+        self.assertEqual(res_ticks.status_code, 200)
+        d_ticks = res_ticks.json()
+        self.assertEqual(d_ticks["status"], "SUCCESS")
+        self.assertEqual(d_ticks["instrument"], "EURUSD")
+        self.assertLess(d_ticks["current_price"], 2.0)  # FX rate ~ 1.09, not 3500 Gold
+
+        # 4. TestClient: GET /api/daily-a-star?instrument=EURUSD
+        res_daily = client.get("/api/daily-a-star?instrument=EURUSD")
+        self.assertEqual(res_daily.status_code, 200)
+        d_daily = res_daily.json()
+        self.assertEqual(d_daily["symbol"], "EURUSD")
+        self.assertEqual(d_daily["contract_size"], 100000.0)
+        self.assertEqual(d_daily["pip_size"], 0.0001)
+        self.assertIn("snr_pure_trend", d_daily)
+        tt = d_daily["trade_ticket"]
+        self.assertEqual(tt["asset"], "Euro / US Dollar (EURUSD)")
+
+        # 5. TestClient: GET /api/multi-horizon-a-star?instrument=EURUSD
+        res_multi = client.get("/api/multi-horizon-a-star?instrument=EURUSD")
+        self.assertEqual(res_multi.status_code, 200)
+        d_multi = res_multi.json()
+        self.assertEqual(d_multi["symbol"], "EURUSD")
+        self.assertEqual(d_multi["pip_size"], 0.0001)
+        self.assertIn("horizons", d_multi)
+        self.assertIn("scalping", d_multi["horizons"])
+        self.assertIn("daily", d_multi["horizons"])
+
+        # 6. Multi-Asset Isolation: Concurrent Gold & EUR/USD trades in ledger without price cross-contamination
+        import tempfile
+        tmp_ledger = os.path.join(tempfile.gettempdir(), "test_dual_asset_ledger.json")
+        if os.path.exists(tmp_ledger):
+            os.remove(tmp_ledger)
+        try:
+            mgr = qm.SetupLifecycleManager(filepath=tmp_ledger)
+            # Add XAUUSD trade
+            mgr.add_to_running_list({
+                "horizon": "daily",
+                "direction": "BUY",
+                "asset": "XAUUSD",
+                "entry_zone": "$3500.00 - $3505.00",
+                "stop_loss": "$3480.00",
+                "take_profit_1": "$3550.00",
+                "take_profit_2": "$3600.00",
+                "recommended_lot": 0.02,
+                "immediate_entry": True
+            }, 3500.0)
+            # Add EURUSD trade
+            mgr.add_to_running_list({
+                "horizon": "daily",
+                "direction": "BUY",
+                "asset": "EURUSD",
+                "entry_zone": "$1.08500 - $1.08520",
+                "stop_loss": "$1.08300",
+                "take_profit_1": "$1.09000",
+                "take_profit_2": "$1.09300",
+                "recommended_lot": 0.50,
+                "immediate_entry": True
+            }, 1.08500)
+
+            # Evaluate with live_prices dictionary for both assets simultaneously
+            cat = mgr.get_categorized_ledger(live_prices={"XAUUSD": 3520.0, "EURUSD": 1.08700})
+            running = cat["active_running"]
+            self.assertEqual(len(running), 2)
+            gold_trade = next(t for t in running if t["asset"] == "XAUUSD")
+            eur_trade = next(t for t in running if t["asset"] == "EURUSD")
+
+            # Gold: +$20 on 0.02 lot (2 oz) = +$40.00, +1.0R
+            self.assertAlmostEqual(gold_trade["floating_pnl_usd"], 40.0, delta=2.0)
+            self.assertAlmostEqual(gold_trade["floating_r"], 1.0, delta=0.1)
+
+            # EUR: +20 pips on 0.50 lot (50,000 EUR) = +$100.00, +1.0R
+            self.assertAlmostEqual(eur_trade["floating_pnl_usd"], 100.0, delta=2.0)
+            self.assertAlmostEqual(eur_trade["floating_r"], 1.0, delta=0.1)
+            # Dynamic Breakeven Shield triggered on EUR trade (at +1.0R)
+            self.assertEqual(eur_trade.get("trailed_sl"), 1.08505)
+        finally:
+            if os.path.exists(tmp_ledger):
+                os.remove(tmp_ledger)
 
 
 if __name__ == "__main__":

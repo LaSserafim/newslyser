@@ -12,6 +12,9 @@ Zero fabricated numbers. Strictly <= today (no future historical records).
 """
 
 import os
+for _k in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]:
+    os.environ.pop(_k, None)
+
 import io
 import json
 import math
@@ -32,7 +35,7 @@ def _today_str():
 
 def fetch_fred_series(series_id):
     print(f"[FRED] Fetching {series_id}...")
-    cmd = ["curl", "-sf", "-m", "15", f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"]
+    cmd = ["curl", "--noproxy", "*", "-sf", "-m", "15", f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode == 0 and res.stdout.startswith("observation_date"):
         df = pd.read_csv(io.StringIO(res.stdout))
@@ -521,7 +524,7 @@ def _build_quant_8_snapshot(mkt, qm, daily_ca_block, spot_gc, spot_dxy, icsa_ser
             iv_atm = float(0.5 * (c_atm["impliedVolatility"] + p_atm["impliedVolatility"]))
             straddle_pct = round(float((c_atm["mid"] + p_atm["mid"]) * 0.80 / max(1e-6, gld_spot) * 100.0), 2)
             try:
-                tv_r = subprocess.run(["curl", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan", "-H", "Content-Type: application/json", "-d", json.dumps({"symbols": {"tickers": ["FX_IDC:XAUUSD"]}, "columns": ["close"]})], capture_output=True, text=True)
+                tv_r = subprocess.run(["curl", "--noproxy", "*", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan", "-H", "Content-Type: application/json", "-H", "User-Agent: Mozilla/5.0", "-d", json.dumps({"symbols": {"tickers": ["FX_IDC:XAUUSD", "OANDA:XAUUSD"]}, "columns": ["close"]})], capture_output=True, text=True)
                 tv_d = json.loads(tv_r.stdout).get("data", [])
                 if tv_d and tv_d[0].get("d") and tv_d[0]["d"][0]:
                     spot_gc = float(tv_d[0]["d"][0])
@@ -999,7 +1002,7 @@ def build_all_datasets():
     # Download Yahoo Finance daily market history strictly through today + 1 (since yfinance end is exclusive)
     end_dt = (datetime.datetime.utcnow() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"[YFINANCE] Downloading market history 2023-12-15 -> {end_dt}...")
-    tickers = ["GC=F", "DX-Y.NYB", "ZT=F", "ZQ=F", "^TNX", "CL=F", "HG=F", "^VIX", "^GVZ", "TIP"]
+    tickers = ["GC=F", "EURUSD=X", "BTC-USD", "DX-Y.NYB", "ZT=F", "ZQ=F", "^TNX", "CL=F", "HG=F", "^VIX", "^GVZ", "TIP"]
     mkt = yf.download(tickers, start="2023-12-15", end=end_dt, interval="1d", progress=False, auto_adjust=False)
     dgs2_df = fred["DGS2"].dropna() if "DGS2" in fred else None
     tips_df = fred["DFII10"].dropna() if "DFII10" in fred else None

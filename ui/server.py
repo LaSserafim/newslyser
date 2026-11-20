@@ -11,6 +11,9 @@ Delivers:
 """
 
 import os
+for _k in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]:
+    os.environ.pop(_k, None)
+
 import sys
 import json
 import math
@@ -73,14 +76,16 @@ def load_data():
     return hist, tomorrow, macro
 
 def fetch_live_quotes():
-    tickers = ["FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!", "TVC:VIX"]
+    tickers = ["FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "FOREXCOM:XAUUSD", "TVC:GOLD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!", "TVC:VIX"]
     cmd = [
-        "curl", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
+        "curl", "--noproxy", "*", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
         "-H", "Content-Type: application/json",
+        "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
         "-d", json.dumps({"symbols": {"tickers": tickers}, "columns": ["close", "bid", "ask", "change", "high", "low", "open", "ATR|30"]})
     ]
+    clean_env = {k: v for k, v in os.environ.items() if "proxy" not in k.lower()}
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, env=clean_env)
         if res.returncode == 0:
             data = json.loads(res.stdout).get("data", [])
             mapping = {}
@@ -318,18 +323,25 @@ def get_premarket_snapshot():
     }
 
 @app.get("/api/live-ticks")
-def get_live_ticks(include_astar: bool = False):
+def get_live_ticks(include_astar: bool = False, horizon: str = "daily"):
     prices = fetch_live_quotes()
     res = {"status": "SUCCESS", "prices": prices}
     if include_astar:
-        current_gold = prices.get("GC=F", 3975.0)
-        atr_val = prices.get("ATR_M30", 10.50)
+        current_gold = prices.get("GC=F", 3570.0)
+        atr_val = prices.get("ATR_M30", 18.0)
         sh, sl, sc = prices.get("SESSION_HIGH"), prices.get("SESSION_LOW"), prices.get("SESSION_CLOSE")
         dxy = prices.get("DX-Y.NYB", 102.28)
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
-        created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
-        res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc)
+        h_key = (horizon or "daily").lower()
+        ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
+        created_epoch, _ = get_or_create_setup_epoch(h_key, ttl_map.get(h_key, 5400))
+        res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(
+            current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+            wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000,
+            setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc,
+            horizon=h_key
+        )
     return res
 
 @app.get("/api/pre-news-model")

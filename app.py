@@ -4,6 +4,8 @@ FastAPI application delivering real econometric analysis, historical telemetry, 
 """
 
 import os
+for _k in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]:
+    os.environ.pop(_k, None)
 import json
 import math
 import numpy as np
@@ -29,7 +31,7 @@ def get_or_create_setup_epoch(event_type="daily", ttl_seconds=5400):
     """
     Persistent Server-Side Setup Epoch Anchor:
     Guarantees setup timestamp survives page refreshes and server reboots.
-    Prevents timer reset loop.
+    Prevents timer reset loop. Auto-rolls over when setup validity expires.
     """
     import time
     now_ts = int(time.time())
@@ -42,7 +44,7 @@ def get_or_create_setup_epoch(event_type="daily", ttl_seconds=5400):
             epochs = {}
             
     rec = epochs.get(event_type)
-    if not rec:
+    if not rec or now_ts >= rec.get("expires_at", 0):
         rec = {"created_at": now_ts, "expires_at": now_ts + ttl_seconds}
         epochs[event_type] = rec
         try:
@@ -98,17 +100,25 @@ def fetch_live_quotes():
 def fetch_tradingview_live_quotes():
     """
     Direct streaming quotes from TradingView Global Scanner API.
-    Prioritizes FX_IDC:XAUUSD (official ICE spot gold feed matching TradingView charts)
-    alongside OANDA:XAUUSD, TVC:DXY, TVC:US10Y, TVC:US02Y, and NYMEX:CL1!.
+    Prioritizes official spot feeds: FX_IDC:XAUUSD & FX_IDC:EURUSD alongside OANDA,
+    TVC:DXY, TVC:US10Y, TVC:US02Y, TVC:DE10Y, and NYMEX:CL1!.
     """
     import subprocess
-    tickers = ["FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "NYMEX:CL1!", "TVC:VIX"]
+    clean_env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
+    tickers = [
+        "FX_IDC:XAUUSD", "OANDA:XAUUSD", "FX:XAUUSD", "FOREXCOM:XAUUSD", "TVC:GOLD", "SAXO:XAUUSD",
+        "FX_IDC:EURUSD", "OANDA:EURUSD", "FX:EURUSD",
+        "BINANCE:BTCUSDT", "COINBASE:BTCUSD",
+        "TVC:DXY", "TVC:US02Y", "TVC:US10Y", "TVC:DE10Y",
+        "NYMEX:CL1!", "TVC:VIX"
+    ]
     cmd = [
-        "curl", "-s", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
+        "curl", "-s", "--noproxy", "*", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
         "-H", "Content-Type: application/json",
+        "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "-d", json.dumps({"symbols": {"tickers": tickers}, "columns": ["close", "bid", "ask", "change", "high", "low", "open", "ATR|30"]})
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, env=clean_env)
     if res.returncode != 0:
         return {}
     try:
@@ -147,12 +157,56 @@ def fetch_tradingview_live_quotes():
                     quotes["SESSION_CLOSE"] = round(float(close_p), 2)
                 if atr_30 is not None and float(atr_30) > 0:
                     quotes["ATR_M30"] = round(float(atr_30), 2)
+            elif sym == "FX_IDC:EURUSD":
+                if close_p is not None:
+                    live_eur = round(float(close_p), 5)
+                    quotes["EURUSD=X"] = live_eur
+                    quotes["EURUSD_SPOT"] = live_eur
+                    if bid is not None and ask is not None and abs(((float(bid) + float(ask)) / 2.0) - live_eur) <= 0.0010:
+                        quotes["EURUSD_BID"] = round(float(bid), 5)
+                        quotes["EURUSD_ASK"] = round(float(ask), 5)
+                    else:
+                        quotes["EURUSD_BID"] = live_eur
+                        quotes["EURUSD_ASK"] = live_eur
+                elif bid is not None and ask is not None:
+                    mid = round((float(bid) + float(ask)) / 2.0, 5)
+                    quotes["EURUSD=X"] = mid
+                    quotes["EURUSD_SPOT"] = mid
+                    quotes["EURUSD_BID"] = round(float(bid), 5)
+                    quotes["EURUSD_ASK"] = round(float(ask), 5)
+                if high_p is not None and low_p is not None and close_p is not None:
+                    quotes["EURUSD_SESSION_HIGH"] = round(float(high_p), 5)
+                    quotes["EURUSD_SESSION_LOW"] = round(float(low_p), 5)
+                    quotes["EURUSD_SESSION_CLOSE"] = round(float(close_p), 5)
+                if atr_30 is not None and float(atr_30) > 0:
+                    quotes["EURUSD_ATR_M30"] = round(float(atr_30), 5)
+            elif sym in ("BINANCE:BTCUSDT", "COINBASE:BTCUSD") and "BTC-USD" not in quotes:
+                if close_p is not None:
+                    live_btc = round(float(close_p), 2)
+                    quotes["BTC-USD"] = live_btc
+                    quotes["BTCUSD_SPOT"] = live_btc
+                    quotes["BTC_BID"] = round(float(bid), 2) if bid is not None else live_btc
+                    quotes["BTC_ASK"] = round(float(ask), 2) if ask is not None else live_btc
+                elif bid is not None and ask is not None:
+                    mid = round((float(bid) + float(ask)) / 2.0, 2)
+                    quotes["BTC-USD"] = mid
+                    quotes["BTCUSD_SPOT"] = mid
+                    quotes["BTC_BID"] = round(float(bid), 2)
+                    quotes["BTC_ASK"] = round(float(ask), 2)
+                if high_p is not None and low_p is not None and close_p is not None:
+                    quotes["BTC_SESSION_HIGH"] = round(float(high_p), 2)
+                    quotes["BTC_SESSION_LOW"] = round(float(low_p), 2)
+                    quotes["BTC_SESSION_CLOSE"] = round(float(close_p), 2)
+                if atr_30 is not None and float(atr_30) > 0:
+                    quotes["BTC_ATR_M30"] = round(float(atr_30), 2)
             elif sym == "TVC:DXY" and close_p is not None:
                 quotes["DX-Y.NYB"] = round(float(close_p), 3)
             elif sym == "TVC:US02Y" and close_p is not None:
                 quotes["ZT=F"] = round(float(close_p), 3)
             elif sym == "TVC:US10Y" and close_p is not None:
                 quotes["^TNX"] = round(float(close_p), 3)
+            elif sym == "TVC:DE10Y" and close_p is not None:
+                quotes["DE10Y"] = round(float(close_p), 3)
             elif sym == "NYMEX:CL1!" and close_p is not None:
                 quotes["CL=F"] = round(float(close_p), 2)
             elif sym == "TVC:VIX" and close_p is not None:
@@ -161,14 +215,33 @@ def fetch_tradingview_live_quotes():
             for row in data.get("data", []):
                 sym = row.get("s")
                 cols = row.get("d", [])
-                if sym in ["FX:XAUUSD", "OANDA:XAUUSD"]:
-                    bid, ask, close_p = cols[1], cols[2], cols[0]
-                    live_px = round(float(close_p), 2) if close_p is not None else round((float(bid) + float(ask)) / 2.0, 2)
+                if sym in ["FX:XAUUSD", "OANDA:XAUUSD", "FOREXCOM:XAUUSD", "TVC:GOLD", "SAXO:XAUUSD"]:
+                    bid, ask, close_p = (cols[1] if len(cols) > 1 else None), (cols[2] if len(cols) > 2 else None), (cols[0] if len(cols) > 0 else None)
+                    if close_p is not None:
+                        live_px = round(float(close_p), 2)
+                    elif bid is not None and ask is not None:
+                        live_px = round((float(bid) + float(ask)) / 2.0, 2)
+                    else:
+                        continue
                     quotes["GC=F"] = live_px
                     quotes["XAUUSD_SPOT"] = live_px
                     quotes["XAUUSD_BID"] = round(float(bid), 2) if (bid is not None and abs(float(bid) - live_px) <= 1.50) else live_px
                     quotes["XAUUSD_ASK"] = round(float(ask), 2) if (ask is not None and abs(float(ask) - live_px) <= 1.50) else live_px
                     break
+        if "EURUSD=X" not in quotes:
+            for row in data.get("data", []):
+                sym = row.get("s")
+                cols = row.get("d", [])
+                if sym in ["FX:EURUSD", "OANDA:EURUSD"]:
+                    close_p, bid, ask = cols[0], cols[1], cols[2]
+                    live_eur = round(float(close_p), 5) if close_p is not None else round((float(bid) + float(ask)) / 2.0, 5)
+                    quotes["EURUSD=X"] = live_eur
+                    quotes["EURUSD_SPOT"] = live_eur
+                    quotes["EURUSD_BID"] = round(float(bid), 5) if bid is not None else live_eur
+                    quotes["EURUSD_ASK"] = round(float(ask), 5) if ask is not None else live_eur
+                    break
+        if "^TNX" in quotes and "DE10Y" in quotes:
+            quotes["YIELD_SPREAD_US_DE"] = round(quotes["^TNX"] - quotes["DE10Y"], 3)
         return quotes
     except Exception as e:
         print("TradingView scanner parse error:", e)
@@ -196,29 +269,81 @@ def fetch_live_macro_data():
     if tv_quotes and "GC=F" in tv_quotes and tv_quotes["GC=F"] is not None:
         prices = tv_quotes
         is_live_verified = True
-        data_source = "TRADINGVIEW REAL-TIME SPOT FEED (FX_IDC:XAUUSD)"
+        data_source = "TRADINGVIEW REAL-TIME SPOT FEED (FX_IDC:XAUUSD + FX_IDC:EURUSD)"
     else:
-        # Tier 2: Yahoo Finance 5m live quote fallback
+        # Tier 2: Yahoo Finance fast quote / 5m live quote fallback
         try:
-            gc_hist = yf.Ticker("GC=F").history(period="1d", interval="5m")
-            if gc_hist is not None and not gc_hist.empty and "Close" in gc_hist:
-                s = gc_hist["Close"].dropna()
-                if not s.empty:
-                    prices["GC=F"] = round(float(s.iloc[-1]), 2)
-                    prices["XAUUSD_SPOT"] = prices["GC=F"]
-                    is_live_verified = True
-            data_source = "YAHOO FINANCE LIVE FEED" if is_live_verified else "OFFLINE (UNVERIFIED)"
+            fast_px = yf.Ticker("GC=F").fast_info.get("last_price")
+            if fast_px is not None and not math.isnan(fast_px) and float(fast_px) > 0:
+                prices["GC=F"] = round(float(fast_px), 2)
+                prices["XAUUSD_SPOT"] = prices["GC=F"]
+                is_live_verified = True
+            else:
+                gc_hist = yf.Ticker("GC=F").history(period="1d", interval="5m")
+                if gc_hist is not None and not gc_hist.empty and "Close" in gc_hist:
+                    s = gc_hist["Close"].dropna()
+                    if not s.empty:
+                        prices["GC=F"] = round(float(s.iloc[-1]), 2)
+                        prices["XAUUSD_SPOT"] = prices["GC=F"]
+                        is_live_verified = True
         except Exception:
-            data_source = "OFFLINE (UNVERIFIED)"
+            pass
+        try:
+            fast_eur = yf.Ticker("EURUSD=X").fast_info.get("last_price")
+            if fast_eur is not None and not math.isnan(fast_eur) and float(fast_eur) > 0:
+                prices["EURUSD=X"] = round(float(fast_eur), 5)
+                prices["EURUSD_SPOT"] = prices["EURUSD=X"]
+                is_live_verified = True
+            else:
+                eur_hist = yf.Ticker("EURUSD=X").history(period="1d", interval="5m")
+                if eur_hist is not None and not eur_hist.empty and "Close" in eur_hist:
+                    s_eur = eur_hist["Close"].dropna()
+                    if not s_eur.empty:
+                        eur_px = round(float(s_eur.iloc[-1]), 5)
+                        prices["EURUSD=X"] = eur_px
+                        prices["EURUSD_SPOT"] = eur_px
+                        is_live_verified = True
+        except Exception:
+            pass
+        try:
+            fast_btc = yf.Ticker("BTC-USD").fast_info.get("last_price")
+            if fast_btc is not None and not math.isnan(fast_btc) and float(fast_btc) > 0:
+                prices["BTC-USD"] = round(float(fast_btc), 2)
+                prices["BTCUSD_SPOT"] = prices["BTC-USD"]
+                is_live_verified = True
+            else:
+                btc_hist = yf.Ticker("BTC-USD").history(period="1d", interval="5m")
+                if btc_hist is not None and not btc_hist.empty and "Close" in btc_hist:
+                    s_btc = btc_hist["Close"].dropna()
+                    if not s_btc.empty:
+                        btc_px = round(float(s_btc.iloc[-1]), 2)
+                        prices["BTC-USD"] = btc_px
+                        prices["BTCUSD_SPOT"] = btc_px
+                        is_live_verified = True
+        except Exception:
+            pass
+        data_source = "YAHOO FINANCE LIVE FEED" if is_live_verified else "OFFLINE (UNVERIFIED)"
 
-    # Cache verified live prices; if temporarily offline, reuse last verified live quote (NEVER jump to fake 4036.17)
+    # Cache verified live prices; if temporarily offline, reuse last verified live quote (NEVER jump to fake numbers)
     if is_live_verified:
         _LAST_VERIFIED_PRICES.update(prices)
     elif _LAST_VERIFIED_PRICES:
         for k, v in _LAST_VERIFIED_PRICES.items():
             prices.setdefault(k, v)
 
-    # Non-gold macro secondary fallbacks only if missing (Gold is NEVER faked as verified)
+    # Macro & cross-asset secondary fallbacks only if missing
+    if "EURUSD=X" not in prices:
+        prices["EURUSD=X"] = _LAST_VERIFIED_PRICES.get("EURUSD=X", 1.08500)
+        prices["EURUSD_SPOT"] = prices["EURUSD=X"]
+    if "EURUSD_ATR_M30" not in prices:
+        prices["EURUSD_ATR_M30"] = _LAST_VERIFIED_PRICES.get("EURUSD_ATR_M30", 0.00120)
+    if "BTC-USD" not in prices:
+        prices["BTC-USD"] = _LAST_VERIFIED_PRICES.get("BTC-USD", 91500.0)
+        prices["BTCUSD_SPOT"] = prices["BTC-USD"]
+    if "BTC_ATR_M30" not in prices:
+        prices["BTC_ATR_M30"] = _LAST_VERIFIED_PRICES.get("BTC_ATR_M30", 450.0)
+    if "DE10Y" not in prices:
+        prices["DE10Y"] = _LAST_VERIFIED_PRICES.get("DE10Y", 2.35)
     if "DX-Y.NYB" not in prices:
         prices["DX-Y.NYB"] = _LAST_VERIFIED_PRICES.get("DX-Y.NYB", 102.24)
     if "ZT=F" not in prices:
@@ -227,6 +352,8 @@ def fetch_live_macro_data():
         prices["^TNX"] = _LAST_VERIFIED_PRICES.get("^TNX", 5.00)
     if "CL=F" not in prices:
         prices["CL=F"] = _LAST_VERIFIED_PRICES.get("CL=F", 86.28)
+    if "YIELD_SPREAD_US_DE" not in prices and "^TNX" in prices and "DE10Y" in prices:
+        prices["YIELD_SPREAD_US_DE"] = round(float(prices["^TNX"]) - float(prices["DE10Y"]), 3)
 
     # 2. Release detector: read latest verified release status from tomorrow_preview.json (no hardcoded dummy actuals)
     headline_actual = None
@@ -379,23 +506,54 @@ def get_premarket_snapshot():
     }
 
 @app.get("/api/live-ticks")
-def get_live_ticks(include_astar: bool = False):
+def get_live_ticks(include_astar: bool = False, instrument: str = "XAUUSD", horizon: str = "daily"):
     """Lightweight spot-only tick stream: NEVER mutates pre-market snapshot or Wave 1 firewall."""
     live_data = fetch_live_macro_data()
     prices = live_data.get("prices", {})
-    res = {"status": "SUCCESS", "timestamp": live_data.get("timestamp"), "prices": prices}
-    if include_astar:
-        current_gold = prices.get("GC=F", 3975.0)
+    inst_upper = (instrument or "XAUUSD").upper()
+    if inst_upper in ["EURUSD", "EUR"]:
+        inst_key = "EURUSD"
+        current_px = prices.get("EURUSD=X", 1.08500)
+        atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        sh = prices.get("EURUSD_SESSION_HIGH")
+        sl = prices.get("EURUSD_SESSION_LOW")
+        sc = prices.get("EURUSD_SESSION_CLOSE")
+    elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+        inst_key = "BTCUSD"
+        current_px = prices.get("BTC-USD", 91500.0)
+        atr_val = prices.get("BTC_ATR_M30", 450.0)
+        sh = prices.get("BTC_SESSION_HIGH")
+        sl = prices.get("BTC_SESSION_LOW")
+        sc = prices.get("BTC_SESSION_CLOSE")
+    else:
+        inst_key = "XAUUSD"
+        current_px = prices.get("GC=F", 3975.0)
         atr_val = prices.get("ATR_M30", 10.50)
-        sh, sl, sc = prices.get("SESSION_HIGH"), prices.get("SESSION_LOW"), prices.get("SESSION_CLOSE")
+        sh = prices.get("SESSION_HIGH")
+        sl = prices.get("SESSION_LOW")
+        sc = prices.get("SESSION_CLOSE")
+
+    res = {
+        "status": "SUCCESS",
+        "timestamp": live_data.get("timestamp"),
+        "instrument": inst_key,
+        "current_price": current_px,
+        "prices": prices
+    }
+    if include_astar:
         dxy = prices.get("DX-Y.NYB", 102.24)
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
-        created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
+        h_key = (horizon or "daily").lower()
+        ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
+        ttl_sec = ttl_map.get(h_key, 5400)
+        epoch_name = f"{h_key}_{inst_key.lower()}"
+        created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_sec)
         res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(
-            current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+            current_price=current_px, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
             wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
-            n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc
+            n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc,
+            horizon=h_key, instrument=inst_key, de10y_val=prices.get("DE10Y")
         )
     return res
 
@@ -444,45 +602,94 @@ def get_ppi_prenew_model(price: float = None, atr: float = None):
         session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
     )
 @app.get("/api/setup-ledger")
-def get_setup_ledger():
+def get_setup_ledger(instrument: str = None):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
-    cur_gold = prices.get("GC=F") if live.get("is_live_verified") else None
+    verified = bool(live.get("is_live_verified"))
+    lp_dict = {}
+    if verified:
+        if "GC=F" in prices:
+            lp_dict["XAUUSD"] = float(prices["GC=F"])
+        if "EURUSD=X" in prices:
+            lp_dict["EURUSD"] = float(prices["EURUSD=X"])
+        if "BTC-USD" in prices:
+            lp_dict["BTCUSD"] = float(prices["BTC-USD"])
+    cur_gold = prices.get("GC=F") if verified else None
     mgr = quant_model.SetupLifecycleManager()
-    res = mgr.get_categorized_ledger(live_price=cur_gold)
+    res = mgr.get_categorized_ledger(live_price=cur_gold, live_prices=lp_dict)
+    if instrument:
+        inst_upper = instrument.upper()
+        if inst_upper in ["EURUSD", "EUR"]:
+            target = "EURUSD"
+        elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+            target = "BTCUSD"
+        else:
+            target = "XAUUSD"
+        res["running_trades"] = [t for t in res.get("running_trades", []) if t.get("asset", "XAUUSD") == target]
+        res["active_running"] = [t for t in res.get("active_running", []) if t.get("asset", "XAUUSD") == target]
+        res["hit_tp"] = [t for t in res.get("hit_tp", []) if t.get("asset", "XAUUSD") == target]
+        res["sl_touched"] = [t for t in res.get("sl_touched", []) if t.get("asset", "XAUUSD") == target]
+        res["archived_expired"] = [t for t in res.get("archived_expired", []) if t.get("asset", "XAUUSD") == target]
+        res["completed_setups"] = [t for t in res.get("completed_setups", []) if t.get("asset", "XAUUSD") == target]
     res["data_source"] = live.get("source", "UNKNOWN")
-    res["is_live_verified"] = bool(live.get("is_live_verified"))
+    res["is_live_verified"] = verified
     return res
 
 @app.post("/api/setup-ledger/add")
 def add_setup_to_running_list(payload: dict):
     """Explicit user opt-in: adds an A* setup (selected horizon) into the Running Trading List."""
     live = fetch_live_macro_data()
-    if not live.get("is_live_verified") or live.get("prices", {}).get("GC=F") is None:
-        return {"status": "OFFLINE", "message": "Live gold price feed unverified — cannot add trade without real live tick."}
     prices = live.get("prices", {})
-    cur_gold = float(prices["GC=F"])
+    verified = bool(live.get("is_live_verified"))
+
+    inst = str(payload.get("asset") or payload.get("instrument") or "XAUUSD").upper()
+    if inst in ["EURUSD", "EUR"]:
+        target_asset = "EURUSD"
+        price_key = "EURUSD=X"
+        default_atr = 0.00120
+    elif inst in ["BTCUSD", "BTC", "BITCOIN"]:
+        target_asset = "BTCUSD"
+        price_key = "BTC-USD"
+        default_atr = 450.0
+    else:
+        target_asset = "XAUUSD"
+        price_key = "GC=F"
+        default_atr = 10.50
+
+    cur_px = prices.get(price_key)
+    if not verified or cur_px is None:
+        return {"status": "OFFLINE", "message": f"Live {target_asset} price feed unverified — cannot add trade without real live tick."}
+    cur_px = float(cur_px)
     h_key = str(payload.get("horizon") or "daily").lower()
 
     # If client passed only horizon, compute fresh live ticket for that horizon
     if not payload.get("stop_loss") or not payload.get("take_profit_1"):
-        atr_val = prices.get("ATR_M30", 10.50)
+        atr_key = "EURUSD_ATR_M30" if target_asset == "EURUSD" else ("BTC_ATR_M30" if target_asset == "BTCUSD" else "ATR_M30")
+        atr_val = prices.get(atr_key, default_atr)
         dxy = prices.get("DX-Y.NYB", 102.24)
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
         ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
-        created_epoch, _ = get_or_create_setup_epoch(h_key, ttl_map.get(h_key, 5400))
+        epoch_name = f"{h_key}_{target_asset.lower()}"
+        created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_map.get(h_key, 5400))
+        sh_key = "EURUSD_SESSION_HIGH" if target_asset == "EURUSD" else ("BTC_SESSION_HIGH" if target_asset == "BTCUSD" else "SESSION_HIGH")
+        sl_key = "EURUSD_SESSION_LOW" if target_asset == "EURUSD" else ("BTC_SESSION_LOW" if target_asset == "BTCUSD" else "SESSION_LOW")
+        sc_key = "EURUSD_SESSION_CLOSE" if target_asset == "EURUSD" else ("BTC_SESSION_CLOSE" if target_asset == "BTCUSD" else "SESSION_CLOSE")
+        sh = prices.get(sh_key)
+        sl = prices.get(sl_key)
+        sc = prices.get(sc_key)
         ast = quant_model.calculate_daily_a_star_setup(
-            current_price=cur_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+            current_price=cur_px, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
             wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
             n_paths=5000, setup_created_epoch=created_epoch,
-            session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"),
-            horizon=h_key
+            session_h=sh, session_l=sl, session_c=sc,
+            horizon=h_key, instrument=target_asset, de10y_val=prices.get("DE10Y")
         )
         tt = ast.get("trade_ticket", {})
         if not ast.get("is_a_star") and not payload.get("allow_non_astar", False):
-            return {"status": "BLOCKED", "message": f"{h_key.upper()} is currently STAND ASIDE (not A* Grade). Wait for gates to pass."}
+            return {"status": "BLOCKED", "message": f"{h_key.upper()} ({target_asset}) is currently STAND ASIDE (not A* Grade). Wait for gates to pass."}
         payload = {
+            "asset": target_asset,
             "horizon": h_key,
             "action": tt.get("action", ""),
             "ticket_type": tt.get("ticket_type", ""),
@@ -494,10 +701,19 @@ def add_setup_to_running_list(payload: dict):
             "recommended_lot": tt.get("recommended_lot_size_1000_equity", 0.01),
             "immediate_entry": True
         }
+    else:
+        payload["asset"] = target_asset
 
     mgr = quant_model.SetupLifecycleManager()
-    res = mgr.add_to_running_list(payload, cur_gold)
-    res["ledger"] = mgr.get_categorized_ledger(live_price=cur_gold)
+    res = mgr.add_to_running_list(payload, cur_px)
+    lp_dict = {}
+    if "GC=F" in prices:
+        lp_dict["XAUUSD"] = float(prices["GC=F"])
+    if "EURUSD=X" in prices:
+        lp_dict["EURUSD"] = float(prices["EURUSD=X"])
+    if "BTC-USD" in prices:
+        lp_dict["BTCUSD"] = float(prices["BTC-USD"])
+    res["ledger"] = mgr.get_categorized_ledger(live_price=prices.get("GC=F"), live_prices=lp_dict)
     return res
 
 @app.post("/api/setup-ledger/action")
@@ -508,12 +724,39 @@ def action_on_running_setup(payload: dict):
     if mode not in ("close", "remove"):
         return {"status": "ERROR", "message": "Invalid mode (must be 'close' or 'remove')."}
     live = fetch_live_macro_data()
-    cur_gold = float(live["prices"]["GC=F"]) if (live.get("is_live_verified") and live.get("prices", {}).get("GC=F") is not None) else None
-    if mode == "close" and cur_gold is None:
-        return {"status": "OFFLINE", "message": "Live gold price feed unverified — cannot close at market without live price."}
+    prices = live.get("prices", {})
+    verified = bool(live.get("is_live_verified"))
     mgr = quant_model.SetupLifecycleManager()
-    res = mgr.close_or_remove_running_trade(setup_id, live_price=cur_gold, mode=mode)
-    res["ledger"] = mgr.get_categorized_ledger(live_price=cur_gold)
+
+    # Identify asset of the setup
+    target_trade = None
+    data = mgr._load()
+    for item in data.get("running_trades", []):
+        if item.get("setup_id") == setup_id:
+            target_trade = item
+            break
+
+    trade_asset = target_trade.get("asset", "XAUUSD") if target_trade else "XAUUSD"
+    if trade_asset == "EURUSD":
+        price_key = "EURUSD=X"
+    elif trade_asset == "BTCUSD":
+        price_key = "BTC-USD"
+    else:
+        price_key = "GC=F"
+    live_px = float(prices[price_key]) if (verified and prices.get(price_key) is not None) else None
+
+    if mode == "close" and live_px is None:
+        return {"status": "OFFLINE", "message": f"Live {trade_asset} price feed unverified — cannot close at market without live price."}
+    res = mgr.close_or_remove_running_trade(setup_id, live_price=live_px, mode=mode)
+    lp_dict = {}
+    if verified:
+        if "GC=F" in prices:
+            lp_dict["XAUUSD"] = float(prices["GC=F"])
+        if "EURUSD=X" in prices:
+            lp_dict["EURUSD"] = float(prices["EURUSD=X"])
+        if "BTC-USD" in prices:
+            lp_dict["BTCUSD"] = float(prices["BTC-USD"])
+    res["ledger"] = mgr.get_categorized_ledger(live_price=prices.get("GC=F"), live_prices=lp_dict)
     return res
 
 @app.get("/api/global-macro-matrix")
@@ -605,37 +848,95 @@ def get_pdf_distribution(event_type: str = "cpi"):
 def get_high_impact_calendar():
     with open(os.path.join(DATA_DIR, "high_impact_calendar.json")) as f:
         data = json.load(f)
+    for ev in data:
+        if not ev.get("crypto_sensitivity"):
+            cat = str(ev.get("category", "")).upper()
+            title = str(ev.get("title", "")).upper()
+            if any(k in cat for k in ["INFLATION", "CENTRAL_BANK", "LABOR"]) or any(k in title for k in ["CPI", "FOMC", "PAYROLL", "NFP"]):
+                ev["crypto_sensitivity"] = "HIGH"
+                ev.setdefault("effect_btcusd", "GLOBAL USD LIQUIDITY IMPULSE // STAND ASIDE T-30m TO T+15m")
+            elif any(k in cat for k in ["GROWTH"]) or any(k in title for k in ["PPI", "CLAIMS", "RETAIL"]):
+                ev["crypto_sensitivity"] = "MEDIUM"
+                ev.setdefault("effect_btcusd", "SHORT-TERM USD VOLATILITY TRANSMISSION")
+            else:
+                ev["crypto_sensitivity"] = "LOW"
+                ev.setdefault("effect_btcusd", "INDIRECT FX LIQUIDITY IMPACT")
     return data
 
 @app.get("/api/daily-a-star")
-def get_daily_a_star(price: float = None, horizon: str = "daily"):
+def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: str = "XAUUSD"):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
-    if price is None:
-        price = prices.get("GC=F", 3975.0)
-    atr_val = prices.get("ATR_M30", 10.50)
+    inst_upper = (instrument or "XAUUSD").upper()
+    if inst_upper in ["EURUSD", "EUR"]:
+        inst_key = "EURUSD"
+        if price is None:
+            price = prices.get("EURUSD=X", 1.08500)
+        atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        sh = prices.get("EURUSD_SESSION_HIGH")
+        sl = prices.get("EURUSD_SESSION_LOW")
+        sc = prices.get("EURUSD_SESSION_CLOSE")
+    elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+        inst_key = "BTCUSD"
+        if price is None:
+            price = prices.get("BTC-USD", 91500.0)
+        atr_val = prices.get("BTC_ATR_M30", 450.0)
+        sh = prices.get("BTC_SESSION_HIGH")
+        sl = prices.get("BTC_SESSION_LOW")
+        sc = prices.get("BTC_SESSION_CLOSE")
+    else:
+        inst_key = "XAUUSD"
+        if price is None:
+            price = prices.get("GC=F", 3975.0)
+        atr_val = prices.get("ATR_M30", 10.50)
+        sh = prices.get("SESSION_HIGH")
+        sl = prices.get("SESSION_LOW")
+        sc = prices.get("SESSION_CLOSE")
     dxy = prices.get("DX-Y.NYB", 102.24)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
     h_key = (horizon or "daily").lower()
     ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
     ttl_sec = ttl_map.get(h_key, 5400)
-    created_epoch, _ = get_or_create_setup_epoch(h_key, ttl_sec)
+    epoch_name = f"{h_key}_{inst_key.lower()}"
+    created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_sec)
     return quant_model.calculate_daily_a_star_setup(
         current_price=price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
         wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
         n_paths=10000, setup_created_epoch=created_epoch,
-        session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"),
-        horizon=h_key
+        session_h=sh, session_l=sl, session_c=sc,
+        horizon=h_key, instrument=inst_key, de10y_val=prices.get("DE10Y")
     )
 
 @app.get("/api/multi-horizon-a-star")
-def get_multi_horizon_a_star(price: float = None):
+def get_multi_horizon_a_star(price: float = None, instrument: str = "XAUUSD"):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
-    if price is None:
-        price = prices.get("GC=F", 3975.0)
-    atr_val = prices.get("ATR_M30", 10.50)
+    inst_upper = (instrument or "XAUUSD").upper()
+    if inst_upper in ["EURUSD", "EUR"]:
+        inst_key = "EURUSD"
+        if price is None:
+            price = prices.get("EURUSD=X", 1.08500)
+        atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        sh = prices.get("EURUSD_SESSION_HIGH")
+        sl = prices.get("EURUSD_SESSION_LOW")
+        sc = prices.get("EURUSD_SESSION_CLOSE")
+    elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+        inst_key = "BTCUSD"
+        if price is None:
+            price = prices.get("BTC-USD", 91500.0)
+        atr_val = prices.get("BTC_ATR_M30", 450.0)
+        sh = prices.get("BTC_SESSION_HIGH")
+        sl = prices.get("BTC_SESSION_LOW")
+        sc = prices.get("BTC_SESSION_CLOSE")
+    else:
+        inst_key = "XAUUSD"
+        if price is None:
+            price = prices.get("GC=F", 3975.0)
+        atr_val = prices.get("ATR_M30", 10.50)
+        sh = prices.get("SESSION_HIGH")
+        sl = prices.get("SESSION_LOW")
+        sc = prices.get("SESSION_CLOSE")
     dxy = prices.get("DX-Y.NYB", 102.24)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
@@ -643,7 +944,8 @@ def get_multi_horizon_a_star(price: float = None):
         current_price=price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
         wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
         n_paths=10000,
-        session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
+        session_h=sh, session_l=sl, session_c=sc,
+        instrument=inst_key, de10y_val=prices.get("DE10Y")
     )
 
 @app.get("/api/dynamic-levels")
@@ -940,6 +1242,10 @@ def reset_setup_session(event_type: str = "all", horizon: str = None):
     except Exception as e:
         print("Error saving reset setup epoch:", e)
         
+    _clear_quant_caches()
+    _CACHE_MACRO["data"] = None
+    _CACHE_MACRO["timestamp"] = 0.0
+
     return {
         "status": "SUCCESS",
         "message": f"Fresh session window initialized for {', '.join(k.upper() for k in keys_to_reset)}",
@@ -1017,39 +1323,49 @@ class LotCalcRequest(BaseModel):
     risk_mode: str = "pct"
     risk_pct: float = 2.0
     max_risk_usd: float = None
-    leverage: int = 100
-    entry_price: float = 3925.0
+    leverage: int = None
+    entry_price: float = None
     sl_price: float = None
     sl_pips: float = None
     tp1_price: float = None
     tp1_pips: float = None
     tp2_price: float = None
     tp2_pips: float = None
-    contract_size: float = 100.0
+    contract_size: float = None
     instrument: str = "XAUUSD"
     direction: str = "BUY"
 
 @app.post("/api/calculate-lot-size")
 def api_calculate_lot_size(req: LotCalcRequest):
+    inst = (req.instrument or "XAUUSD").upper()
+    spec = quant_model.get_instrument_spec(inst)
+    lev = req.leverage if req.leverage is not None else spec.get("default_leverage", 100)
+    entry = req.entry_price if req.entry_price is not None else (91500.0 if spec["symbol"] == "BTCUSD" else (1.08500 if spec["symbol"] == "EURUSD" else 3925.0))
+    c_size = req.contract_size if req.contract_size is not None else spec.get("contract", 100.0)
     return quant_model.calculate_lot_and_risk(
         equity=req.equity, risk_mode=req.risk_mode, risk_pct=req.risk_pct,
-        max_risk_usd=req.max_risk_usd, leverage=req.leverage,
-        entry_price=req.entry_price, sl_price=req.sl_price, sl_pips=req.sl_pips,
+        max_risk_usd=req.max_risk_usd, leverage=lev,
+        entry_price=entry, sl_price=req.sl_price, sl_pips=req.sl_pips,
         tp1_price=req.tp1_price, tp1_pips=req.tp1_pips,
         tp2_price=req.tp2_price, tp2_pips=req.tp2_pips,
-        contract_size=req.contract_size, instrument=req.instrument,
+        contract_size=c_size, instrument=spec["symbol"],
         direction=req.direction
     )
 
 @app.get("/api/calculate-lot-size")
-def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", risk_pct: float = 2.0, max_risk_usd: float = None, leverage: int = 100, entry: float = 3925.0, sl: float = None, sl_pips: float = None, tp1: float = None, tp1_pips: float = None, tp2: float = None, tp2_pips: float = None, contract_size: float = 100.0, instrument: str = "XAUUSD", direction: str = "BUY"):
+def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", risk_pct: float = 2.0, max_risk_usd: float = None, leverage: int = None, entry: float = None, sl: float = None, sl_pips: float = None, tp1: float = None, tp1_pips: float = None, tp2: float = None, tp2_pips: float = None, contract_size: float = None, instrument: str = "XAUUSD", direction: str = "BUY"):
+    inst = (instrument or "XAUUSD").upper()
+    spec = quant_model.get_instrument_spec(inst)
+    lev = leverage if leverage is not None else spec.get("default_leverage", 100)
+    entry_p = entry if entry is not None else (91500.0 if spec["symbol"] == "BTCUSD" else (1.08500 if spec["symbol"] == "EURUSD" else 3925.0))
+    c_size = contract_size if contract_size is not None else spec.get("contract", 100.0)
     return quant_model.calculate_lot_and_risk(
         equity=equity, risk_mode=risk_mode, risk_pct=risk_pct,
-        max_risk_usd=max_risk_usd, leverage=leverage,
-        entry_price=entry, sl_price=sl, sl_pips=sl_pips,
+        max_risk_usd=max_risk_usd, leverage=lev,
+        entry_price=entry_p, sl_price=sl, sl_pips=sl_pips,
         tp1_price=tp1, tp1_pips=tp1_pips,
         tp2_price=tp2, tp2_pips=tp2_pips,
-        contract_size=contract_size, instrument=instrument,
+        contract_size=c_size, instrument=spec["symbol"],
         direction=direction
     )
 
