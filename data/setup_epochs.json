@@ -1,7 +1,7 @@
 {
   "daily": {
-    "created_at": 1795183019,
-    "expires_at": 1795188419
+    "created_at": 1795188429,
+    "expires_at": 1795193829
   },
   "intraday": {
     "created_at": 1795183078,
@@ -20,8 +20,8 @@
     "expires_at": 1795014206
   },
   "daily_eurusd": {
-    "created_at": 1795183578,
-    "expires_at": 1795188978
+    "created_at": 1795189544,
+    "expires_at": 1795194944
   },
   "news_xauusd": {
     "created_at": 1795183747,
@@ -36,8 +36,8 @@
     "expires_at": 1795199042
   },
   "scalping_xauusd": {
-    "created_at": 1795184666,
-    "expires_at": 1795188266
+    "created_at": 1795189545,
+    "expires_at": 1795193145
   },
   "swing_xauusd": {
     "created_at": 1795184671,

@@ -1379,12 +1379,22 @@ def get_hypothesis_test(event_type: str = "cpi"):
     return quant_model.get_event_hypothesis_test(event_type=event_type)
 
 @app.get("/api/backtest-5y")
-def get_backtest_5y():
-    path_5y = os.path.join(DATA_DIR, "backtest_multi_horizon_5y.json")
+def get_backtest_5y(instrument: str = "XAUUSD"):
+    inst = (instrument or "XAUUSD").upper()
+    fname = "backtest_multi_horizon_5y_eurusd.json" if inst in ("EURUSD", "EUR") else "backtest_multi_horizon_5y.json"
+    path_5y = os.path.join(DATA_DIR, fname)
     if os.path.exists(path_5y):
         with open(path_5y, "r") as f:
             return json.load(f)
-    return {"error": "5y backtest telemetry not found"}
+    return {"error": f"5y backtest telemetry not found for {inst}"}
+
+@app.get("/api/backtest-eurusd-5y")
+def get_backtest_eurusd_5y():
+    path_eur = os.path.join(DATA_DIR, "backtest_multi_horizon_5y_eurusd.json")
+    if os.path.exists(path_eur):
+        with open(path_eur, "r") as f:
+            return json.load(f)
+    return {"error": "EUR/USD 5y backtest telemetry not found"}
 
 @app.get("/api/backtest-maxtp")
 def get_backtest_maxtp():
@@ -1421,9 +1431,12 @@ def get_backtest_enhanced_v2():
     return {"error": "enhanced v2 backtest telemetry not found"}
 
 @app.get("/api/backtest-multi-horizon")
-def get_backtest_multi_horizon():
-    path_5y = os.path.join(DATA_DIR, "backtest_multi_horizon_5y.json")
-    path_3y = os.path.join(DATA_DIR, "backtest_multi_horizon_3y.json")
+def get_backtest_multi_horizon(instrument: str = "XAUUSD"):
+    inst = (instrument or "XAUUSD").upper()
+    fname_5y = "backtest_multi_horizon_5y_eurusd.json" if inst in ("EURUSD", "EUR") else "backtest_multi_horizon_5y.json"
+    fname_3y = "backtest_multi_horizon_5y_eurusd.json" if inst in ("EURUSD", "EUR") else "backtest_multi_horizon_3y.json"
+    path_5y = os.path.join(DATA_DIR, fname_5y)
+    path_3y = os.path.join(DATA_DIR, fname_3y)
     res = {}
     if os.path.exists(path_5y):
         with open(path_5y, "r") as f:

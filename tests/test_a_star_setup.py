@@ -205,6 +205,68 @@ class TestAStarSetupEngine(unittest.TestCase):
         self.assertLess(data["hypothesis_testing"]["rademacher_permutation_pval"], 0.01)
         self.assertGreater(data["hypothesis_testing"]["deflated_sharpe_ratio"], 0.99)
 
+    def test_5y_eurusd_multi_horizon_backtest_telemetry(self):
+        """Verifies Phase 5: EUR/USD 5-year multi-horizon backtest engine and hypothesis testing telemetry."""
+        res = qm.calculate_daily_a_star_setup(instrument="EURUSD", horizon="daily", n_paths=1000)
+        pe = res["probability_engine"]
+        self.assertIn("backtest_3y_summary", pe)
+        self.assertIn("backtest_5y_summary", pe)
+        bt5 = pe["backtest_5y_summary"]
+        self.assertGreater(bt5["trades"], 50)
+        self.assertGreater(bt5["profit_factor"], 1.0)
+
+        # Check JSON telemetry on disk
+        bt5_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "backtest_multi_horizon_5y_eurusd.json")
+        self.assertTrue(os.path.exists(bt5_path), f"File {bt5_path} must exist from Phase 5 backtest engine")
+        with open(bt5_path, "r") as f:
+            data = json.load(f)
+
+        self.assertEqual(data.get("instrument"), "EURUSD")
+        self.assertIn("tracks", data)
+        tracks = data["tracks"]
+        for expected_track in ["scalping_astar", "intraday_astar", "daily_astar", "swing_astar", "macro_news", "combined_portfolio"]:
+            self.assertIn(expected_track, tracks, f"Track {expected_track} must exist in EUR/USD backtest")
+
+        comb = tracks["combined_portfolio"]
+        self.assertGreaterEqual(comb["trades"], 500, "Combined trades must be >= 500 across 5 years")
+        self.assertGreater(comb["sum_r"], 50.0, "Cumulative R must exceed +50.0R")
+        self.assertGreater(comb["ending_equity_usd"], 2500.0, "Ending equity from $1k baseline must exceed $2,500.00")
+        self.assertGreaterEqual(comb["t_stat"], 2.0, "Student t-statistic must be >= 2.0")
+        self.assertLess(comb["p_val"], 0.01, "p-value must be < 0.01")
+        self.assertLess(comb["max_drawdown_pct"], 30.0, "Max DD must be < 30.0%")
+
+        # Hypothesis testing validation
+        ht = data["hypothesis_testing"]
+        self.assertLess(ht["rademacher_permutation_pval"], 0.001, "100,000 Rademacher sign-flipping permutation must reject H0 at p < 0.001")
+        self.assertGreaterEqual(ht["deflated_sharpe_ratio"], 0.99, "Deflated Sharpe Ratio (DSR) must be >= 0.99 (99% confidence)")
+        self.assertGreater(ht["bootstrap_ci_99"][0], 0.0, "99% Bootstrap CI lower bound must be strictly > 0")
+
+        # Year-over-Year vintage stability
+        yoy = data.get("year_over_year", {})
+        for yr in ["2022", "2023", "2024", "2025", "2026"]:
+            self.assertIn(yr, yoy, f"Year {yr} must be represented in vintage stability")
+            self.assertGreater(yoy[yr]["profit_factor"], 1.0, f"Year {yr} must show profitable regime survival")
+
+        # Test API endpoints
+        import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app.app)
+
+        res_5y = client.get("/api/backtest-5y?instrument=EURUSD")
+        self.assertEqual(res_5y.status_code, 200)
+        d_5y = res_5y.json()
+        self.assertEqual(d_5y.get("instrument"), "EURUSD")
+        self.assertEqual(d_5y["tracks"]["combined_portfolio"]["trades"], comb["trades"])
+
+        res_eur = client.get("/api/backtest-eurusd-5y")
+        self.assertEqual(res_eur.status_code, 200)
+
+        res_mh = client.get("/api/backtest-multi-horizon?instrument=EURUSD")
+        self.assertEqual(res_mh.status_code, 200)
+        d_mh = res_mh.json()
+        self.assertIn("backtest_5y", d_mh)
+        self.assertEqual(d_mh["backtest_5y"].get("instrument"), "EURUSD")
+
     def test_zero_lookahead_audit_telemetry(self):
         """Verifies that the strict zero-lookahead, anti-overfitting audit telemetry is valid."""
         zl_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "backtest_zero_lookahead_5y.json")
