@@ -1395,12 +1395,22 @@ def get_backtest_maxtp():
     return {"error": "maxtp backtest telemetry not found"}
 
 @app.get("/api/backtest-zero-lookahead")
-def get_backtest_zero_lookahead():
-    path_zl = os.path.join(DATA_DIR, "backtest_zero_lookahead_5y.json")
+def get_backtest_zero_lookahead(instrument: str = "XAUUSD"):
+    inst = (instrument or "XAUUSD").upper()
+    fname = "backtest_btc_zero_lookahead_5y.json" if inst in ("BTCUSD", "BTC", "BITCOIN") else "backtest_zero_lookahead_5y.json"
+    path_zl = os.path.join(DATA_DIR, fname)
     if os.path.exists(path_zl):
         with open(path_zl, "r") as f:
             return json.load(f)
-    return {"error": "zero lookahead backtest telemetry not found"}
+    return {"error": f"zero lookahead backtest telemetry not found for {inst}"}
+
+@app.get("/api/backtest-btc-zero-lookahead")
+def get_backtest_btc_zero_lookahead():
+    path_btc = os.path.join(DATA_DIR, "backtest_btc_zero_lookahead_5y.json")
+    if os.path.exists(path_btc):
+        with open(path_btc, "r") as f:
+            return json.load(f)
+    return {"error": "BTC zero lookahead backtest telemetry not found"}
 
 @app.get("/api/backtest-enhanced-v2")
 def get_backtest_enhanced_v2():

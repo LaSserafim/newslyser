@@ -851,6 +851,33 @@ class TestAStarSetupEngine(unittest.TestCase):
             if os.path.exists(tmp_ledger):
                 os.remove(tmp_ledger)
 
+    def test_phase4_frontend_multi_asset_toggle_and_metrics(self):
+        """Verifies Phase 4: UI templates, ticker strip, and multi-asset toggle integration."""
+        import app
+        from fastapi.testclient import TestClient
+
+        client = TestClient(app.app)
+
+        # 1. Verify index.html contains EURUSD asset selector and new telemetry elements
+        res_idx = client.get("/")
+        self.assertEqual(res_idx.status_code, 200)
+        html = res_idx.text
+        self.assertIn('data-asset="EURUSD"', html, "EURUSD asset toggle button must exist in index.html")
+        self.assertIn('id="tick-yield-spread-us-de"', html, "Transatlantic yield spread ticker must exist")
+        self.assertIn('id="row-ast-yield-spread"', html, "Yield spread table row must exist")
+        self.assertIn('id="row-ast-pure-trend"', html, "SNR Pure-Trend table row must exist")
+        self.assertIn('id="row-ast-be-shield"', html, "Dynamic Breakeven Shield table row must exist")
+        self.assertIn('id="row-astar-be-shield"', html, "Ticket Pane Dynamic Breakeven Shield must exist")
+
+        # 2. Verify static/app.js is accessible and contains Phase 4 multi-asset telemetry handlers
+        res_js = client.get("/static/app.js")
+        self.assertEqual(res_js.status_code, 200)
+        js = res_js.text
+        self.assertIn("EURUSD.SNR <GO>", js)
+        self.assertIn("TRANSATLANTIC SPREAD (US10Y - DE10Y)", js)
+        self.assertIn("SANDWICH CHOP BLACKOUT", js)
+        self.assertIn("tick-yield-spread-us-de", js)
+
 
 if __name__ == "__main__":
     unittest.main()

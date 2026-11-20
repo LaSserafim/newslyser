@@ -823,6 +823,11 @@ async function fetchState() {
     if (p) {
       animateNumber(document.getElementById("tick-gold"), p["GC=F"], "$", "", 2);
       animateNumber(document.getElementById("tick-eur"), p["EURUSD=X"], "", "", 5);
+      animateNumber(document.getElementById("tick-yield-spread-us-de"), p["YIELD_SPREAD_US_DE"], (p["YIELD_SPREAD_US_DE"] >= 0 ? "+" : ""), "%", 3);
+      if (p["DE10Y"]) window._LAST_VERIFIED_DE10Y = Number(p["DE10Y"]);
+      if (p["EURUSD_BID"] && p["EURUSD_ASK"]) {
+        window._LAST_VERIFIED_EUR_SPREAD = Math.abs((p["EURUSD_ASK"] - p["EURUSD_BID"]) * 10000).toFixed(1);
+      }
       animateNumber(document.getElementById("tick-btc"), p["BTC-USD"], "$", "", 2);
       if (p["BTC-USD"]) window._LAST_VERIFIED_BTC_PRICE = Number(p["BTC-USD"]);
       animateNumber(document.getElementById("tick-dxy"), p["DX-Y.NYB"], "", "", 2);
@@ -1827,24 +1832,87 @@ function applyAstarData(aStar) {
   if (document.getElementById("ast-vr5")) document.getElementById("ast-vr5").innerText = fp.footprint_verdict || `VR=${fp.lo_mackinlay_vr5}x (p=${fp.p_value})`;
   if (document.getElementById("ast-lambda")) document.getElementById("ast-lambda").innerText = `λ = ${fp.kyles_lambda}% | Amihud = ${fp.amihud_illiq} (n=${fp.n_bars})`;
   const q8p = aStar.quant_8_pillars || {};
-  if (document.getElementById("ast-har-vol")) {
-    document.getElementById("ast-har-vol").innerText = `${q8p.vol_targeting_scalar || 1.0}x Cap $${q8p.target_risk_usd || 30.0} (Fcst ${q8p.har_rv_forecast_pct || 1.19}%/d | t5 VaR99 ${q8p.var99_student_t5_pct || -3.52}%)`;
-  }
-  if (document.getElementById("ast-q8-live")) {
-    document.getElementById("ast-q8-live").innerText = `GEX $${q8p.net_gex_usd_m || 0}M (Flip $${q8p.gamma_flip_xau || 0}) | O-U s=${q8p.ou_fair_value_s_score >= 0 ? "+" : ""}${q8p.ou_fair_value_s_score || 0}σ | VPIN=${q8p.vpin_now || 0.44}`;
-  }
-  if (document.getElementById("val-ast-pwin")) document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (M2M EV: ${fpa.expected_value_r >= 0 ? "+" : ""}${fpa.expected_value_r}R / Kelly: ${fpa.quarter_kelly_pct}%)`;
-  if (document.getElementById("val-ast-var")) document.getElementById("val-ast-var").innerText = `${mcq.var_95_pct}% (CVaR: ${mcq.cvar_95_pct}% | ${(mcq.n_paths || 10000).toLocaleString()} paths)`;
-
-  const ticket = aStar.trade_ticket || {};
-  const scoreBadge = document.getElementById("astar-grade-badge");
-  const ticketLabel = document.getElementById("astar-ticket-label");
-  const ticketPane = document.getElementById("astar-ticket-pane");
-  const actionEl = document.getElementById("astar-action");
   const isEur = aStar.symbol === "EURUSD";
   const isBtc = aStar.symbol === "BTCUSD";
   const pDec = isEur ? 5 : 2;
   const pPfx = isEur ? "" : "$";
+
+  const cmdTitle = document.getElementById("cmd-function-title");
+  if (cmdTitle) {
+    cmdTitle.innerText = isEur ? "EURUSD.SNR <GO> | WORKSTATION | HC3 KERNEL" : (isBtc ? "BTCUSD.MOM <GO> | WORKSTATION | HC3 KERNEL" : "CPI.XAU <GO> | WORKSTATION | HC3 KERNEL");
+  }
+
+  // Macro Metrics: Yield Spreads & SNR Pure-Trend Telemetry
+  const mm = aStar.macro_metrics || {};
+  const lblSpread = document.getElementById("lbl-ast-yield-spread");
+  const valSpread = document.getElementById("ast-yield-spread");
+  if (valSpread) {
+    if (isEur && mm.transatlantic_yield_spread_us_de) {
+      if (lblSpread) lblSpread.innerText = "TRANSATLANTIC SPREAD (US10Y - DE10Y):";
+      valSpread.innerText = `${mm.transatlantic_yield_spread_us_de} (German Bund: ${window._LAST_VERIFIED_DE10Y || '3.32%'})`;
+      valSpread.style.color = "#00e5ff";
+    } else {
+      if (lblSpread) lblSpread.innerText = "US 10Y-2Y YIELD SPREAD:";
+      valSpread.innerText = mm.yield_spread_10_2 || "--";
+      valSpread.style.color = "#00e5ff";
+    }
+  }
+
+  const rTrend = document.getElementById("row-ast-pure-trend");
+  const valTrend = document.getElementById("ast-pure-trend");
+  if (rTrend && valTrend) {
+    if (isEur && aStar.snr_pure_trend) {
+      rTrend.style.display = "";
+      const pt = aStar.snr_pure_trend;
+      if (pt.is_sandwich_chop) {
+        valTrend.innerHTML = '<span style="color:var(--amber-cmd); font-weight:900;">SANDWICH CHOP BLACKOUT</span> (EMA50/EMA200 Compression)';
+      } else if (pt.pure_trend_direction === 'BULLISH_TREND') {
+        valTrend.innerHTML = '<span style="color:#00e676; font-weight:900;">BULLISH PURE-TREND</span> (EMA50 > EMA200, Zero Counter-Trend Gate)';
+      } else if (pt.pure_trend_direction === 'BEARISH_TREND') {
+        valTrend.innerHTML = '<span style="color:#ff4444; font-weight:900;">BEARISH PURE-TREND</span> (EMA50 < EMA200, Zero Counter-Trend Gate)';
+      } else {
+        valTrend.innerText = pt.pure_trend_direction || '--';
+      }
+    } else {
+      rTrend.style.display = "none";
+    }
+  }
+
+  const ticket = aStar.trade_ticket || {};
+  const rShield = document.getElementById("row-ast-be-shield");
+  const valShield = document.getElementById("ast-be-shield");
+  const rTkShield = document.getElementById("row-astar-be-shield");
+  const valTkShield = document.getElementById("astar-be-shield");
+  if (isEur && (ticket.dynamic_be_shield_trigger || ticket.dynamic_be_shield_sl)) {
+    if (rShield) rShield.style.display = "";
+    if (valShield) valShield.innerText = `+1.0R (${ticket.dynamic_be_shield_trigger}) -> Locked SL (${ticket.dynamic_be_shield_sl})`;
+    if (rTkShield) rTkShield.style.display = "";
+    if (valTkShield) valTkShield.innerText = `+1.0R Trigger: ${ticket.dynamic_be_shield_trigger} | BE Shield SL: ${ticket.dynamic_be_shield_sl}`;
+  } else {
+    if (rShield) rShield.style.display = "none";
+    if (rTkShield) rTkShield.style.display = "none";
+  }
+
+  const lblQ8 = document.getElementById("lbl-ast-q8");
+  if (lblQ8) lblQ8.innerText = isEur ? "EUR/USD SPREAD / DE10Y / VPIN:" : (isBtc ? "BTC FUNDING / VPIN / OI:" : "GLD GEX / O-U / VPIN:");
+  if (isEur && document.getElementById("ast-q8-live")) {
+    const pipSp = window._LAST_VERIFIED_EUR_SPREAD || '0.2';
+    const de10 = window._LAST_VERIFIED_DE10Y ? `${Number(window._LAST_VERIFIED_DE10Y).toFixed(3)}%` : '3.321%';
+    document.getElementById("ast-q8-live").innerText = `Spread ${pipSp} pips | Bund ${de10} | VPIN=${q8p.vpin_now || 0.44}`;
+  } else if (document.getElementById("ast-q8-live")) {
+    document.getElementById("ast-q8-live").innerText = `GEX $${q8p.net_gex_usd_m || 0}M (Flip $${q8p.gamma_flip_xau || 0}) | O-U s=${q8p.ou_fair_value_s_score >= 0 ? "+" : ""}${q8p.ou_fair_value_s_score || 0}σ | VPIN=${q8p.vpin_now || 0.44}`;
+  }
+
+  if (document.getElementById("ast-har-vol")) {
+    document.getElementById("ast-har-vol").innerText = `${q8p.vol_targeting_scalar || 1.0}x Cap $${q8p.target_risk_usd || 30.0} (Fcst ${q8p.har_rv_forecast_pct || 1.19}%/d | t5 VaR99 ${q8p.var99_student_t5_pct || -3.52}%)`;
+  }
+  if (document.getElementById("val-ast-pwin")) document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (M2M EV: ${fpa.expected_value_r >= 0 ? "+" : ""}${fpa.expected_value_r}R / Kelly: ${fpa.quarter_kelly_pct}%)`;
+  if (document.getElementById("val-ast-var")) document.getElementById("val-ast-var").innerText = `${mcq.var_95_pct}% (CVaR: ${mcq.cvar_95_pct}% | ${(mcq.n_paths || 10000).toLocaleString()} paths)`;
+
+  const scoreBadge = document.getElementById("astar-grade-badge");
+  const ticketLabel = document.getElementById("astar-ticket-label");
+  const ticketPane = document.getElementById("astar-ticket-pane");
+  const actionEl = document.getElementById("astar-action");
 
   if (scoreBadge) scoreBadge.innerText = `${aStar.confluence_score}/100`;
   if (actionEl) {
@@ -1853,6 +1921,9 @@ function applyAstarData(aStar) {
       actionEl.style.color = "#ff4444";
     } else if (aStar.btc_regime?.is_sandwich_chop) {
       actionEl.innerHTML = `<span style="background:var(--amber-cmd); color:#000; padding:2px 6px; font-weight:900; margin-right:6px;">SANDWICH CHOP</span> ACTION: STAND ASIDE — PRICE COMPRESSED BETWEEN EMA50 & EMA200`;
+      actionEl.style.color = "var(--amber-cmd)";
+    } else if (isEur && aStar.snr_pure_trend?.is_sandwich_chop) {
+      actionEl.innerHTML = `<span style="background:var(--amber-cmd); color:#000; padding:2px 6px; font-weight:900; margin-right:6px;">SANDWICH CHOP BLACKOUT</span> ACTION: STAND ASIDE — EUR/USD COMPRESSED BETWEEN EMA50 & EMA200`;
       actionEl.style.color = "var(--amber-cmd)";
     } else {
       actionEl.innerText = `ACTION: ${ticket.action || "STAND ASIDE"}`;
@@ -2219,14 +2290,19 @@ async function renderSetupLedgerTable() {
           const pips = calcPips(s);
           const rr = Number(s.realized_r || 0);
           const usd = Number(s.realized_pnl_usd || 0);
+          const isE = (s.asset === "EURUSD");
+          const d = isE ? 5 : 2;
+          const p = isE ? "" : "$";
+          const exitTxt = s.exit_price ? `${p}${Number(s.exit_price).toFixed(d)}` : (s.take_profit_1 ? `${p}${Number(s.take_profit_1).toFixed(d)}` : "--");
+          const assetBadge = s.asset ? `<span style="font-size:8px; border:1px solid ${isE ? '#00e5ff' : '#ffd700'}; color:${isE ? '#00e5ff' : '#ffd700'}; padding:1px 3px; margin-right:4px;">${s.asset}</span>` : "";
           return `
             <tr>
               <td>${s.resolved_at || s.created_at_utc || "--"}</td>
               <td><strong style="color:#00e676;">${s.setup_id}</strong></td>
-              <td>${(s.horizon || "daily").toUpperCase()}</td>
+              <td>${assetBadge}${(s.horizon || "daily").toUpperCase()}</td>
               <td><strong style="color:${s.direction === 'BUY' ? '#00e676' : '#ff8a80'};">${s.direction}</strong></td>
               <td>${fmtEntry(s)}</td>
-              <td style="color:#00e676;">${s.exit_price ? `$${Number(s.exit_price).toFixed(2)}` : (s.take_profit_1 ? `$${Number(s.take_profit_1).toFixed(2)}` : "--")}</td>
+              <td style="color:#00e676;">${exitTxt}</td>
               <td><span style="color:#00e676; border:1px solid #00e676; padding:1px 4px; font-size:8px;">${s.status}</span></td>
               <td style="color:#00e5ff; font-weight:800;">${pips !== null ? `+${Math.abs(pips).toFixed(1)}` : "--"}</td>
               <td style="color:#00e676; font-weight:900;">+${rr.toFixed(2)} R</td>
@@ -2246,14 +2322,19 @@ async function renderSetupLedgerTable() {
           const pips = calcPips(s);
           const rr = Number(s.realized_r || -1.0);
           const usd = Number(s.realized_pnl_usd || 0);
+          const isE = (s.asset === "EURUSD");
+          const d = isE ? 5 : 2;
+          const p = isE ? "" : "$";
+          const exitTxt = s.exit_price ? `${p}${Number(s.exit_price).toFixed(d)}` : (s.stop_loss ? `${p}${Number(s.stop_loss).toFixed(d)}` : "--");
+          const assetBadge = s.asset ? `<span style="font-size:8px; border:1px solid ${isE ? '#00e5ff' : '#ffd700'}; color:${isE ? '#00e5ff' : '#ffd700'}; padding:1px 3px; margin-right:4px;">${s.asset}</span>` : "";
           return `
             <tr>
               <td>${s.resolved_at || s.created_at_utc || "--"}</td>
               <td><strong style="color:#ff4444;">${s.setup_id}</strong></td>
-              <td>${(s.horizon || "daily").toUpperCase()}</td>
+              <td>${assetBadge}${(s.horizon || "daily").toUpperCase()}</td>
               <td><strong style="color:${s.direction === 'BUY' ? '#fff' : '#ff4444'};">${s.direction}</strong></td>
               <td>${fmtEntry(s)}</td>
-              <td style="color:#ff4444;">${s.exit_price ? `$${Number(s.exit_price).toFixed(2)}` : (s.stop_loss ? `$${Number(s.stop_loss).toFixed(2)}` : "--")}</td>
+              <td style="color:#ff4444;">${exitTxt}</td>
               <td><span style="color:#ff4444; border:1px solid #ff4444; padding:1px 4px; font-size:8px;">${s.status}</span></td>
               <td style="color:#ff6b6b; font-weight:800;">${pips !== null ? `-${Math.abs(pips).toFixed(1)}` : "--"}</td>
               <td style="color:#ff4444; font-weight:900;">${rr.toFixed(2)} R</td>
@@ -2403,6 +2484,11 @@ function initAutoRefreshLoop() {
         const p = data.prices;
         animateNumber(document.getElementById("tick-gold"), p["GC=F"], "$", "", 2);
         animateNumber(document.getElementById("tick-eur"), p["EURUSD=X"], "", "", 5);
+        animateNumber(document.getElementById("tick-yield-spread-us-de"), p["YIELD_SPREAD_US_DE"], (p["YIELD_SPREAD_US_DE"] >= 0 ? "+" : ""), "%", 3);
+        if (p["DE10Y"]) window._LAST_VERIFIED_DE10Y = Number(p["DE10Y"]);
+        if (p["EURUSD_BID"] && p["EURUSD_ASK"]) {
+          window._LAST_VERIFIED_EUR_SPREAD = Math.abs((p["EURUSD_ASK"] - p["EURUSD_BID"]) * 10000).toFixed(1);
+        }
         animateNumber(document.getElementById("tick-btc"), p["BTC-USD"], "$", "", 2);
         if (p["BTC-USD"]) window._LAST_VERIFIED_BTC_PRICE = Number(p["BTC-USD"]);
         animateNumber(document.getElementById("tick-dxy"), p["DX-Y.NYB"], "", "", 2);
@@ -3195,7 +3281,7 @@ function initLotCalculator() {
     if (document.getElementById("out-calc-lot")) {
       document.getElementById("out-calc-lot").innerText = `${lot.toFixed(2)} LOT`;
     }
-    const priceDec = pipVal < 0.01 ? 4 : 2;
+    const priceDec = pipVal < 0.01 ? 5 : 2;
     if (document.getElementById("out-calc-notional")) {
       document.getElementById("out-calc-notional").innerText = `$${notional.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD Notional (${(lot * cSize).toLocaleString("en-US", { maximumFractionDigits: 1 })} ${spec.unit})`;
     }
@@ -3300,7 +3386,7 @@ function initLotCalculator() {
     const entry = parseFloat(entInput?.value || 3925.0);
     const spec = getSpec();
     const pipVal = spec.pip;
-    const priceDec = pipVal < 0.01 ? 4 : 2;
+    const priceDec = pipVal < 0.01 ? 5 : 2;
     const slPips = parseFloat(slPipsInput?.value || 100.0);
     const tp1Pips = parseFloat(tp1PipsInput?.value || 250.0);
     const tp2Pips = parseFloat(tp2PipsInput?.value || 500.0);
@@ -3419,6 +3505,10 @@ function initLotCalculator() {
     let dir = "BUY";
 
     if (activeMod === "mod-astar") {
+      if (CURRENT_ASTAR_ASSET && instSel) {
+        instSel.value = CURRENT_ASTAR_ASSET;
+        if (CURRENT_ASTAR_ASSET === "EURUSD" && levSel) levSel.value = "500";
+      }
       const entTxt = document.getElementById("astar-entry")?.innerText || "";
       const slTxt = document.getElementById("astar-sl")?.innerText || "";
       const tp1Txt = document.getElementById("astar-tp1")?.innerText || "";
@@ -3468,7 +3558,7 @@ function initLotCalculator() {
       btnDirBuy?.classList.remove("active");
     }
 
-    const syncDec = getSpec().pip < 0.01 ? 4 : 2;
+    const syncDec = getSpec().pip < 0.01 ? 5 : 2;
     if (entInput) entInput.value = entryVal.toFixed(syncDec);
     if (slInput) slInput.value = slVal.toFixed(syncDec);
     if (tp1Input) tp1Input.value = tp1Val.toFixed(syncDec);

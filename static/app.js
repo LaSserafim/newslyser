@@ -3281,7 +3281,7 @@ function initLotCalculator() {
     if (document.getElementById("out-calc-lot")) {
       document.getElementById("out-calc-lot").innerText = `${lot.toFixed(2)} LOT`;
     }
-    const priceDec = pipVal < 0.01 ? 4 : 2;
+    const priceDec = pipVal < 0.01 ? 5 : 2;
     if (document.getElementById("out-calc-notional")) {
       document.getElementById("out-calc-notional").innerText = `$${notional.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD Notional (${(lot * cSize).toLocaleString("en-US", { maximumFractionDigits: 1 })} ${spec.unit})`;
     }
@@ -3386,7 +3386,7 @@ function initLotCalculator() {
     const entry = parseFloat(entInput?.value || 3925.0);
     const spec = getSpec();
     const pipVal = spec.pip;
-    const priceDec = pipVal < 0.01 ? 4 : 2;
+    const priceDec = pipVal < 0.01 ? 5 : 2;
     const slPips = parseFloat(slPipsInput?.value || 100.0);
     const tp1Pips = parseFloat(tp1PipsInput?.value || 250.0);
     const tp2Pips = parseFloat(tp2PipsInput?.value || 500.0);
@@ -3505,6 +3505,10 @@ function initLotCalculator() {
     let dir = "BUY";
 
     if (activeMod === "mod-astar") {
+      if (CURRENT_ASTAR_ASSET && instSel) {
+        instSel.value = CURRENT_ASTAR_ASSET;
+        if (CURRENT_ASTAR_ASSET === "EURUSD" && levSel) levSel.value = "500";
+      }
       const entTxt = document.getElementById("astar-entry")?.innerText || "";
       const slTxt = document.getElementById("astar-sl")?.innerText || "";
       const tp1Txt = document.getElementById("astar-tp1")?.innerText || "";
@@ -3554,7 +3558,7 @@ function initLotCalculator() {
       btnDirBuy?.classList.remove("active");
     }
 
-    const syncDec = getSpec().pip < 0.01 ? 4 : 2;
+    const syncDec = getSpec().pip < 0.01 ? 5 : 2;
     if (entInput) entInput.value = entryVal.toFixed(syncDec);
     if (slInput) slInput.value = slVal.toFixed(syncDec);
     if (tp1Input) tp1Input.value = tp1Val.toFixed(syncDec);

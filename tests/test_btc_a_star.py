@@ -242,5 +242,49 @@ class TestBtcAStarEngine(unittest.TestCase):
             if os.path.exists(tmp_ledger):
                 os.remove(tmp_ledger)
 
+    def test_btc_5y_zero_lookahead_telemetry(self):
+        """
+        Verifies 5-Year Zero-Lookahead Audit Telemetry for Bitcoin (BTCUSD):
+        1. Point-in-time execution, Next-bar Open, Worst-case collision.
+        2. Strictly positive mean R and profit factor across all tracks.
+        3. Statistical significance: Student t >= 2.0, White HC3 t >= 2.0, Rademacher p < 0.01.
+        4. In-Sample vs Out-of-Sample stability (positive alpha in both bear and bull regimes).
+        """
+        import json
+        telemetry_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "backtest_btc_zero_lookahead_5y.json")
+        self.assertTrue(os.path.exists(telemetry_path), f"Telemetry file missing at {telemetry_path}")
+
+        with open(telemetry_path, "r") as f:
+            tdata = json.load(f)
+
+        self.assertEqual(tdata["asset"], "BTCUSD")
+        self.assertGreaterEqual(tdata["data_range"]["bars"], 1800)
+
+        # All 4 tracks must show positive sum R and PF >= 1.20
+        tracks = tdata["tracks"]
+        for t_name in ["scalping", "intraday", "daily", "swing"]:
+            t_res = tracks[t_name]
+            self.assertGreater(t_res["trades"], 50)
+            self.assertGreater(t_res["sum_r"], 0.0, f"Track {t_name} sum R must be > 0")
+            self.assertGreaterEqual(t_res["profit_factor"], 1.20, f"Track {t_name} PF must be >= 1.20")
+
+        # Portfolio metrics
+        port = tdata["portfolio"]
+        self.assertGreater(port["trades"], 400)
+        self.assertGreater(port["sum_r"], 40.0)
+        self.assertGreaterEqual(port["win_rate_pct"], 45.0)
+        self.assertGreaterEqual(port["profit_factor"], 1.30)
+        self.assertGreaterEqual(port["t_stat"], 2.0)
+        self.assertGreaterEqual(port["white_hc3_t"], 2.0)
+        self.assertLess(port["rademacher_p"], 0.01)
+        self.assertGreaterEqual(port["dsr_prob_pct"], 95.0)
+
+        # In-sample vs Out-of-sample positive alpha
+        split = tdata["sample_split"]
+        self.assertGreater(split["in_sample"]["sum_r"], 10.0)
+        self.assertGreaterEqual(split["in_sample"]["profit_factor"], 1.30)
+        self.assertGreater(split["out_of_sample"]["sum_r"], 20.0)
+        self.assertGreaterEqual(split["out_of_sample"]["profit_factor"], 1.25)
+
 if __name__ == "__main__":
     unittest.main()

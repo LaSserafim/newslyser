@@ -1,0 +1,276 @@
+{
+  "asset": "BTCUSD",
+  "audit_version": "5Y_BTC_ZERO_LOOKAHEAD_ANTI_OVERFITTING_V1",
+  "timestamp_utc": "2026-11-20 14:49:20 UTC",
+  "data_range": {
+    "start": "2021-11-20",
+    "end": "2026-11-20",
+    "bars": 1827
+  },
+  "anti_bias_rules": [
+    "Point-in-time signal computed strictly at Day i Close",
+    "Execution strictly on Day i+1 Open (Next-Bar Open)",
+    "Sandwich Chop Zone Blackout: min(EMA50, EMA200) <= Close <= max(EMA50, EMA200) locks execution",
+    "Pure-Trend: Bullish requires Close > EMA50 > EMA200, Bearish requires Close < EMA50 < EMA200",
+    "S/R Anchor & Pullback Retest: Price tests within 0.75x ATR of EMA50 with reversal candle confirmation",
+    "Worst-case same-bar collision: SL hit first (-1.0 R)",
+    "Overnight gap past SL fills at Open (slippage loss)",
+    "Trading friction included (0.05% of notional per trade)"
+  ],
+  "tracks": {
+    "scalping": {
+      "trades": 172,
+      "wins": 88,
+      "win_rate_pct": 51.16,
+      "mean_r": 0.0629,
+      "sum_r": 10.82,
+      "std_r": 0.7464,
+      "t_stat": 1.106,
+      "p_val": 0.27028,
+      "white_hc3_se": 0.0571,
+      "white_hc3_t": 1.103,
+      "white_hc3_p": 0.271577,
+      "profit_factor": 1.23,
+      "ending_equity_usd": 1038.0,
+      "net_return_pct": 3.8,
+      "max_drawdown_pct": 2.89,
+      "sharpe_ratio": 0.49,
+      "dsr_prob_pct": 86.59,
+      "rademacher_p": 0.13384,
+      "ci_95": [
+        -0.0495,
+        0.1768
+      ],
+      "ci_99": [
+        -0.0867,
+        0.2125
+      ]
+    },
+    "intraday": {
+      "trades": 135,
+      "wins": 65,
+      "win_rate_pct": 48.15,
+      "mean_r": 0.0949,
+      "sum_r": 12.82,
+      "std_r": 0.9032,
+      "t_stat": 1.221,
+      "p_val": 0.22423,
+      "white_hc3_se": 0.078,
+      "white_hc3_t": 1.217,
+      "white_hc3_p": 0.225743,
+      "profit_factor": 1.3,
+      "ending_equity_usd": 1064.71,
+      "net_return_pct": 6.47,
+      "max_drawdown_pct": 2.9,
+      "sharpe_ratio": 0.55,
+      "dsr_prob_pct": 89.87,
+      "rademacher_p": 0.1135,
+      "ci_95": [
+        -0.0564,
+        0.25
+      ],
+      "ci_99": [
+        -0.1007,
+        0.2927
+      ]
+    },
+    "daily": {
+      "trades": 95,
+      "wins": 51,
+      "win_rate_pct": 53.68,
+      "mean_r": 0.1887,
+      "sum_r": 17.92,
+      "std_r": 1.0843,
+      "t_stat": 1.696,
+      "p_val": 0.093196,
+      "white_hc3_se": 0.1118,
+      "white_hc3_t": 1.687,
+      "white_hc3_p": 0.094919,
+      "profit_factor": 1.56,
+      "ending_equity_usd": 1189.55,
+      "net_return_pct": 18.96,
+      "max_drawdown_pct": 5.53,
+      "sharpe_ratio": 0.76,
+      "dsr_prob_pct": 96.55,
+      "rademacher_p": 0.04707,
+      "ci_95": [
+        -0.0253,
+        0.415
+      ],
+      "ci_99": [
+        -0.0843,
+        0.4843
+      ]
+    },
+    "swing": {
+      "trades": 69,
+      "wins": 34,
+      "win_rate_pct": 49.28,
+      "mean_r": 0.1241,
+      "sum_r": 8.56,
+      "std_r": 1.0384,
+      "t_stat": 0.993,
+      "p_val": 0.32423,
+      "white_hc3_se": 0.1259,
+      "white_hc3_t": 0.985,
+      "white_hc3_p": 0.328116,
+      "profit_factor": 1.37,
+      "ending_equity_usd": 1085.39,
+      "net_return_pct": 8.54,
+      "max_drawdown_pct": 3.46,
+      "sharpe_ratio": 0.44,
+      "dsr_prob_pct": 85.31,
+      "rademacher_p": 0.16109,
+      "ci_95": [
+        -0.1133,
+        0.3721
+      ],
+      "ci_99": [
+        -0.1779,
+        0.455
+      ]
+    }
+  },
+  "portfolio": {
+    "trades": 471,
+    "wins": 238,
+    "win_rate_pct": 50.53,
+    "mean_r": 0.1064,
+    "sum_r": 50.12,
+    "std_r": 0.9102,
+    "t_stat": 2.537,
+    "p_val": 0.011503,
+    "white_hc3_se": 0.042,
+    "white_hc3_t": 2.535,
+    "white_hc3_p": 0.011568,
+    "profit_factor": 1.35,
+    "ending_equity_usd": 1440.34,
+    "net_return_pct": 44.03,
+    "max_drawdown_pct": 13.81,
+    "sharpe_ratio": 1.13,
+    "dsr_prob_pct": 99.6,
+    "rademacher_p": 0.00568,
+    "ci_95": [
+      0.0254,
+      0.1913
+    ],
+    "ci_99": [
+      0.0001,
+      0.2166
+    ]
+  },
+  "sample_split": {
+    "in_sample": {
+      "trades": 139,
+      "wins": 64,
+      "win_rate_pct": 46.04,
+      "mean_r": 0.1379,
+      "sum_r": 19.17,
+      "std_r": 1.0333,
+      "t_stat": 1.573,
+      "p_val": 0.118009,
+      "white_hc3_se": 0.088,
+      "white_hc3_t": 1.568,
+      "white_hc3_p": 0.119171,
+      "profit_factor": 1.41,
+      "ending_equity_usd": 1149.76,
+      "net_return_pct": 14.98,
+      "max_drawdown_pct": 13.81,
+      "sharpe_ratio": 0.7,
+      "dsr_prob_pct": 95.14,
+      "rademacher_p": 0.05939,
+      "ci_95": [
+        -0.0331,
+        0.3152
+      ],
+      "ci_99": [
+        -0.0813,
+        0.3702
+      ]
+    },
+    "out_of_sample": {
+      "trades": 332,
+      "wins": 174,
+      "win_rate_pct": 52.41,
+      "mean_r": 0.0932,
+      "sum_r": 30.96,
+      "std_r": 0.8548,
+      "t_stat": 1.988,
+      "p_val": 0.047635,
+      "white_hc3_se": 0.047,
+      "white_hc3_t": 1.985,
+      "white_hc3_p": 0.04797,
+      "profit_factor": 1.32,
+      "ending_equity_usd": 1252.73,
+      "net_return_pct": 25.27,
+      "max_drawdown_pct": 10.0,
+      "sharpe_ratio": 0.89,
+      "dsr_prob_pct": 98.07,
+      "rademacher_p": 0.02402,
+      "ci_95": [
+        -0.0012,
+        0.1856
+      ],
+      "ci_99": [
+        -0.0281,
+        0.2166
+      ]
+    }
+  },
+  "scenario_1pct_risk": {
+    "trades": 471,
+    "wins": 238,
+    "win_rate_pct": 50.53,
+    "mean_r": 0.1064,
+    "sum_r": 50.12,
+    "std_r": 0.9102,
+    "t_stat": 2.537,
+    "p_val": 0.011503,
+    "white_hc3_se": 0.042,
+    "white_hc3_t": 2.535,
+    "white_hc3_p": 0.011568,
+    "profit_factor": 1.35,
+    "ending_equity_usd": 1618.7,
+    "net_return_pct": 61.87,
+    "max_drawdown_pct": 17.99,
+    "sharpe_ratio": 1.13,
+    "dsr_prob_pct": 99.6,
+    "rademacher_p": 0.00568,
+    "ci_95": [
+      0.0254,
+      0.1913
+    ],
+    "ci_99": [
+      0.0001,
+      0.2166
+    ]
+  },
+  "scenario_2pct_risk": {
+    "trades": 471,
+    "wins": 238,
+    "win_rate_pct": 50.53,
+    "mean_r": 0.1064,
+    "sum_r": 50.12,
+    "std_r": 0.9102,
+    "t_stat": 2.537,
+    "p_val": 0.011503,
+    "white_hc3_se": 0.042,
+    "white_hc3_t": 2.535,
+    "white_hc3_p": 0.011568,
+    "profit_factor": 1.35,
+    "ending_equity_usd": 2520.68,
+    "net_return_pct": 152.07,
+    "max_drawdown_pct": 32.87,
+    "sharpe_ratio": 1.13,
+    "dsr_prob_pct": 99.6,
+    "rademacher_p": 0.00568,
+    "ci_95": [
+      0.0254,
+      0.1913
+    ],
+    "ci_99": [
+      0.0001,
+      0.2166
+    ]
+  }
+}

@@ -27,7 +27,7 @@ _CALIBRATION_CACHE = {}
 _DAILY_OLS_CACHE = {"ts": 0.0, "data": None}
 _LIVE_OVERLAY_CACHE = {"ts": 0.0, "data": {}}
 _DAILY_PROB_CACHE = {"ts": 0.0, "data": None}
-_INTRADAY_MOM_CACHE = {"ts": 0.0, "data": None}
+_INTRADAY_MOM_CACHE = {}
 _PAPER_3Y_CACHE = {"ts": 0.0, "data": None}
 
 def _event_file_mtime(event_type="cpi"):
@@ -2069,7 +2069,7 @@ def calculate_lot_and_risk(
     tp1_pips=None,
     tp2_price=None,
     tp2_pips=None,
-    contract_size=100.0,
+    contract_size=None,
     instrument="XAUUSD",
     direction="BUY"
 ):
@@ -2084,7 +2084,7 @@ def calculate_lot_and_risk(
     """
     inst = (instrument or "XAUUSD").upper()
     spec = get_instrument_spec(inst)
-    c_size = contract_size if (contract_size and contract_size != 100.0) else spec["contract"]
+    c_size = float(contract_size) if (contract_size is not None and float(contract_size) > 0) else spec["contract"]
     pip_val = spec["pip"]
     price_dec = spec["price_decimals"]
     pip_value_per_lot = c_size * pip_val
@@ -2518,7 +2518,6 @@ def _get_intraday_momentum_regime(instrument="XAUUSD"):
             "mu_m15_post_pct": 0.0,
             "mu_h1_post_pct": 0.0,
         }
-        return fallback_res
         return fallback_res
 
 
@@ -3589,6 +3588,20 @@ def calculate_daily_a_star_setup(
         elif is_bullish is False:
             dynamic_be_trigger = snr_eval["short_setup"]["dynamic_be_shield_trigger"]
             dynamic_be_sl = snr_eval["short_setup"]["dynamic_be_shield_sl"]
+    elif inst_key == "BTCUSD":
+        if is_bullish is True:
+            dynamic_be_trigger = round(mid_entry + eff_sl_dist, price_dec)
+            dynamic_be_sl = round(mid_entry + 15.0, price_dec)
+        elif is_bullish is False:
+            dynamic_be_trigger = round(mid_entry - eff_sl_dist, price_dec)
+            dynamic_be_sl = round(mid_entry - 15.0, price_dec)
+    elif inst_key == "XAUUSD":
+        if is_bullish is True:
+            dynamic_be_trigger = round(mid_entry + eff_sl_dist, price_dec)
+            dynamic_be_sl = round(mid_entry + 0.50, price_dec)
+        elif is_bullish is False:
+            dynamic_be_trigger = round(mid_entry - eff_sl_dist, price_dec)
+            dynamic_be_sl = round(mid_entry - 0.50, price_dec)
 
     return {
         "horizon": h_mode,
