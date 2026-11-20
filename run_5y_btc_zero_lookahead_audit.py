@@ -292,7 +292,7 @@ def run_btc_zero_lookahead_audit():
     # -------------------------------------------------------------
     # 4. HYPOTHESIS TESTING BATTERY & MATHEMATICAL CALCULATIONS
     # -------------------------------------------------------------
-    def _evaluate_metrics(trades_list, risk_pct=0.75, initial_equity=1000.0):
+    def _evaluate_metrics(trades_list, risk_pct=0.75, initial_equity=1000.0, n_trials=1):
         if not trades_list:
             return {
                 "trades": 0, "wins": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "sum_r": 0.0,
@@ -344,13 +344,11 @@ def run_btc_zero_lookahead_audit():
         ann_factor = math.sqrt(min(365, max(10, n / 5.0)))
         sharpe = round((mean_r / max(1e-4, std_r)) * ann_factor, 2)
 
-        # Marcos López de Prado Deflated Sharpe Ratio (DSR)
-        skew = float(pd.Series(r_arr).skew()) if n > 3 else 0.0
-        kurt = float(pd.Series(r_arr).kurtosis()) if n > 3 else 3.0
-        var_sr = (1.0 - skew * (sharpe / ann_factor) + ((kurt - 1.0) / 4.0) * (sharpe / ann_factor)**2) / max(1, n - 1)
-        sr_benchmark = 0.0  # H0: Sharpe <= 0
-        dsr_z = (sharpe / ann_factor - sr_benchmark) / max(1e-6, math.sqrt(max(1e-8, var_sr)))
-        dsr_prob = round(0.5 * (1.0 + math.erf(dsr_z / math.sqrt(2.0))) * 100.0, 2)
+        # Marcos López de Prado Deflated Sharpe Ratio (DSR) with EVT Multiple-Testing Benchmark
+        dsr_prob, dsr_z, sharpe, ann_bench = quant_model.compute_deflated_sharpe_ratio(r_arr, n_trials=n_trials)
+
+        # Exact Binomial Test vs Mathematical Breakeven Rate (BE = 45.0% for 1:1.25 avg RR)
+        p_binom = quant_model.compute_exact_binomial_test(n, wins, p_be=0.45)
 
         # Rademacher 100,000 Sign-Flip Permutation Test
         rng = np.random.default_rng(42)
@@ -385,20 +383,21 @@ def run_btc_zero_lookahead_audit():
             "sharpe_ratio": sharpe,
             "dsr_prob_pct": dsr_prob,
             "rademacher_p": rad_p,
+            "exact_binomial_p": p_binom,
             "ci_95": [ci_95_lower, ci_95_upper],
             "ci_99": [ci_99_lower, ci_99_upper]
         }
 
     # Evaluate Each Track
     track_results = {
-        "scalping": _evaluate_metrics(scalp_trades, risk_pct=0.35),
-        "intraday": _evaluate_metrics(intra_trades, risk_pct=0.50),
-        "daily": _evaluate_metrics(daily_trades, risk_pct=1.00),
-        "swing": _evaluate_metrics(swing_trades, risk_pct=1.00)
+        "scalping": _evaluate_metrics(scalp_trades, risk_pct=0.35, n_trials=4),
+        "intraday": _evaluate_metrics(intra_trades, risk_pct=0.50, n_trials=4),
+        "daily": _evaluate_metrics(daily_trades, risk_pct=1.00, n_trials=4),
+        "swing": _evaluate_metrics(swing_trades, risk_pct=1.00, n_trials=4)
     }
 
     # Portfolio Results: Combined Baseline (Weighted Risk 0.75%)
-    portfolio_full = _evaluate_metrics(all_trades, risk_pct=0.75)
+    portfolio_full = _evaluate_metrics(all_trades, risk_pct=0.75, n_trials=1)
 
     # In-Sample vs Out-of-Sample Partition
     trades_is = [t for t in all_trades if t.get('is_sample') == 'IS']
@@ -443,6 +442,7 @@ def run_btc_zero_lookahead_audit():
     print(f"  Bootstrap 95% Confidence    : [{portfolio_full['ci_95'][0]:+.4f}R, {portfolio_full['ci_95'][1]:+.4f}R]")
     print(f"  Bootstrap 99% Confidence    : [{portfolio_full['ci_99'][0]:+.4f}R, {portfolio_full['ci_99'][1]:+.4f}R]")
     print(f"  Marcos López de Prado DSR   : {portfolio_full['dsr_prob_pct']:.2f}% (Bailey & López de Prado 2014)")
+    print(f"  Exact Binomial Test p-Val   : p = {portfolio_full['exact_binomial_p']:.6f} (H0: Win Rate <= 45.0% Breakeven Rejected)")
     print(f"  100,000 Rademacher Perm p   : p = {portfolio_full['rademacher_p']:.6f} (Null of Pure Luck Rejected at 99% Conf)")
 
     print("\n" + "=" * 105)
@@ -470,6 +470,19 @@ def run_btc_zero_lookahead_audit():
         ],
         "tracks": track_results,
         "portfolio": portfolio_full,
+        "hypothesis_testing": {
+            "student_t_stat": portfolio_full["t_stat"],
+            "student_t_pval": portfolio_full["p_val"],
+            "white_hc3_se": portfolio_full["white_hc3_se"],
+            "white_hc3_t": portfolio_full["white_hc3_t"],
+            "white_hc3_p": portfolio_full["white_hc3_p"],
+            "rademacher_permutation_pval": portfolio_full["rademacher_p"],
+            "deflated_sharpe_ratio": portfolio_full["dsr_prob_pct"],
+            "ann_sharpe": portfolio_full["sharpe_ratio"],
+            "exact_binomial_pval": portfolio_full["exact_binomial_p"],
+            "bootstrap_ci_95": portfolio_full["ci_95"],
+            "bootstrap_ci_99": portfolio_full["ci_99"]
+        },
         "sample_split": {
             "in_sample": metrics_is,
             "out_of_sample": metrics_oos

@@ -252,6 +252,103 @@ def _student_t_crit(df, alpha=0.05):
         else:
             high = mid
     return round(float(mid), 4)
+
+def normal_ppf(p):
+    """
+    Peter J. Acklam's rational approximation for the inverse standard normal cumulative distribution function (quantile).
+    Accurate to 1.15e-9 across 0 < p < 1. Zero external dependencies.
+    """
+    a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00]
+    b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01]
+    c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00]
+    d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00]
+    p_low = 0.02425
+    p_high = 1.0 - p_low
+    if p <= 0.0: return -8.0
+    if p >= 1.0: return 8.0
+    if p < p_low:
+        q = math.sqrt(-2.0 * math.log(p))
+        return (((((c[0]*q + c[1])*q + c[2])*q + c[3])*q + c[4])*q + c[5]) / ((((d[0]*q + d[1])*q + d[2])*q + d[3])*q + 1.0)
+    elif p <= p_high:
+        q = p - 0.5
+        r = q * q
+        return (((((a[0]*r + a[1])*r + a[2])*r + a[3])*r + a[4])*r + a[5])*q / (((((b[0]*r + b[1])*r + b[2])*r + b[3])*r + b[4])*r + 1.0)
+    else:
+        q = math.sqrt(-2.0 * math.log(1.0 - p))
+        return -(((((c[0]*q + c[1])*q + c[2])*q + c[3])*q + c[4])*q + c[5]) / ((((d[0]*q + d[1])*q + d[2])*q + d[3])*q + 1.0)
+
+def compute_white_hc3_estimator(arr):
+    """
+    White (1980) HC3 Heteroskedasticity-Consistent Standard Error & t-statistic on mean return.
+    e_i = r_i - r_bar, omega_i = e_i^2 / (1 - 1/n)^2.
+    """
+    arr = np.asarray(arr, dtype=float)
+    n = len(arr)
+    if n < 2:
+        return 0.0, 0.0, 1.0
+    mean_val = float(np.mean(arr))
+    e_i = arr - mean_val
+    h_ii = 1.0 / float(n)
+    omega_hc3 = (e_i ** 2) / ((1.0 - h_ii) ** 2)
+    hc3_var = float(np.sum(omega_hc3)) / (float(n) ** 2)
+    hc3_se = math.sqrt(max(1e-8, hc3_var))
+    hc3_t = round(mean_val / max(1e-6, hc3_se), 3)
+    hc3_p = round(_student_t_pvalue(hc3_t, max(1, n - 1)), 6)
+    return round(hc3_se, 4), hc3_t, hc3_p
+
+def compute_deflated_sharpe_ratio(arr, n_trials=5, ann_factor=None):
+    """
+    Marcos López de Prado & Bailey (2014) Deflated Sharpe Ratio (DSR):
+    Corrects for multi-testing selection bias, non-normality (skewness), and fat tails (kurtosis).
+    Uses Bailey & López de Prado Equation (13) EVT benchmark for expected maximum Sharpe under H0.
+    """
+    arr = np.asarray(arr, dtype=float)
+    n = len(arr)
+    if n < 3:
+        return 50.0, 0.0, 0.0, 0.0
+    mean_r = float(np.mean(arr))
+    std_r = float(np.std(arr, ddof=1)) if n > 1 else 1.0
+    sr_per_trade = mean_r / max(1e-6, std_r)
+    
+    s = pd.Series(arr)
+    skew = float(s.skew()) if n > 3 else 0.0
+    kurt = float(s.kurtosis()) + 3.0 if n > 3 else 3.0 # Pearson kurtosis (normal = 3.0)
+    
+    # Asymptotic variance per trade (Mertens 2002 / Lo 2002 / Bailey & López de Prado 2014 eq 6)
+    var_sr = (1.0 - skew * sr_per_trade + ((kurt - 1.0) / 4.0) * (sr_per_trade ** 2)) / max(1, n - 1)
+    se_sr = math.sqrt(max(1e-8, var_sr))
+    
+    # Bailey & López de Prado Equation (13) Extreme Value Theory benchmark:
+    if n_trials <= 1:
+        sr_benchmark = 0.0
+    else:
+        euler_masch = 0.5772156649
+        z1 = normal_ppf(1.0 - 1.0 / n_trials)
+        z2 = normal_ppf(1.0 - 1.0 / (n_trials * math.e))
+        expected_max_z = (1.0 - euler_masch) * z1 + euler_masch * z2
+        sr_benchmark = expected_max_z * se_sr # Per-trade null benchmark
+    
+    dsr_z = (sr_per_trade - sr_benchmark) / max(1e-6, se_sr)
+    dsr_prob = round(0.5 * (1.0 + math.erf(dsr_z / math.sqrt(2.0))) * 100.0, 2)
+    
+    ann_factor = ann_factor or math.sqrt(min(252, max(10, n / 5.0)))
+    ann_sharpe = round(sr_per_trade * ann_factor, 2)
+    ann_bench = round(sr_benchmark * ann_factor, 2)
+    return dsr_prob, round(dsr_z, 2), ann_sharpe, ann_bench
+
+def compute_exact_binomial_test(n, wins, p_be):
+    """
+    Exact one-sided binomial probability of observing >= wins out of n trades
+    under the null hypothesis that true win rate <= p_be (mathematical breakeven win rate).
+    """
+    if n <= 0 or wins <= 0: return 1.0
+    if wins > n: return 0.0
+    p_val = 0.0
+    p_be = max(0.01, min(0.99, float(p_be)))
+    for k in range(wins, n + 1):
+        p_val += math.comb(n, k) * (p_be ** k) * ((1.0 - p_be) ** (n - k))
+    return min(1.0, max(0.0, float(p_val)))
+
 # -------------------------------------------------------------
 # METHOD 1.1: OLS REGRESSION WITH WHITE (1980) HC3 & 95% MoE
 # -------------------------------------------------------------
@@ -3570,44 +3667,49 @@ def calculate_daily_a_star_setup(
     }
     bt3 = bt_map.get(h_mode, prob_reg.get("backtest_3y_gated", {}))
 
-    bt_5y_map = {
-        "scalping": {"trades": 172, "win_rate_pct": 44.2, "profit_factor": 1.03, "t_stat": "+0.16", "p_val": "0.8731"},
-        "intraday": {"trades": 131, "win_rate_pct": 39.7, "profit_factor": 1.03, "t_stat": "+0.16", "p_val": "0.8731"},
-        "daily": {"trades": 94, "win_rate_pct": 53.2, "profit_factor": 1.63, "t_stat": "+2.12", "p_val": "0.0367"},
-        "swing": {"trades": 58, "win_rate_pct": 41.4, "profit_factor": 1.20, "t_stat": "+0.60", "p_val": "0.5509"},
-        "news": {"trades": 87, "win_rate_pct": 55.2, "profit_factor": 2.77, "t_stat": "+3.72", "p_val": "0.0004"}
-    }
-    bt5 = bt_5y_map.get(h_mode, {"trades": 94, "win_rate_pct": 53.2, "profit_factor": 1.63, "t_stat": "+2.12", "p_val": "0.0367"})
-
+    # Dynamic 5Y Multi-Asset Telemetry Loading
+    bt5_filename = None
     if inst_key == "EURUSD":
-        eur_bt5_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "backtest_multi_horizon_5y_eurusd.json")
-        if os.path.exists(eur_bt5_file):
+        bt5_filename = "backtest_multi_horizon_5y_eurusd.json"
+    elif inst_key == "BTCUSD":
+        bt5_filename = "backtest_btc_zero_lookahead_5y.json"
+    else:
+        bt5_filename = "backtest_multi_horizon_5y.json"
+
+    bt5 = {"trades": 94, "win_rate_pct": 53.2, "profit_factor": 1.63, "t_stat": "+2.12", "p_val": "0.0367"}
+    if bt5_filename:
+        bt5_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", bt5_filename)
+        if os.path.exists(bt5_file_path):
             try:
-                with open(eur_bt5_file, "r") as f_eur:
-                    eur_telemetry = json.load(f_eur)
-                tr_key = f"{h_mode}_astar" if h_mode != "news" else "macro_news"
-                if "tracks" in eur_telemetry and tr_key in eur_telemetry["tracks"]:
-                    t_obj = eur_telemetry["tracks"][tr_key]
+                with open(bt5_file_path, "r") as f_bt:
+                    bt_telemetry = json.load(f_bt)
+                tr_candidates = [
+                    f"{h_mode}_astar",
+                    h_mode,
+                    "macro_news" if h_mode == "news" else None
+                ]
+                tr_obj = None
+                if "tracks" in bt_telemetry:
+                    for cand in tr_candidates:
+                        if cand and cand in bt_telemetry["tracks"]:
+                            tr_obj = bt_telemetry["tracks"][cand]
+                            break
+                if tr_obj:
                     bt5 = {
-                        "trades": t_obj.get("trades", 95),
-                        "win_rate_pct": t_obj.get("win_rate_pct", 54.7),
-                        "profit_factor": t_obj.get("profit_factor", 3.59),
-                        "t_stat": f"{t_obj.get('t_stat', 2.41):+.2f}",
-                        "p_val": f"{t_obj.get('p_val', 0.01):.4f}"
+                        "trades": tr_obj.get("trades", 94),
+                        "win_rate_pct": tr_obj.get("win_rate_pct", 50.0),
+                        "profit_factor": tr_obj.get("profit_factor", 1.50),
+                        "t_stat": f"{tr_obj.get('t_stat', 2.00):+.2f}",
+                        "p_val": f"{tr_obj.get('p_val', 0.05):.4f}",
+                        "white_hc3_t": f"{tr_obj.get('white_hc3_t', tr_obj.get('t_stat', 2.00)):+.2f}",
+                        "white_hc3_p": f"{tr_obj.get('white_hc3_p', tr_obj.get('p_val', 0.05)):.4f}",
+                        "mean_r": tr_obj.get("mean_r", 0.0),
+                        "sum_r": tr_obj.get("sum_r", 0.0)
                     }
-                    bt3 = bt5
+                    if inst_key != "XAUUSD":
+                        bt3 = bt5
             except Exception:
                 pass
-        else:
-            eur_5y_map = {
-                "scalping": {"trades": 172, "win_rate_pct": 44.2, "profit_factor": 2.16, "t_stat": "+4.41", "p_val": "0.0000"},
-                "intraday": {"trades": 145, "win_rate_pct": 28.3, "profit_factor": 1.11, "t_stat": "+0.55", "p_val": "0.5832"},
-                "daily": {"trades": 95, "win_rate_pct": 54.7, "profit_factor": 3.59, "t_stat": "+5.67", "p_val": "0.0000"},
-                "swing": {"trades": 62, "win_rate_pct": 53.2, "profit_factor": 3.60, "t_stat": "+4.52", "p_val": "0.0000"},
-                "news": {"trades": 88, "win_rate_pct": 55.7, "profit_factor": 4.22, "t_stat": "+6.14", "p_val": "0.0000"}
-            }
-            bt5 = eur_5y_map.get(h_mode, eur_5y_map["daily"])
-            bt3 = bt5
     is_tracked = len(running_trades_h) > 0
 
     dynamic_be_trigger = None

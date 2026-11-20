@@ -1381,7 +1381,12 @@ def get_hypothesis_test(event_type: str = "cpi"):
 @app.get("/api/backtest-5y")
 def get_backtest_5y(instrument: str = "XAUUSD"):
     inst = (instrument or "XAUUSD").upper()
-    fname = "backtest_multi_horizon_5y_eurusd.json" if inst in ("EURUSD", "EUR") else "backtest_multi_horizon_5y.json"
+    if inst in ("EURUSD", "EUR"):
+        fname = "backtest_multi_horizon_5y_eurusd.json"
+    elif inst in ("BTCUSD", "BTC", "BITCOIN"):
+        fname = "backtest_btc_zero_lookahead_5y.json"
+    else:
+        fname = "backtest_multi_horizon_5y.json"
     path_5y = os.path.join(DATA_DIR, fname)
     if os.path.exists(path_5y):
         with open(path_5y, "r") as f:
@@ -1433,8 +1438,15 @@ def get_backtest_enhanced_v2():
 @app.get("/api/backtest-multi-horizon")
 def get_backtest_multi_horizon(instrument: str = "XAUUSD"):
     inst = (instrument or "XAUUSD").upper()
-    fname_5y = "backtest_multi_horizon_5y_eurusd.json" if inst in ("EURUSD", "EUR") else "backtest_multi_horizon_5y.json"
-    fname_3y = "backtest_multi_horizon_5y_eurusd.json" if inst in ("EURUSD", "EUR") else "backtest_multi_horizon_3y.json"
+    if inst in ("EURUSD", "EUR"):
+        fname_5y = "backtest_multi_horizon_5y_eurusd.json"
+        fname_3y = "backtest_multi_horizon_5y_eurusd.json"
+    elif inst in ("BTCUSD", "BTC", "BITCOIN"):
+        fname_5y = "backtest_btc_zero_lookahead_5y.json"
+        fname_3y = "backtest_btc_zero_lookahead_5y.json"
+    else:
+        fname_5y = "backtest_multi_horizon_5y.json"
+        fname_3y = "backtest_multi_horizon_3y.json"
     path_5y = os.path.join(DATA_DIR, fname_5y)
     path_3y = os.path.join(DATA_DIR, fname_3y)
     res = {}

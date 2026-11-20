@@ -1,6 +1,6 @@
 {
-  "generated_at": 1795186785.6741,
-  "time_utc": "2026-11-20 14:59:45 UTC",
+  "generated_at": 1795194029.60607,
+  "time_utc": "2026-11-20 17:00:29 UTC",
   "period_years": 5,
   "instrument": "EURUSD",
   "tracks": {
@@ -83,6 +83,20 @@
       "max_drawdown_pct": 5.5
     }
   },
+  "in_sample_vs_oos": {
+    "in_sample": {
+      "trades": 141,
+      "mean_r": 0.503,
+      "sum_r": 70.98,
+      "profit_factor": 2.21
+    },
+    "out_of_sample": {
+      "trades": 421,
+      "mean_r": 0.69,
+      "sum_r": 290.54,
+      "profit_factor": 2.59
+    }
+  },
   "year_over_year": {
     "2022": {
       "trades": 30,
@@ -128,9 +142,13 @@
   "hypothesis_testing": {
     "student_t_stat": 9.23,
     "student_t_pval": 0.0,
+    "white_hc3_se": 0.0697,
+    "white_hc3_t": 9.225,
+    "white_hc3_p": 0.0,
     "rademacher_permutation_pval": 0.0,
-    "deflated_sharpe_ratio": 1.0,
+    "deflated_sharpe_ratio": 100.0,
     "ann_sharpe": 4.13,
+    "exact_binomial_pval": 3.9592758987774914e-16,
     "bootstrap_ci_95": [
       0.5060463523131672,
       0.7830629448398576

@@ -283,26 +283,46 @@ def run_5y_eurusd_multi_horizon_suite():
     print(f"     Max Permuted Mean R        : {np.max(perm_means):+.4f} R")
     print(f"     Rademacher Permutation p   : {perm_p_val:.6f} ({'p < 0.0001 -> H0 REJECTED' if perm_p_val < 0.0001 else 'REJECTED'})")
 
-    # Test 2: Deflated Sharpe Ratio (Bailey & Lopez de Prado, 2014)
-    print("\n  2. Deflated Sharpe Ratio (DSR) (Bailey & Lopez de Prado, 2014):")
-    ann_factor = math.sqrt(n_all / 5.0)
-    sharpe_hat = (mean_all / std_all) * ann_factor
+    # Test 2: White (1980) HC3 Heteroskedasticity-Consistent Robust Standard Error
+    print("\n  2. White (1980) HC3 Heteroskedasticity-Consistent Robust Inference:")
+    hc3_se, hc3_t, hc3_p = quant_model.compute_white_hc3_estimator(arr_all)
+    print(f"     Student's t-Statistic      : t = {t_stat_all:+.2f} (p = {p_val_all:.6f})")
+    print(f"     White HC3 Robust SE        : {hc3_se:.4f} R")
+    print(f"     White HC3 Robust t-Stat    : t = {hc3_t:+.2f} (p = {hc3_p:.6f}) (Heteroskedasticity-Adjusted)")
+
+    # Test 3: Deflated Sharpe Ratio (Bailey & Lopez de Prado, 2014)
+    print("\n  3. Deflated Sharpe Ratio (DSR) (Bailey & Lopez de Prado, 2014):")
+    dsr_prob, dsr_z, ann_sharpe, ann_bench = quant_model.compute_deflated_sharpe_ratio(arr_all, n_trials=5)
     skew_r = float(pd.Series(arr_all).skew())
     kurt_r = float(pd.Series(arr_all).kurtosis()) + 3.0
-    se_sr = math.sqrt((1.0 + 0.5 * sharpe_hat**2 - skew_r * sharpe_hat + ((kurt_r - 3.0) / 4.0) * sharpe_hat**2) / (n_all - 1))
-    n_trials = 5
-    euler_masch = 0.5772156649
-    sr_benchmark = ( (1.0 - euler_masch) * math.sqrt(2.0 * math.log(n_trials)) + euler_masch * math.sqrt(2.0 * math.log(n_trials)) ) * (1.0 / ann_factor)
-    dsr_z = (sharpe_hat - sr_benchmark) / max(1e-4, se_sr)
-    dsr_prob = 0.5 * (1.0 + math.erf(dsr_z / math.sqrt(2.0)))
-    print(f"     Annualized Sharpe Ratio    : {sharpe_hat:.2f}")
+    print(f"     Annualized Sharpe Ratio    : {ann_sharpe:.2f} (Benchmark: {ann_bench:.2f})")
     print(f"     Return Skewness / Kurtosis : Skew: {skew_r:+.2f} | Kurtosis: {kurt_r:.2f}")
-    print(f"     Multi-Testing Trials       : N = {n_trials} strategy variants")
+    print(f"     Multi-Testing Trials       : N = 5 strategy variants")
     print(f"     DSR Statistic (Z-Score)    : {dsr_z:.2f}")
-    print(f"     Deflated Sharpe Confidence : {format_pct(dsr_prob * 100.0, 3)} (Probability that SR > 0 after multi-testing)")
+    print(f"     Deflated Sharpe Confidence : {dsr_prob:.2f}% (Bailey & Lopez de Prado EVT null)")
 
-    # Test 3: Year-over-Year Vintage Stability
-    print("\n  3. Chronological Vintage Stability (5-Year Persistence Across All Regimes):")
+    # Test 4: Exact Binomial Test vs Mathematical Breakeven Rate (BE = 28.57% for 1:2.50 RR)
+    print("\n  4. Exact Binomial Test vs Mathematical Breakeven Rate (BE = 28.57%):")
+    p_binom = quant_model.compute_exact_binomial_test(n_all, int(np.sum(arr_all > 0)), p_be=0.2857)
+    print(f"     Observed Wins              : {int(np.sum(arr_all > 0))}/{n_all} ({format_pct(np.sum(arr_all > 0)/n_all*100.0)})")
+    print(f"     Breakeven Win Rate         : 28.57% (based on 1:2.50 RR)")
+    print(f"     Binomial Test p-Value      : p = {p_binom:.6e} ({'p < 0.0001 -> H0 REJECTED' if p_binom < 0.0001 else 'REJECTED'})")
+
+    # Test 5: In-Sample vs Out-of-Sample Stability
+    print("\n  5. Anti-Overfitting Protocol: In-Sample vs Out-of-Sample Stability:")
+    is_trades = [t for t in all_trades if t['date'] <= '2023-12-31']
+    oos_trades = [t for t in all_trades if t['date'] > '2023-12-31']
+    is_arr = np.array([t['r'] for t in is_trades], dtype=float) if is_trades else np.array([0.0])
+    oos_arr = np.array([t['r'] for t in oos_trades], dtype=float) if oos_trades else np.array([0.0])
+    is_mean, oos_mean = float(np.mean(is_arr)), float(np.mean(oos_arr))
+    is_sum, oos_sum = float(np.sum(is_arr)), float(np.sum(oos_arr))
+    is_pf = float(np.sum(is_arr[is_arr > 0])) / max(1e-4, abs(float(np.sum(is_arr[is_arr < 0]))))
+    oos_pf = float(np.sum(oos_arr[oos_arr > 0])) / max(1e-4, abs(float(np.sum(oos_arr[oos_arr < 0]))))
+    print(f"     In-Sample (2021-2023 Fed)  : {len(is_arr):3d}t | Mean R: {is_mean:+.3f} | PF: {is_pf:.2f}x | Sum R: {is_sum:+.1f}R")
+    print(f"     Out-of-Sample (2024-2026)  : {len(oos_arr):3d}t | Mean R: {oos_mean:+.3f} | PF: {oos_pf:.2f}x | Sum R: {oos_sum:+.1f}R")
+
+    # Test 6: Year-over-Year Vintage Stability
+    print("\n  6. Chronological Vintage Stability (5-Year Persistence Across All Regimes):")
     years_summary = {}
     for yr in [2022, 2023, 2024, 2025, 2026]:
         yr_trades = [t for t in all_trades if t['year'] == yr]
@@ -317,8 +337,8 @@ def run_5y_eurusd_multi_horizon_suite():
         }
         print(f"     Year {yr}: {yr_n:3d} trades | Win Rate: {yr_wins/max(1,yr_n)*100:5.1f}% | Mean R: {yr_mean:+.3f} | PF: {yr_pf:4.2f} | Sum R: {np.sum(yr_arr):+6.2f}R")
 
-    # Test 4: Bootstrap 99% Confidence Interval
-    print("\n  4. Non-Parametric 99% Bootstrap Confidence Interval (10,000 Resamples):")
+    # Test 7: Bootstrap 99% Confidence Interval
+    print("\n  7. Non-Parametric 99% Bootstrap Confidence Interval (10,000 Resamples):")
     boot_idx = rng.integers(0, n_all, size=(10000, n_all))
     boot_means = np.mean(arr_all[boot_idx], axis=1)
     ci_95 = (float(np.percentile(boot_means, 2.5)), float(np.percentile(boot_means, 97.5)))
@@ -347,13 +367,21 @@ def run_5y_eurusd_multi_horizon_suite():
                 "macro_news": s_news,
                 "combined_portfolio": s_comb
             },
+            "in_sample_vs_oos": {
+                "in_sample": {"trades": len(is_arr), "mean_r": round(is_mean, 3), "sum_r": round(is_sum, 2), "profit_factor": round(is_pf, 2)},
+                "out_of_sample": {"trades": len(oos_arr), "mean_r": round(oos_mean, 3), "sum_r": round(oos_sum, 2), "profit_factor": round(oos_pf, 2)}
+            },
             "year_over_year": years_summary,
             "hypothesis_testing": {
                 "student_t_stat": t_stat_all,
                 "student_t_pval": p_val_all,
+                "white_hc3_se": hc3_se,
+                "white_hc3_t": hc3_t,
+                "white_hc3_p": hc3_p,
                 "rademacher_permutation_pval": perm_p_val,
                 "deflated_sharpe_ratio": dsr_prob,
-                "ann_sharpe": round(sharpe_hat, 2),
+                "ann_sharpe": ann_sharpe,
+                "exact_binomial_pval": p_binom,
                 "bootstrap_ci_95": ci_95,
                 "bootstrap_ci_99": ci_99
             },

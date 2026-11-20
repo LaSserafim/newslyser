@@ -1,7 +1,7 @@
 {
   "daily": {
-    "created_at": 1795188429,
-    "expires_at": 1795193829
+    "created_at": 1795193848,
+    "expires_at": 1795199248
   },
   "intraday": {
     "created_at": 1795183078,
@@ -28,16 +28,16 @@
     "expires_at": 1795187347
   },
   "daily_xauusd": {
-    "created_at": 1795184595,
-    "expires_at": 1795189995
+    "created_at": 1795190040,
+    "expires_at": 1795195440
   },
   "intraday_xauusd": {
     "created_at": 1795184642,
     "expires_at": 1795199042
   },
   "scalping_xauusd": {
-    "created_at": 1795189545,
-    "expires_at": 1795193145
+    "created_at": 1795194180,
+    "expires_at": 1795197780
   },
   "swing_xauusd": {
     "created_at": 1795184671,

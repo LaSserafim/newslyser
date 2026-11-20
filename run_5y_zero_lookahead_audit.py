@@ -452,6 +452,9 @@ def run_zero_lookahead_audit():
         t_stat = round(mean_r / max(1e-6, std_r / math.sqrt(n)), 3)
         p_val = round(quant_model._student_t_pvalue(t_stat, max(1, n - 1)), 6)
 
+        # White (1980) HC3 Robust Standard Error on Mean R
+        hc3_se, hc3_t, hc3_p = quant_model.compute_white_hc3_estimator(r_arr)
+
         pos = float(np.sum(r_arr[r_arr > 0])) if np.any(r_arr > 0) else 0.0
         neg = float(abs(np.sum(r_arr[r_arr < 0]))) if np.any(r_arr < 0) else 1e-4
         pf = round(pos / max(1e-4, neg), 2)
@@ -471,17 +474,11 @@ def run_zero_lookahead_audit():
 
         ret_pct = ((eq - initial_equity) / initial_equity) * 100.0
 
-        # Annualized Sharpe (Assuming ~105 trades/yr on daily/intraday streams)
-        ann_factor = math.sqrt(min(252, n / 5.0))
-        sharpe = round((mean_r / max(1e-4, std_r)) * ann_factor, 2)
+        # Marcos López de Prado Deflated Sharpe Ratio (DSR) with EVT Multiple-Testing Benchmark
+        dsr_prob, dsr_z, sharpe, ann_bench = quant_model.compute_deflated_sharpe_ratio(r_arr, n_trials=5)
 
-        # Marcos López de Prado Deflated Sharpe Ratio (DSR)
-        skew = float(pd.Series(r_arr).skew()) if n > 3 else 0.0
-        kurt = float(pd.Series(r_arr).kurtosis()) if n > 3 else 3.0
-        var_sr = (1.0 - skew * (sharpe / ann_factor) + ((kurt - 1.0) / 4.0) * (sharpe / ann_factor)**2) / max(1, n - 1)
-        sr_benchmark = 0.0 # H0: Sharpe <= 0
-        dsr_z = (sharpe / ann_factor - sr_benchmark) / max(1e-6, math.sqrt(max(1e-8, var_sr)))
-        dsr_prob = round(0.5 * (1.0 + math.erf(dsr_z / math.sqrt(2.0))) * 100.0, 2)
+        # Exact Binomial Test vs Mathematical Breakeven Rate (BE = 40.0% for 1:1.50 avg RR)
+        p_binom = quant_model.compute_exact_binomial_test(n, wins, p_be=0.40)
 
         # Rademacher 100,000 Sign-Flip Permutation Test
         rng = np.random.default_rng(42)
@@ -499,13 +496,17 @@ def run_zero_lookahead_audit():
             "std_r": round(std_r, 4),
             "t_stat": t_stat,
             "p_val": p_val,
+            "white_hc3_se": hc3_se,
+            "white_hc3_t": hc3_t,
+            "white_hc3_p": hc3_p,
             "profit_factor": pf,
             "ending_equity_usd": round(eq, 2),
             "net_return_pct": round(ret_pct, 2),
             "max_drawdown_pct": round(max_dd, 2),
             "sharpe_ratio": sharpe,
             "dsr_prob_pct": dsr_prob,
-            "rademacher_p": rad_p
+            "rademacher_p": rad_p,
+            "exact_binomial_p": p_binom
         }
 
     # Evaluate Each Track

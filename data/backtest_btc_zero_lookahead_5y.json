@@ -1,7 +1,7 @@
 {
   "asset": "BTCUSD",
   "audit_version": "5Y_BTC_ZERO_LOOKAHEAD_ANTI_OVERFITTING_V1",
-  "timestamp_utc": "2026-11-20 14:49:20 UTC",
+  "timestamp_utc": "2026-11-20 17:07:26 UTC",
   "data_range": {
     "start": "2021-11-20",
     "end": "2026-11-20",
@@ -35,8 +35,9 @@
       "net_return_pct": 3.8,
       "max_drawdown_pct": 2.89,
       "sharpe_ratio": 0.49,
-      "dsr_prob_pct": 86.59,
+      "dsr_prob_pct": 52.49,
       "rademacher_p": 0.13384,
+      "exact_binomial_p": 0.061112912089935405,
       "ci_95": [
         -0.0495,
         0.1768
@@ -63,8 +64,9 @@
       "net_return_pct": 6.47,
       "max_drawdown_pct": 2.9,
       "sharpe_ratio": 0.55,
-      "dsr_prob_pct": 89.87,
+      "dsr_prob_pct": 58.21,
       "rademacher_p": 0.1135,
+      "exact_binomial_p": 0.2577837897112309,
       "ci_95": [
         -0.0564,
         0.25
@@ -91,8 +93,9 @@
       "net_return_pct": 18.96,
       "max_drawdown_pct": 5.53,
       "sharpe_ratio": 0.76,
-      "dsr_prob_pct": 96.55,
+      "dsr_prob_pct": 77.01,
       "rademacher_p": 0.04707,
+      "exact_binomial_p": 0.055340535721536264,
       "ci_95": [
         -0.0253,
         0.415
@@ -119,8 +122,9 @@
       "net_return_pct": 8.54,
       "max_drawdown_pct": 3.46,
       "sharpe_ratio": 0.44,
-      "dsr_prob_pct": 85.31,
+      "dsr_prob_pct": 50.06,
       "rademacher_p": 0.16109,
+      "exact_binomial_p": 0.27591333902204357,
       "ci_95": [
         -0.1133,
         0.3721
@@ -148,13 +152,33 @@
     "net_return_pct": 44.03,
     "max_drawdown_pct": 13.81,
     "sharpe_ratio": 1.13,
-    "dsr_prob_pct": 99.6,
+    "dsr_prob_pct": 99.59,
     "rademacher_p": 0.00568,
+    "exact_binomial_p": 0.009105873172696613,
     "ci_95": [
       0.0254,
       0.1913
     ],
     "ci_99": [
+      0.0001,
+      0.2166
+    ]
+  },
+  "hypothesis_testing": {
+    "student_t_stat": 2.537,
+    "student_t_pval": 0.011503,
+    "white_hc3_se": 0.042,
+    "white_hc3_t": 2.535,
+    "white_hc3_p": 0.011568,
+    "rademacher_permutation_pval": 0.00568,
+    "deflated_sharpe_ratio": 99.59,
+    "ann_sharpe": 1.13,
+    "exact_binomial_pval": 0.009105873172696613,
+    "bootstrap_ci_95": [
+      0.0254,
+      0.1913
+    ],
+    "bootstrap_ci_99": [
       0.0001,
       0.2166
     ]
@@ -177,8 +201,9 @@
       "net_return_pct": 14.98,
       "max_drawdown_pct": 13.81,
       "sharpe_ratio": 0.7,
-      "dsr_prob_pct": 95.14,
+      "dsr_prob_pct": 95.11,
       "rademacher_p": 0.05939,
+      "exact_binomial_p": 0.434610782160795,
       "ci_95": [
         -0.0331,
         0.3152
@@ -205,8 +230,9 @@
       "net_return_pct": 25.27,
       "max_drawdown_pct": 10.0,
       "sharpe_ratio": 0.89,
-      "dsr_prob_pct": 98.07,
+      "dsr_prob_pct": 98.01,
       "rademacher_p": 0.02402,
+      "exact_binomial_p": 0.0040057273464545315,
       "ci_95": [
         -0.0012,
         0.1856
@@ -234,8 +260,9 @@
     "net_return_pct": 61.87,
     "max_drawdown_pct": 17.99,
     "sharpe_ratio": 1.13,
-    "dsr_prob_pct": 99.6,
+    "dsr_prob_pct": 99.59,
     "rademacher_p": 0.00568,
+    "exact_binomial_p": 0.009105873172696613,
     "ci_95": [
       0.0254,
       0.1913
@@ -262,8 +289,9 @@
     "net_return_pct": 152.07,
     "max_drawdown_pct": 32.87,
     "sharpe_ratio": 1.13,
-    "dsr_prob_pct": 99.6,
+    "dsr_prob_pct": 99.59,
     "rademacher_p": 0.00568,
+    "exact_binomial_p": 0.009105873172696613,
     "ci_95": [
       0.0254,
       0.1913

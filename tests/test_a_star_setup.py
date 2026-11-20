@@ -940,6 +940,62 @@ class TestAStarSetupEngine(unittest.TestCase):
         self.assertIn("SANDWICH CHOP BLACKOUT", js)
         self.assertIn("tick-yield-spread-us-de", js)
 
+    def test_hypothesis_testing_battery_mathematics(self):
+        """Verifies mathematical correctness of Acklam normal PPF, White HC3, DSR EVT, and Binomial test."""
+        # 1. Acklam normal inverse CDF
+        self.assertAlmostEqual(qm.normal_ppf(0.50), 0.0, places=5)
+        self.assertAlmostEqual(qm.normal_ppf(0.8413447), 1.0, places=4)
+        self.assertAlmostEqual(qm.normal_ppf(0.975), 1.95996, places=4)
+        self.assertAlmostEqual(qm.normal_ppf(0.99), 2.32635, places=4)
+
+        # 2. White HC3 Robust Estimator
+        rng = np.random.default_rng(20261121)
+        r_homo = rng.normal(0.20, 1.0, 500)
+        se, t_val, p_val = qm.compute_white_hc3_estimator(r_homo)
+        self.assertGreater(t_val, 2.0)
+        self.assertLess(p_val, 0.05)
+        self.assertGreater(se, 0.0)
+
+        # 3. Deflated Sharpe Ratio (DSR) with EVT multiple-testing benchmark
+        dsr_prob, dsr_z, ann_sr, ann_bench = qm.compute_deflated_sharpe_ratio(r_homo, n_trials=5)
+        self.assertGreaterEqual(dsr_prob, 90.0)
+        self.assertGreater(ann_sr, ann_bench)
+
+        # 4. Single-trial DSR (no selection penalty)
+        dsr_single, dsr_z_single, _, bench_single = qm.compute_deflated_sharpe_ratio(r_homo, n_trials=1)
+        self.assertEqual(bench_single, 0.0)
+        self.assertGreaterEqual(dsr_single, dsr_prob)
+
+        # 5. Exact Binomial Test
+        # 50 wins out of 100 on fair coin (p=0.50) -> p_val ~ 0.539
+        p_coin = qm.compute_exact_binomial_test(100, 50, 0.50)
+        self.assertGreater(p_coin, 0.40)
+        # 75 wins out of 100 on fair coin (p=0.50) -> p_val < 1e-6 (H0 rejected)
+        p_edge = qm.compute_exact_binomial_test(100, 75, 0.50)
+        self.assertLess(p_edge, 1e-6)
+
+    def test_multi_asset_5y_backtest_endpoints(self):
+        """Verifies that /api/backtest-5y and /api/backtest-multi-horizon serve all 3 assets with hypothesis testing."""
+        import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app.app)
+
+        for inst in ["XAUUSD", "EURUSD", "BTCUSD"]:
+            res = client.get(f"/api/backtest-5y?instrument={inst}")
+            self.assertEqual(res.status_code, 200, f"/api/backtest-5y?instrument={inst} failed")
+            data = res.json()
+            self.assertIn("tracks", data)
+            self.assertIn("hypothesis_testing", data)
+            ht = data["hypothesis_testing"]
+            self.assertIn("student_t_stat", ht)
+            self.assertIn("deflated_sharpe_ratio", ht)
+            self.assertIn("rademacher_permutation_pval", ht)
+
+            res_mh = client.get(f"/api/backtest-multi-horizon?instrument={inst}")
+            self.assertEqual(res_mh.status_code, 200, f"/api/backtest-multi-horizon?instrument={inst} failed")
+            d_mh = res_mh.json()
+            self.assertIn("backtest_5y", d_mh)
+
 
 if __name__ == "__main__":
     unittest.main()
