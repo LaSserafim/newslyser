@@ -2036,7 +2036,7 @@ async function fetchAstarData() {
     const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
     const [aRes, dRes] = await Promise.all([
       fetch(`/api/daily-a-star?horizon=${h}&instrument=${CURRENT_ASTAR_ASSET}`),
-      fetch("/api/dynamic-levels")
+      fetch(`/api/dynamic-levels?instrument=${CURRENT_ASTAR_ASSET}`)
     ]);
     const aStar = await aRes.json();
     const dyn = await dRes.json();
@@ -2527,7 +2527,7 @@ function initAutoRefreshLoop() {
         }
       }
     } catch (e) {}
-  }, 2000);
+  }, 1000);
   document.getElementById("btn-reset-astar-session")?.addEventListener("click", async () => {
     const b = document.getElementById("btn-reset-astar-session");
     b.innerText = "WAIT REFRESHING...";

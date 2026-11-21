@@ -94,6 +94,37 @@ def load_data():
 _CACHE_MACRO = {"timestamp": 0.0, "data": None}
 
 
+def _prewarm_market_data_caches():
+    """Background async worker: pre-warms macro and intraday momentum caches so user endpoints run in <40ms."""
+    try:
+        fetch_live_macro_data()
+    except Exception:
+        pass
+    for inst in ("XAUUSD", "EURUSD", "BTCUSD"):
+        try:
+            quant_model._get_intraday_momentum_regime(inst)
+        except Exception:
+            pass
+    try:
+        quant_model._get_daily_prob_regime()
+    except Exception:
+        pass
+
+
+def _background_cache_refresher():
+    import time
+    while True:
+        time.sleep(240)
+        _prewarm_market_data_caches()
+
+
+@app.on_event("startup")
+def on_app_startup():
+    import threading
+    threading.Thread(target=_prewarm_market_data_caches, daemon=True).start()
+    threading.Thread(target=_background_cache_refresher, daemon=True).start()
+
+
 def fetch_live_quotes():
     return fetch_tradingview_live_quotes()
 
@@ -113,7 +144,7 @@ def fetch_tradingview_live_quotes():
         "NYMEX:CL1!", "TVC:VIX"
     ]
     cmd = [
-        "curl", "-s", "--noproxy", "*", "-m", "3", "-X", "POST", "https://scanner.tradingview.com/global/scan",
+        "curl", "-s", "--noproxy", "*", "-m", "2", "--connect-timeout", "1.5", "-X", "POST", "https://scanner.tradingview.com/global/scan",
         "-H", "Content-Type: application/json",
         "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "-d", json.dumps({"symbols": {"tickers": tickers}, "columns": ["close", "bid", "ask", "change", "high", "low", "open", "ATR|30"]})
@@ -132,6 +163,7 @@ def fetch_tradingview_live_quotes():
             ask = cols[2] if len(cols) > 2 else None
             high_p = cols[4] if len(cols) > 4 else None
             low_p = cols[5] if len(cols) > 5 else None
+            open_p = cols[6] if len(cols) > 6 else None
             atr_30 = cols[7] if len(cols) > 7 else None
 
             if sym == "FX_IDC:XAUUSD":
@@ -151,6 +183,8 @@ def fetch_tradingview_live_quotes():
                     quotes["XAUUSD_SPOT"] = mid
                     quotes["XAUUSD_BID"] = round(float(bid), 2)
                     quotes["XAUUSD_ASK"] = round(float(ask), 2)
+                if open_p is not None:
+                    quotes["SESSION_OPEN"] = round(float(open_p), 2)
                 if high_p is not None and low_p is not None and close_p is not None:
                     quotes["SESSION_HIGH"] = round(float(high_p), 2)
                     quotes["SESSION_LOW"] = round(float(low_p), 2)
@@ -174,6 +208,8 @@ def fetch_tradingview_live_quotes():
                     quotes["EURUSD_SPOT"] = mid
                     quotes["EURUSD_BID"] = round(float(bid), 5)
                     quotes["EURUSD_ASK"] = round(float(ask), 5)
+                if open_p is not None:
+                    quotes["EURUSD_SESSION_OPEN"] = round(float(open_p), 5)
                 if high_p is not None and low_p is not None and close_p is not None:
                     quotes["EURUSD_SESSION_HIGH"] = round(float(high_p), 5)
                     quotes["EURUSD_SESSION_LOW"] = round(float(low_p), 5)
@@ -193,6 +229,8 @@ def fetch_tradingview_live_quotes():
                     quotes["BTCUSD_SPOT"] = mid
                     quotes["BTC_BID"] = round(float(bid), 2)
                     quotes["BTC_ASK"] = round(float(ask), 2)
+                if open_p is not None:
+                    quotes["BTC_SESSION_OPEN"] = round(float(open_p), 2)
                 if high_p is not None and low_p is not None and close_p is not None:
                     quotes["BTC_SESSION_HIGH"] = round(float(high_p), 2)
                     quotes["BTC_SESSION_LOW"] = round(float(low_p), 2)
@@ -515,6 +553,7 @@ def get_live_ticks(include_astar: bool = False, instrument: str = "XAUUSD", hori
         inst_key = "EURUSD"
         current_px = prices.get("EURUSD=X", 1.08500)
         atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        so = prices.get("EURUSD_SESSION_OPEN")
         sh = prices.get("EURUSD_SESSION_HIGH")
         sl = prices.get("EURUSD_SESSION_LOW")
         sc = prices.get("EURUSD_SESSION_CLOSE")
@@ -522,6 +561,7 @@ def get_live_ticks(include_astar: bool = False, instrument: str = "XAUUSD", hori
         inst_key = "BTCUSD"
         current_px = prices.get("BTC-USD", 91500.0)
         atr_val = prices.get("BTC_ATR_M30", 450.0)
+        so = prices.get("BTC_SESSION_OPEN")
         sh = prices.get("BTC_SESSION_HIGH")
         sl = prices.get("BTC_SESSION_LOW")
         sc = prices.get("BTC_SESSION_CLOSE")
@@ -529,6 +569,7 @@ def get_live_ticks(include_astar: bool = False, instrument: str = "XAUUSD", hori
         inst_key = "XAUUSD"
         current_px = prices.get("GC=F", 3975.0)
         atr_val = prices.get("ATR_M30", 10.50)
+        so = prices.get("SESSION_OPEN")
         sh = prices.get("SESSION_HIGH")
         sl = prices.get("SESSION_LOW")
         sc = prices.get("SESSION_CLOSE")
@@ -553,7 +594,7 @@ def get_live_ticks(include_astar: bool = False, instrument: str = "XAUUSD", hori
             current_price=current_px, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
             wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
             n_paths=10000, setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc,
-            horizon=h_key, instrument=inst_key, de10y_val=prices.get("DE10Y")
+            horizon=h_key, instrument=inst_key, de10y_val=prices.get("DE10Y"), session_o=so
         )
     return res
 
@@ -672,9 +713,11 @@ def add_setup_to_running_list(payload: dict):
         ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
         epoch_name = f"{h_key}_{target_asset.lower()}"
         created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_map.get(h_key, 5400))
+        so_key = "EURUSD_SESSION_OPEN" if target_asset == "EURUSD" else ("BTC_SESSION_OPEN" if target_asset == "BTCUSD" else "SESSION_OPEN")
         sh_key = "EURUSD_SESSION_HIGH" if target_asset == "EURUSD" else ("BTC_SESSION_HIGH" if target_asset == "BTCUSD" else "SESSION_HIGH")
         sl_key = "EURUSD_SESSION_LOW" if target_asset == "EURUSD" else ("BTC_SESSION_LOW" if target_asset == "BTCUSD" else "SESSION_LOW")
         sc_key = "EURUSD_SESSION_CLOSE" if target_asset == "EURUSD" else ("BTC_SESSION_CLOSE" if target_asset == "BTCUSD" else "SESSION_CLOSE")
+        so = prices.get(so_key)
         sh = prices.get(sh_key)
         sl = prices.get(sl_key)
         sc = prices.get(sc_key)
@@ -683,7 +726,7 @@ def add_setup_to_running_list(payload: dict):
             wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
             n_paths=5000, setup_created_epoch=created_epoch,
             session_h=sh, session_l=sl, session_c=sc,
-            horizon=h_key, instrument=target_asset, de10y_val=prices.get("DE10Y")
+            horizon=h_key, instrument=target_asset, de10y_val=prices.get("DE10Y"), session_o=so
         )
         tt = ast.get("trade_ticket", {})
         if not ast.get("is_a_star") and not payload.get("allow_non_astar", False):
@@ -873,6 +916,7 @@ def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: st
         if price is None:
             price = prices.get("EURUSD=X", 1.08500)
         atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        so = prices.get("EURUSD_SESSION_OPEN")
         sh = prices.get("EURUSD_SESSION_HIGH")
         sl = prices.get("EURUSD_SESSION_LOW")
         sc = prices.get("EURUSD_SESSION_CLOSE")
@@ -881,6 +925,7 @@ def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: st
         if price is None:
             price = prices.get("BTC-USD", 91500.0)
         atr_val = prices.get("BTC_ATR_M30", 450.0)
+        so = prices.get("BTC_SESSION_OPEN")
         sh = prices.get("BTC_SESSION_HIGH")
         sl = prices.get("BTC_SESSION_LOW")
         sc = prices.get("BTC_SESSION_CLOSE")
@@ -889,6 +934,7 @@ def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: st
         if price is None:
             price = prices.get("GC=F", 3975.0)
         atr_val = prices.get("ATR_M30", 10.50)
+        so = prices.get("SESSION_OPEN")
         sh = prices.get("SESSION_HIGH")
         sl = prices.get("SESSION_LOW")
         sc = prices.get("SESSION_CLOSE")
@@ -905,7 +951,7 @@ def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: st
         wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
         n_paths=10000, setup_created_epoch=created_epoch,
         session_h=sh, session_l=sl, session_c=sc,
-        horizon=h_key, instrument=inst_key, de10y_val=prices.get("DE10Y")
+        horizon=h_key, instrument=inst_key, de10y_val=prices.get("DE10Y"), session_o=so
     )
 
 @app.get("/api/multi-horizon-a-star")
@@ -918,6 +964,7 @@ def get_multi_horizon_a_star(price: float = None, instrument: str = "XAUUSD"):
         if price is None:
             price = prices.get("EURUSD=X", 1.08500)
         atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        so = prices.get("EURUSD_SESSION_OPEN")
         sh = prices.get("EURUSD_SESSION_HIGH")
         sl = prices.get("EURUSD_SESSION_LOW")
         sc = prices.get("EURUSD_SESSION_CLOSE")
@@ -926,6 +973,7 @@ def get_multi_horizon_a_star(price: float = None, instrument: str = "XAUUSD"):
         if price is None:
             price = prices.get("BTC-USD", 91500.0)
         atr_val = prices.get("BTC_ATR_M30", 450.0)
+        so = prices.get("BTC_SESSION_OPEN")
         sh = prices.get("BTC_SESSION_HIGH")
         sl = prices.get("BTC_SESSION_LOW")
         sc = prices.get("BTC_SESSION_CLOSE")
@@ -934,6 +982,7 @@ def get_multi_horizon_a_star(price: float = None, instrument: str = "XAUUSD"):
         if price is None:
             price = prices.get("GC=F", 3975.0)
         atr_val = prices.get("ATR_M30", 10.50)
+        so = prices.get("SESSION_OPEN")
         sh = prices.get("SESSION_HIGH")
         sl = prices.get("SESSION_LOW")
         sc = prices.get("SESSION_CLOSE")
@@ -945,19 +994,39 @@ def get_multi_horizon_a_star(price: float = None, instrument: str = "XAUUSD"):
         wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"),
         n_paths=10000,
         session_h=sh, session_l=sl, session_c=sc,
-        instrument=inst_key, de10y_val=prices.get("DE10Y")
+        instrument=inst_key, de10y_val=prices.get("DE10Y"), session_o=so
     )
 
 @app.get("/api/dynamic-levels")
-def get_dynamic_levels(price: float = None):
+def get_dynamic_levels(price: float = None, instrument: str = "XAUUSD"):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
-    if price is None:
-        price = prices.get("GC=F", 3975.0)
-    atr_val = prices.get("ATR_M30", 10.50)
+    inst_upper = (instrument or "XAUUSD").upper()
+    if inst_upper in ["EURUSD", "EUR"]:
+        inst_key = "EURUSD"
+        p = price if price is not None else prices.get("EURUSD=X", 1.08500)
+        atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        sh = prices.get("EURUSD_SESSION_HIGH")
+        sl = prices.get("EURUSD_SESSION_LOW")
+        sc = prices.get("EURUSD_SESSION_CLOSE")
+    elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+        inst_key = "BTCUSD"
+        p = price if price is not None else prices.get("BTC-USD", 91500.0)
+        atr_val = prices.get("BTC_ATR_M30", 450.0)
+        sh = prices.get("BTC_SESSION_HIGH")
+        sl = prices.get("BTC_SESSION_LOW")
+        sc = prices.get("BTC_SESSION_CLOSE")
+    else:
+        inst_key = "XAUUSD"
+        p = price if price is not None else prices.get("GC=F", 3975.0)
+        atr_val = prices.get("ATR_M30", 10.50)
+        sh = prices.get("SESSION_HIGH")
+        sl = prices.get("SESSION_LOW")
+        sc = prices.get("SESSION_CLOSE")
     return quant_model.calculate_dynamic_levels(
-        current_price=price, atr_m30=atr_val,
-        session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE")
+        current_price=p, atr_m30=atr_val,
+        session_h=sh, session_l=sl, session_c=sc,
+        instrument=inst_key
     )
 
 def _clear_quant_caches():

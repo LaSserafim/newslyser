@@ -1287,30 +1287,35 @@ def calculate_time_to_live_status(event_type="daily", setup_created_epoch=None, 
 
 # METHOD 5.2: DYNAMIC ATR SUPPORT / RESISTANCE GEOMETRY
 # -------------------------------------------------------------
-def calculate_dynamic_levels(current_price=4036.17, atr_m30=12.50, atr_d1=48.00, session_h=None, session_l=None, session_c=None):
+def calculate_dynamic_levels(current_price=4036.17, atr_m30=12.50, atr_d1=48.00, session_h=None, session_l=None, session_c=None, instrument="XAUUSD"):
     """
     Structural Intraday Support / Resistance Geometry.
     Anchors levels to live/recent session extremes (High, Low, Close, and Central Pivot PP),
     falling back cleanly to current_price +/- 1.8 * atr_m30 when session extremes are not supplied.
     """
-    if session_h is None or session_l is None or session_c is None or session_h <= session_l:
-        session_h = round(current_price + 1.8 * atr_m30, 2)
-        session_l = round(current_price - 1.8 * atr_m30, 2)
-        session_c = round(current_price, 2)
-    else:
-        session_h = round(float(session_h), 2)
-        session_l = round(float(session_l), 2)
-        session_c = round(float(session_c), 2)
+    spec = get_instrument_spec(instrument)
+    price_dec = spec.get("price_decimals", 2)
+    min_risk = spec.get("min_risk_floor", 0.50)
+    p_pfx = "" if spec["symbol"] == "EURUSD" else "$"
 
-    PP = round((session_h + session_l + session_c) / 3.0, 2)
+    if session_h is None or session_l is None or session_c is None or session_h <= session_l:
+        session_h = round(current_price + 1.8 * atr_m30, price_dec)
+        session_l = round(current_price - 1.8 * atr_m30, price_dec)
+        session_c = round(current_price, price_dec)
+    else:
+        session_h = round(float(session_h), price_dec)
+        session_l = round(float(session_l), price_dec)
+        session_c = round(float(session_c), price_dec)
+
+    PP = round((session_h + session_l + session_c) / 3.0, price_dec)
     diff = max(atr_m30, session_h - session_l)
 
     r3 = session_h # True Session High / Exhaustion
-    r2 = round(session_c + diff * 1.1 / 4.0, 2) # Camarilla R3 Supply Reversal
-    r1 = round(PP + 0.382 * max(0.5 * atr_m30, session_h - PP), 2) # Minor Value Area High Resistance
+    r2 = round(session_c + diff * 1.1 / 4.0, price_dec) # Camarilla R3 Supply Reversal
+    r1 = round(PP + 0.382 * max(0.5 * atr_m30, session_h - PP), price_dec) # Minor Value Area High Resistance
 
-    s1 = round(PP - 0.382 * max(0.5 * atr_m30, PP - session_l), 2) # Minor Value Area Low Support
-    s2 = round(session_c - diff * 1.1 / 4.0, 2) # Camarilla S3 Demand Reversal
+    s1 = round(PP - 0.382 * max(0.5 * atr_m30, PP - session_l), price_dec) # Minor Value Area Low Support
+    s2 = round(session_c - diff * 1.1 / 4.0, price_dec) # Camarilla S3 Demand Reversal
     s3 = session_l # True Session Low / Structural Floor
     # Real-Time Invalidation & Breach States
     r1_status = "ACTIVE RESISTANCE" if current_price < r1 else "BREACHED / INVERTED TO SUPPORT"
@@ -1321,46 +1326,46 @@ def calculate_dynamic_levels(current_price=4036.17, atr_m30=12.50, atr_d1=48.00,
     # Dynamic Ticket Direction based on Structural Zone & Invalidation State
     if current_price <= s2 + 0.4 * atr_m30:
         action = "BUY LIMIT / LONG DIP AT STRUCTURAL DEMAND"
-        entry_zone = f"${s2:.2f} - ${round(s2 + 0.3*atr_m30, 2):.2f}"
-        sl = f"${round(s3 - 0.5*atr_m30, 2):.2f}"
-        tp = f"${PP:.2f}"
-        rr = round((PP - s2) / max(1.0, s2 - (s3 - 0.5*atr_m30)), 2)
+        entry_zone = f"{p_pfx}{s2:.{price_dec}f} - {p_pfx}{round(s2 + 0.3*atr_m30, price_dec):.{price_dec}f}"
+        sl = f"{p_pfx}{round(s3 - 0.5*atr_m30, price_dec):.{price_dec}f}"
+        tp = f"{p_pfx}{PP:.{price_dec}f}"
+        rr = round((PP - s2) / max(min_risk, s2 - (s3 - 0.5*atr_m30)), 2)
         ticket_type = "BULLISH_DEMAND_REVERSAL"
         bias = "BULLISH_DIP_BUY"
     elif current_price >= r2 - 0.4 * atr_m30:
         action = "SELL LIMIT / SHORT RALLY AT STRUCTURAL SUPPLY"
-        entry_zone = f"${round(r2 - 0.3*atr_m30, 2):.2f} - ${r2:.2f}"
-        sl = f"${round(r3 + 0.5*atr_m30, 2):.2f}"
-        tp = f"${PP:.2f}"
-        rr = round((r2 - PP) / max(1.0, (r3 + 0.5*atr_m30) - r2), 2)
+        entry_zone = f"{p_pfx}{round(r2 - 0.3*atr_m30, price_dec):.{price_dec}f} - {p_pfx}{r2:.{price_dec}f}"
+        sl = f"{p_pfx}{round(r3 + 0.5*atr_m30, price_dec):.{price_dec}f}"
+        tp = f"{p_pfx}{PP:.{price_dec}f}"
+        rr = round((r2 - PP) / max(min_risk, (r3 + 0.5*atr_m30) - r2), 2)
         ticket_type = "BEARISH_SUPPLY_FADE"
         bias = "BEARISH_RALLY_FADE"
     elif current_price < PP:
         action = "SELL STOP / SHORT BREAKDOWN TOWARDS S2 DEMAND"
-        entry_zone = f"${round(current_price - 0.15*atr_m30, 2):.2f} - ${round(current_price + 0.15*atr_m30, 2):.2f}"
-        sl = f"${round(PP + 0.4*atr_m30, 2):.2f}"
-        tp = f"${s2:.2f}"
-        rr = round(abs(current_price - s2) / max(1.0, (PP + 0.4*atr_m30) - current_price), 2)
+        entry_zone = f"{p_pfx}{round(current_price - 0.15*atr_m30, price_dec):.{price_dec}f} - {p_pfx}{round(current_price + 0.15*atr_m30, price_dec):.{price_dec}f}"
+        sl = f"{p_pfx}{round(PP + 0.4*atr_m30, price_dec):.{price_dec}f}"
+        tp = f"{p_pfx}{s2:.{price_dec}f}"
+        rr = round(abs(current_price - s2) / max(min_risk, (PP + 0.4*atr_m30) - current_price), 2)
         ticket_type = "BEARISH_DISCOUNT_MOMENTUM"
         bias = "BEARISH_MOMENTUM"
     else:
         action = "BUY STOP / LONG BREAKOUT TOWARDS R2 SUPPLY"
-        entry_zone = f"${round(current_price - 0.15*atr_m30, 2):.2f} - ${round(current_price + 0.15*atr_m30, 2):.2f}"
-        sl = f"${round(PP - 0.4*atr_m30, 2):.2f}"
-        tp = f"${r2:.2f}"
-        rr = round(abs(r2 - current_price) / max(1.0, current_price - (PP - 0.4*atr_m30)), 2)
+        entry_zone = f"{p_pfx}{round(current_price - 0.15*atr_m30, price_dec):.{price_dec}f} - {p_pfx}{round(current_price + 0.15*atr_m30, price_dec):.{price_dec}f}"
+        sl = f"{p_pfx}{round(PP - 0.4*atr_m30, price_dec):.{price_dec}f}"
+        tp = f"{p_pfx}{r2:.{price_dec}f}"
+        rr = round(abs(r2 - current_price) / max(min_risk, current_price - (PP - 0.4*atr_m30)), 2)
         ticket_type = "BULLISH_PREMIUM_MOMENTUM"
         bias = "BULLISH_MOMENTUM"
 
     # Microstructure: Anchored VWAP from Event Anchor & Volatility Dispersion Bands
-    avwap = round((session_h + session_l + 2.0 * session_c) / 4.0, 2)
-    vwap_sd = round(atr_m30 / 1.414, 2)
+    avwap = round((session_h + session_l + 2.0 * session_c) / 4.0, price_dec)
+    vwap_sd = round(atr_m30 / 1.414, price_dec)
     avwap_bands = {
         "avwap": avwap,
-        "upper_1sd": round(avwap + 1.0 * vwap_sd, 2),
-        "upper_2sd": round(avwap + 2.0 * vwap_sd, 2),
-        "lower_1sd": round(avwap - 1.0 * vwap_sd, 2),
-        "lower_2sd": round(avwap - 2.0 * vwap_sd, 2),
+        "upper_1sd": round(avwap + 1.0 * vwap_sd, price_dec),
+        "upper_2sd": round(avwap + 2.0 * vwap_sd, price_dec),
+        "lower_1sd": round(avwap - 1.0 * vwap_sd, price_dec),
+        "lower_2sd": round(avwap - 2.0 * vwap_sd, price_dec),
         "kyles_lambda_illiquidity_proxy": round((atr_m30 / max(1.0, current_price)) * 100.0, 4)
     }
 
@@ -1369,7 +1374,7 @@ def calculate_dynamic_levels(current_price=4036.17, atr_m30=12.50, atr_d1=48.00,
         "pivot_point": PP,
         "atr_m30": atr_m30,
         "atr_d1": atr_d1,
-        "level_moe_95": round(1.96 * (atr_m30 / math.sqrt(28)), 2),
+        "level_moe_95": round(1.96 * (atr_m30 / math.sqrt(28)), price_dec),
         "bias": bias,
         "resistance": {
             "r1": r1, "r1_status": r1_status,
@@ -1391,20 +1396,20 @@ def calculate_dynamic_levels(current_price=4036.17, atr_m30=12.50, atr_d1=48.00,
             "risk_reward_ratio": f"1:{rr:.2f}"
         },
         "dynamic_short_plan": {
-            "entry_zone": f"${round(r2 - 0.3*atr_m30, 2):.2f} - ${r2:.2f}",
-            "stop_loss": f"${round(r3 + 0.5*atr_m30, 2):.2f}",
-            "target": f"${s2:.2f}",
-            "risk_dollars": round((r3 + 0.5*atr_m30) - r2, 2),
-            "reward_dollars": round(r2 - s2, 2),
-            "risk_reward_ratio": f"1:{round((r2 - s2) / max(1.0, (r3 + 0.5*atr_m30) - r2), 2):.2f}"
+            "entry_zone": f"{p_pfx}{round(r2 - 0.3*atr_m30, price_dec):.{price_dec}f} - {p_pfx}{r2:.{price_dec}f}",
+            "stop_loss": f"{p_pfx}{round(r3 + 0.5*atr_m30, price_dec):.{price_dec}f}",
+            "target": f"{p_pfx}{s2:.{price_dec}f}",
+            "risk_dollars": round((r3 + 0.5*atr_m30) - r2, price_dec),
+            "reward_dollars": round(r2 - s2, price_dec),
+            "risk_reward_ratio": f"1:{round((r2 - s2) / max(min_risk, (r3 + 0.5*atr_m30) - r2), 2):.2f}"
         },
         "dynamic_long_plan": {
-            "entry_zone": f"${s2:.2f} - ${round(s2 + 0.3*atr_m30, 2):.2f}",
-            "stop_loss": f"${round(s3 - 0.5*atr_m30, 2):.2f}",
-            "target": f"${r2:.2f}",
-            "risk_dollars": round(s2 - (s3 - 0.5*atr_m30), 2),
-            "reward_dollars": round(r2 - s2, 2),
-            "risk_reward_ratio": f"1:{round((r2 - s2) / max(1.0, s2 - (s3 - 0.5*atr_m30)), 2):.2f}"
+            "entry_zone": f"{p_pfx}{s2:.{price_dec}f} - {p_pfx}{round(s2 + 0.3*atr_m30, price_dec):.{price_dec}f}",
+            "stop_loss": f"{p_pfx}{round(s3 - 0.5*atr_m30, price_dec):.{price_dec}f}",
+            "target": f"{p_pfx}{r2:.{price_dec}f}",
+            "risk_dollars": round(s2 - (s3 - 0.5*atr_m30), price_dec),
+            "reward_dollars": round(r2 - s2, price_dec),
+            "risk_reward_ratio": f"1:{round((r2 - s2) / max(min_risk, s2 - (s3 - 0.5*atr_m30)), 2):.2f}"
         }
     }
 
@@ -2518,7 +2523,7 @@ def _get_intraday_momentum_regime(instrument="XAUUSD"):
     now = time.time()
     inst = (instrument or "XAUUSD").upper()
     cached = _INTRADAY_MOM_CACHE.get(inst) if isinstance(_INTRADAY_MOM_CACHE, dict) else None
-    if cached is not None and (now - cached.get("ts", 0) < 60.0):
+    if cached is not None and (now - cached.get("ts", 0) < 300.0):
         return cached.get("data")
     try:
         import yfinance as yf
@@ -2532,7 +2537,7 @@ def _get_intraday_momentum_regime(instrument="XAUUSD"):
             ticker = "GC=F"
             price_dec = 2
 
-        df_15m = yf.download(ticker, period="5d", interval="15m", progress=False, auto_adjust=False)
+        df_15m = yf.download(ticker, period="5d", interval="15m", progress=False, auto_adjust=False, threads=False)
         if isinstance(df_15m.columns, pd.MultiIndex):
             df_15m.columns = df_15m.columns.get_level_values(0)
         c15 = df_15m["Close"].dropna()
@@ -2543,7 +2548,7 @@ def _get_intraday_momentum_regime(instrument="XAUUSD"):
         z_m15_1h = round(r_1h_pct / max(0.02, sd15 * math.sqrt(4.0)), 3)
         z_m15_4h = round(r_4h_m15 / max(0.05, sd15 * math.sqrt(16.0)), 3)
 
-        df_1h = yf.download(ticker, period="1mo", interval="1h", progress=False, auto_adjust=False)
+        df_1h = yf.download(ticker, period="1mo", interval="1h", progress=False, auto_adjust=False, threads=False)
         if isinstance(df_1h.columns, pd.MultiIndex):
             df_1h.columns = df_1h.columns.get_level_values(0)
         c1h = df_1h["Close"].dropna()
@@ -2601,6 +2606,8 @@ def _get_intraday_momentum_regime(instrument="XAUUSD"):
             _INTRADAY_MOM_CACHE[inst] = {"ts": now, "data": res}
         return res
     except Exception:
+        if cached is not None and cached.get("data"):
+            return cached.get("data")
         fallback_res = {
             "source": "INTRADAY_FALLBACK",
             "instrument": inst,
@@ -2925,7 +2932,7 @@ def calculate_daily_a_star_setup(
     current_price=None, atr_m30=None, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75,
     wti_val=86.00, vix_val=None, n_paths=10000, setup_created_epoch=None,
     session_h=None, session_l=None, session_c=None, horizon="daily", instrument="XAUUSD",
-    de10y_val=None
+    de10y_val=None, session_o=None
 ):
     import os
     """
@@ -3027,10 +3034,15 @@ def calculate_daily_a_star_setup(
     day_low_px = float(intra_reg.get("day_low", 0.0))
     day_high_px = float(intra_reg.get("day_high", 0.0))
     live_ref_px = float(intra_reg.get("live_px", 0.0)) or current_price
-    if inst_key != "XAUUSD" or (day_open_px > 0 and abs(day_open_px - current_price) / max(0.01, current_price) > 0.50):
+    if session_o is not None and float(session_o) > 0:
+        day_open_px = round(float(session_o), price_dec)
+        day_high_px = round(float(session_h), price_dec) if (session_h is not None and float(session_h) > 0) else round(current_price + 0.5 * atr_m30, price_dec)
+        day_low_px = round(float(session_l), price_dec) if (session_l is not None and float(session_l) > 0) else round(current_price - 0.5 * atr_m30, price_dec)
+        live_ref_px = round(float(session_c), price_dec) if (session_c is not None and float(session_c) > 0) else current_price
+    elif inst_key != "XAUUSD" or (day_open_px > 0 and abs(day_open_px - current_price) / max(0.01, current_price) > 0.50):
         day_open_px = current_price
-        day_low_px = current_price - 0.5 * atr_m30
-        day_high_px = current_price + 0.5 * atr_m30
+        day_low_px = round(current_price - 0.5 * atr_m30, price_dec)
+        day_high_px = round(current_price + 0.5 * atr_m30, price_dec)
         live_ref_px = current_price
         sma200_val = current_price
     mu_m15_post = float(intra_reg.get("mu_m15_post_pct", 0.0))
@@ -3572,7 +3584,7 @@ def calculate_daily_a_star_setup(
     target_risk_usd = round(20.0 * vol_target_scalar * (quarter_kelly_pct / 2.0), 2)
     max_lot_cap = 0.10 if inst_key == "BTCUSD" else (1.00 if inst_key == "EURUSD" else 0.05)
     computed_lot = round(max(0.01, min(max_lot_cap, target_risk_usd / max(0.01, risk_per_lot))), 2)
-    standard_leverage = 200 if inst_key == "BTCUSD" else (2000 if inst_key == "XAUUSD" else 500)
+    standard_leverage = int(spec.get("default_leverage", 200))
     req_margin = round((computed_lot * contract_val * current_price) / standard_leverage, 2)
 
     min_rr_threshold = 2.50 if inst_key == "EURUSD" else (2.00 if inst_key == "BTCUSD" else 1.0)
@@ -3896,7 +3908,7 @@ def calculate_daily_a_star_setup(
 def calculate_multi_horizon_a_star_setup(
     current_price=None, atr_m30=None, dxy_val=102.24, us10y_val=5.00, us2y_val=4.75,
     wti_val=86.00, vix_val=None, n_paths=10000, session_h=None, session_l=None, session_c=None,
-    instrument="XAUUSD", de10y_val=None
+    instrument="XAUUSD", de10y_val=None, session_o=None
 ):
     """
     Unified Multi-Horizon Institutional Quantitative Matrix:
@@ -3911,27 +3923,27 @@ def calculate_multi_horizon_a_star_setup(
     scalping = calculate_daily_a_star_setup(
         current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="scalping", instrument=instrument, de10y_val=de10y_val
+        horizon="scalping", instrument=instrument, de10y_val=de10y_val, session_o=session_o
     )
     intraday = calculate_daily_a_star_setup(
         current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="intraday", instrument=instrument, de10y_val=de10y_val
+        horizon="intraday", instrument=instrument, de10y_val=de10y_val, session_o=session_o
     )
     daily = calculate_daily_a_star_setup(
         current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="daily", instrument=instrument, de10y_val=de10y_val
+        horizon="daily", instrument=instrument, de10y_val=de10y_val, session_o=session_o
     )
     swing = calculate_daily_a_star_setup(
         current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="swing", instrument=instrument, de10y_val=de10y_val
+        horizon="swing", instrument=instrument, de10y_val=de10y_val, session_o=session_o
     )
     news = calculate_daily_a_star_setup(
         current_price=cur_p, atr_m30=atr_val, dxy_val=dxy_val, us10y_val=us10y_val, us2y_val=us2y_val,
         wti_val=wti_val, vix_val=vix_val, n_paths=n_paths, session_h=session_h, session_l=session_l, session_c=session_c,
-        horizon="news", instrument=instrument, de10y_val=de10y_val
+        horizon="news", instrument=instrument, de10y_val=de10y_val, session_o=session_o
     )
 
     active_count = sum(1 for h in [scalping, intraday, daily, swing, news] if h.get("is_a_star"))
