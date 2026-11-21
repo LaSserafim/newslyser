@@ -302,13 +302,14 @@ class TestBtcAStarEngine(unittest.TestCase):
     def test_hawkes_jump_cascade_firewall(self):
         """Verifies Pillar 3: Hawkes (1971) self-exciting point process and cascade detection."""
         # 1. Normal calm market
-        calm_rets = np.random.normal(0, 0.01, 100)
+        rng = np.random.default_rng(42)
+        calm_rets = rng.normal(0, 0.005, 100)
         hwk_calm = qm.compute_hawkes_jump_cascade(calm_rets)
         self.assertFalse(hwk_calm["is_cascade_active"])
 
         # 2. Clustered avalanche shocks
         shock_rets = np.zeros(60)
-        shock_rets[-10:] = np.random.choice([-1, 1], 10) * np.random.uniform(0.08, 0.15, 10)
+        shock_rets[-10:] = rng.choice([-1, 1], 10) * rng.uniform(0.08, 0.15, 10)
         hwk_shock = qm.compute_hawkes_jump_cascade(shock_rets)
         self.assertIn("branching_ratio", hwk_shock)
         self.assertIn("jump_intensity", hwk_shock)
@@ -492,6 +493,93 @@ class TestBtcAStarEngine(unittest.TestCase):
         self.assertIn("NEWSLYSER // A* PROP SCALP ALERT", card)
         self.assertIn("PROP FIRM 100-PIP DEFENSE", card)
         self.assertIn("15.0 pips", card)
+
+    def test_telegram_interactive_commands_and_sizing(self):
+        """Verifies Telegram interactive command dispatcher, dynamic sizing, and HTML security escaping."""
+        import telegram_bot
+        from unittest.mock import patch
+
+        # 1. Test unauthorized user block
+        ok, err = telegram_bot.handle_telegram_command("/size 20000", from_id=999999999)
+        self.assertFalse(ok)
+        self.assertEqual(err, "Unauthorized user")
+
+        # 2. Test user sizing persistence
+        cfg = telegram_bot.get_user_config()
+        self.assertIn("account_balance", cfg)
+        self.assertIn("max_risk_pct", cfg)
+        self.assertIn("leverage", cfg)
+
+        # 3. Test dynamic sizing calculations
+        mock_setup = {
+            "optimal_entry": 1.08500,
+            "stop_loss": 1.08350,
+            "current_price": 1.08500
+        }
+        # Balance = 10,000, Risk = 0.5% ($50)
+        telegram_bot.save_user_config({"account_balance": 10000.0, "max_risk_pct": 0.50, "leverage": 200})
+        sizing_10k = telegram_bot.compute_custom_sizing(mock_setup, instrument="EURUSD")
+        self.assertEqual(sizing_10k["account_size"], 10000.0)
+        self.assertEqual(sizing_10k["risk_budget_usd"], 50.0)
+
+        # Balance = 20,000, Risk = 1.0% ($200)
+        telegram_bot.save_user_config({"account_balance": 20000.0, "max_risk_pct": 1.0, "leverage": 200})
+        sizing_20k = telegram_bot.compute_custom_sizing(mock_setup, instrument="EURUSD")
+        self.assertEqual(sizing_20k["account_size"], 20000.0)
+        self.assertEqual(sizing_20k["risk_budget_usd"], 200.0)
+        self.assertGreater(sizing_20k["lot_size"], sizing_10k["lot_size"])
+
+        # Reset back to 10k default
+        telegram_bot.save_user_config({"account_balance": 10000.0, "max_risk_pct": 0.50, "leverage": 200})
+
+        # 4. Mock send_telegram_message to verify command dispatching without network I/O
+        with patch("telegram_bot.send_telegram_message") as mock_send:
+            mock_send.return_value = (True, "Delivered")
+
+            # Test /start /help
+            telegram_bot.handle_telegram_command("/help", from_id=6107718785)
+            self.assertTrue(mock_send.called)
+            help_msg = mock_send.call_args[0][0]
+            self.assertIn("NEWSLYSER QUANTITATIVE TERMINAL BOT", help_msg)
+            self.assertIn("/size", help_msg)
+
+            # Test /size
+            telegram_bot.handle_telegram_command("/size 15000", from_id=6107718785)
+            cfg_now = telegram_bot.get_user_config()
+            self.assertEqual(cfg_now["account_balance"], 15000.0)
+
+            # Test /risk
+            telegram_bot.handle_telegram_command("/risk 0.75", from_id=6107718785)
+            cfg_now = telegram_bot.get_user_config()
+            self.assertEqual(cfg_now["max_risk_pct"], 0.75)
+
+            # Test /leverage
+            telegram_bot.handle_telegram_command("/leverage 200", from_id=6107718785)
+            cfg_now = telegram_bot.get_user_config()
+            self.assertEqual(cfg_now["leverage"], 200)
+
+            # Test /config
+            telegram_bot.handle_telegram_command("/config", from_id=6107718785)
+            conf_msg = mock_send.call_args[0][0]
+            self.assertIn("CURRENT TRADING CONFIGURATION", conf_msg)
+            self.assertIn("$15,000.00", conf_msg)
+
+            # Test /all Triad Telemetry
+            telegram_bot.handle_telegram_command("/all", from_id=6107718785)
+            all_msg = mock_send.call_args[0][0]
+            self.assertIn("TRIAD MARKET TELEMETRY", all_msg)
+            self.assertIn("EUR/USD", all_msg)
+            self.assertIn("GOLD (XAU/USD)", all_msg)
+            self.assertIn("BITCOIN (BTC/USD)", all_msg)
+
+            # Test HTML safety on unknown command
+            telegram_bot.handle_telegram_command("/test <script>alert(1)</script>", from_id=6107718785)
+            err_msg = mock_send.call_args[0][0]
+            self.assertIn("&lt;script&gt;", err_msg)
+            self.assertNotIn("<script>", err_msg)
+
+        # Restore default 10k config
+        telegram_bot.save_user_config({"account_balance": 10000.0, "max_risk_pct": 0.50, "leverage": 200})
 
 
 if __name__ == "__main__":

@@ -159,6 +159,7 @@ def on_app_startup():
     threading.Thread(target=_prewarm_market_data_caches, daemon=True).start()
     threading.Thread(target=_background_cache_refresher, daemon=True).start()
     threading.Thread(target=_background_telegram_monitor, daemon=True).start()
+    telegram_bot.start_telegram_polling()
 
 
 def fetch_live_quotes():
@@ -1389,6 +1390,8 @@ def get_telegram_status():
         "is_configured": bool(token and chat_id),
         "bot_username": "Newlyser_bot",
         "chat_id": chat_id,
+        "polling_active": telegram_bot._POLLING_STARTED,
+        "user_config": telegram_bot.get_user_config(),
         "recent_alerts_count": len(history),
         "recent_alerts": list(history.values())[-5:]
     }
