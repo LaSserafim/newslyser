@@ -1038,8 +1038,8 @@ async function renderEventMcPane(ev) {
   const pPfx = isEur ? "" : (mc && mc.currency_prefix !== undefined ? mc.currency_prefix : "$");
 
   // Update metrics table
-  const medId = ev === "cpi" ? "val-mc-median" : (ev === "astar" ? "val-ast-pwin" : `val-${ev}-mc-median`);
-  const varId = ev === "cpi" ? "val-mc-var" : (ev === "astar" ? "val-ast-var" : `val-${ev}-mc-var`);
+  const medId = ev === "cpi" ? "val-mc-median" : (ev === "astar" ? null : `val-${ev}-mc-median`);
+  const varId = ev === "cpi" ? "val-mc-var" : (ev === "astar" ? null : `val-${ev}-mc-var`);
   const tailId = ev === "cpi" ? "val-mc-tail" : `val-${ev}-mc-tail`;
   const stochId = ev === "cpi" ? "val-mc-stoch" : `val-${ev}-mc-stoch`;
   const m = mc.metrics || {};
@@ -1059,10 +1059,10 @@ async function renderEventMcPane(ev) {
       }
     }
   } else {
-    if (document.getElementById(medId)) {
+    if (medId && document.getElementById(medId)) {
       document.getElementById(medId).innerText = `${pPfx}${Number(m.median_terminal_price || 0).toFixed(pDec)} (${mc.n_paths.toLocaleString()} paths, ±${pPfx}${mc.mc_moe_terminal_dollars} SE)`;
     }
-    if (document.getElementById(varId)) {
+    if (varId && document.getElementById(varId)) {
       document.getElementById(varId).innerText = `${m.var_95_pct > 0 ? "+" : ""}${m.var_95_pct.toFixed(2)}% / CVaR ${m.cvar_95_pct.toFixed(2)}% (P+: ${m.p_positive_return_pct}% | P-: ${m.p_negative_return_pct}%)`;
     }
   }

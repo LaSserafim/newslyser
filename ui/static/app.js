@@ -1025,15 +1025,21 @@ async function renderEventMcPane(ev) {
   const hVal = (st.horizon !== undefined && st.horizon !== "undefined") ? st.horizon : (ev === "astar" ? "daily" : 1);
   const zVal = (st.z !== undefined && st.z !== "undefined") ? st.z : (ev === "astar" ? -1.18 : 0.0);
   try {
-    const res = await fetch(`/api/monte-carlo?horizon=${hVal}&z=${zVal}&event_type=${ev}&n_paths=10000&min_confidence=${confLvl}`);
+    const instParam = ev === "astar" ? `&instrument=${CURRENT_ASTAR_ASSET}` : "";
+    const res = await fetch(`/api/monte-carlo?horizon=${hVal}&z=${zVal}&event_type=${ev}&n_paths=10000&min_confidence=${confLvl}${instParam}`);
     mc = await res.json();
   } catch (e) {
     return;
   }
 
+  // Multi-asset precision formatting
+  const isEur = (ev === "astar" && CURRENT_ASTAR_ASSET === "EURUSD") || (mc && mc.symbol === "EURUSD") || (mc && mc.instrument === "EURUSD");
+  const pDec = isEur ? 5 : (mc && mc.price_decimals !== undefined ? mc.price_decimals : 2);
+  const pPfx = isEur ? "" : (mc && mc.currency_prefix !== undefined ? mc.currency_prefix : "$");
+
   // Update metrics table
-  const medId = ev === "cpi" ? "val-mc-median" : (ev === "astar" ? "val-ast-pwin" : `val-${ev}-mc-median`);
-  const varId = ev === "cpi" ? "val-mc-var" : (ev === "astar" ? "val-ast-var" : `val-${ev}-mc-var`);
+  const medId = ev === "cpi" ? "val-mc-median" : (ev === "astar" ? null : `val-${ev}-mc-median`);
+  const varId = ev === "cpi" ? "val-mc-var" : (ev === "astar" ? null : `val-${ev}-mc-var`);
   const tailId = ev === "cpi" ? "val-mc-tail" : `val-${ev}-mc-tail`;
   const stochId = ev === "cpi" ? "val-mc-stoch" : `val-${ev}-mc-stoch`;
   const m = mc.metrics || {};
@@ -1041,17 +1047,22 @@ async function renderEventMcPane(ev) {
   const sv = mc.bs_stoch_vol || {};
 
   if (ev === "astar") {
-    if (document.getElementById("val-ast-pwin")) {
-      document.getElementById("val-ast-pwin").innerText = `${m.p_positive_return_pct}% win (${mc.n_paths.toLocaleString()} paths, ±$${mc.mc_moe_terminal_dollars} SE)`;
-    }
-    if (document.getElementById("val-ast-var")) {
-      document.getElementById("val-ast-var").innerText = `${m.var_95_pct > 0 ? "+" : ""}${m.var_95_pct.toFixed(2)}% / CVaR ${m.cvar_95_pct.toFixed(2)}% (P+: ${m.p_positive_return_pct}% | P-: ${m.p_negative_return_pct}%)`;
+    const aStar = window._LAST_ASTAR_DATA;
+    if (aStar) {
+      const fpa = aStar.first_passage_analysis || {};
+      const mcq = aStar.monte_carlo_quantiles || {};
+      if (document.getElementById("val-ast-pwin") && fpa.win_probability_pct !== undefined) {
+        document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (M2M EV: ${fpa.expected_value_r >= 0 ? "+" : ""}${fpa.expected_value_r}R / Kelly: ${fpa.quarter_kelly_pct}%)`;
+      }
+      if (document.getElementById("val-ast-var") && mcq.var_95_pct !== undefined) {
+        document.getElementById("val-ast-var").innerText = `${mcq.var_95_pct}% (CVaR: ${mcq.cvar_95_pct}% | ${(mcq.n_paths || 10000).toLocaleString()} paths)`;
+      }
     }
   } else {
-    if (document.getElementById(medId)) {
-      document.getElementById(medId).innerText = `$${m.median_terminal_price.toFixed(2)} (${mc.n_paths.toLocaleString()} paths, ±$${mc.mc_moe_terminal_dollars} SE)`;
+    if (medId && document.getElementById(medId)) {
+      document.getElementById(medId).innerText = `${pPfx}${Number(m.median_terminal_price || 0).toFixed(pDec)} (${mc.n_paths.toLocaleString()} paths, ±${pPfx}${mc.mc_moe_terminal_dollars} SE)`;
     }
-    if (document.getElementById(varId)) {
+    if (varId && document.getElementById(varId)) {
       document.getElementById(varId).innerText = `${m.var_95_pct > 0 ? "+" : ""}${m.var_95_pct.toFixed(2)}% / CVaR ${m.cvar_95_pct.toFixed(2)}% (P+: ${m.p_positive_return_pct}% | P-: ${m.p_negative_return_pct}%)`;
     }
   }
@@ -1096,7 +1107,7 @@ async function renderEventMcPane(ev) {
   const baseY = getY(mc.current_price);
   const tStart = mc.timesteps[0] || "T0";
   const tMid = mc.timesteps[Math.floor(steps / 2)] || "";
-  const tEnd = mc.timesteps[steps] || (st.horizon === 1 ? "T+24h" : `D${st.horizon}.0`);
+  const tEnd = (mc.timesteps && mc.timesteps[steps]) || (st.horizon === 1 ? "T+24h" : (st.horizon === "intraday" || st.horizon === 0.5 ? "T+12h" : (st.horizon === "scalping" ? "T+6h" : `D${st.horizon}.0`)));
 
   container.innerHTML = `
     <svg id="svg-${ev}-mc" viewBox="0 0 ${w} ${h}" class="bbg-svg" style="cursor:crosshair;">
@@ -1106,12 +1117,12 @@ async function renderEventMcPane(ev) {
       <path d="${path50}" fill="#222222" opacity="0.92"/>
       <g>${tracesSvg}</g>
       <line x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}" stroke="#ffb000" stroke-width="1" stroke-dasharray="2,2"/>
-      <text x="${w - padR - 4}" y="${Math.max(padT + 10, baseY - 4)}" fill="#ffb000" text-anchor="end">T0: $${mc.current_price.toFixed(1)}</text>
+      <text x="${w - padR - 4}" y="${Math.max(padT + 10, baseY - 4)}" fill="#ffb000" text-anchor="end">T0: ${pPfx}${Number(mc.current_price).toFixed(pDec)}</text>
       <path d="${pathMedian}" fill="none" stroke="#ffffff" stroke-width="2"/>
       <circle cx="${getX(steps)}" cy="${getY(p50[steps])}" r="3" fill="#ffffff"/>
-      <text x="${getX(steps) + 5}" y="${getY(p50[steps]) + 3}" fill="#ffffff" font-weight="700">$${p50[steps].toFixed(0)}</text>
-      <text x="${padL - 4}" y="${padT + 8}" text-anchor="end">$${maxP.toFixed(0)}</text>
-      <text x="${padL - 4}" y="${h - padB}" text-anchor="end">$${minP.toFixed(0)}</text>
+      <text x="${getX(steps) + 5}" y="${getY(p50[steps]) + 3}" fill="#ffffff" font-weight="700">${pPfx}${Number(p50[steps]).toFixed(isEur ? 4 : (pDec === 5 ? 4 : 0))}</text>
+      <text x="${padL - 4}" y="${padT + 8}" text-anchor="end">${pPfx}${Number(maxP).toFixed(isEur ? 4 : (pDec === 5 ? 4 : 0))}</text>
+      <text x="${padL - 4}" y="${h - padB}" text-anchor="end">${pPfx}${Number(minP).toFixed(isEur ? 4 : (pDec === 5 ? 4 : 0))}</text>
       <text x="${padL}" y="${h - 6}" text-anchor="start">${tStart}</text>
       <text x="${getX(Math.floor(steps / 2))}" y="${h - 6}" text-anchor="middle">${tMid}</text>
       <text x="${w - padR}" y="${h - 6}" text-anchor="end">${tEnd}</text>
@@ -1137,12 +1148,12 @@ async function renderEventMcPane(ev) {
 
       if (crossV) { crossV.style.display = "block"; crossV.setAttribute("x1", cx); crossV.setAttribute("x2", cx); crossV.setAttribute("y1", padT); crossV.setAttribute("y2", h - padB); }
       if (crossDot) { crossDot.style.display = "block"; crossDot.setAttribute("cx", cx); crossDot.setAttribute("cy", cy); }
-      if (hud) hud.innerHTML = `${mc.timesteps[s]} | Med: <span class="highlight">$${medP.toFixed(1)}</span> (90%: $${p5Val.toFixed(0)}–$${p95Val.toFixed(0)}) | Drift: ${delta >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+      if (hud) hud.innerHTML = `${mc.timesteps[s]} | Med: <span class="highlight">${pPfx}${medP.toFixed(pDec)}</span> (90%: ${pPfx}${p5Val.toFixed(pDec)}–${pPfx}${p95Val.toFixed(pDec)}) | Drift: ${delta >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
       positionTooltip(tt, container, mouseEv.clientX, mouseEv.clientY, `
         <div style="color:var(--amber-cmd); font-weight:800;">${mc.timesteps[s]} (10,000 PATHS)</div>
-        <div>Median: <strong>$${medP.toFixed(2)}</strong> (${delta >= 0 ? "+" : ""}$${delta.toFixed(2)} / ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)</div>
-        <div>50% Core: $${p25Val.toFixed(1)} — $${p75Val.toFixed(1)}</div>
-        <div>90% Band: $${p5Val.toFixed(1)} — $${p95Val.toFixed(1)}</div>
+        <div>Median: <strong>${pPfx}${medP.toFixed(pDec)}</strong> (${delta >= 0 ? "+" : ""}${pPfx}${delta.toFixed(pDec)} / ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)</div>
+        <div>50% Core: ${pPfx}${p25Val.toFixed(pDec)} — ${pPfx}${p75Val.toFixed(pDec)}</div>
+        <div>90% Band: ${pPfx}${p5Val.toFixed(pDec)} — ${pPfx}${p95Val.toFixed(pDec)}</div>
       `);
     });
     svgEl.addEventListener("mouseleave", () => {
@@ -1157,7 +1168,8 @@ async function renderEventMcPane(ev) {
 async function renderGarch90dPane(ev, container, hud) {
   let data = null;
   try {
-    const res = await fetch(`/api/garch-volatility-90d?event_type=${ev}`);
+    const instParam = ev === "astar" ? `&instrument=${CURRENT_ASTAR_ASSET}` : "";
+    const res = await fetch(`/api/garch-volatility-90d?event_type=${ev}${instParam}`);
     data = await res.json();
   } catch (e) {
     return;
@@ -2059,8 +2071,23 @@ function applyAstarData(aStar) {
     initTtlCountdown(aStar.time_to_live.expires_at_epoch, aStar.time_to_live.max_validity_seconds || 5400);
   }
 
-  renderEventMcPane("astar");
-  renderLiquidityHeatmapUi(aStar);
+  const now = Date.now();
+  const lastAsset = window._LAST_RENDERED_ASTAR_ASSET;
+  const lastHorizon = window._LAST_RENDERED_ASTAR_HORIZON;
+  const lastRenderTs = window._LAST_ASTAR_ASYNC_RENDER_TS || 0;
+  const currentAsset = CURRENT_ASTAR_ASSET;
+  const currentHorizon = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
+
+  const stateChanged = (lastAsset !== currentAsset) || (lastHorizon !== currentHorizon);
+  const timeThresholdMet = (now - lastRenderTs) >= 4000;
+
+  if (stateChanged || timeThresholdMet) {
+    window._LAST_RENDERED_ASTAR_ASSET = currentAsset;
+    window._LAST_RENDERED_ASTAR_HORIZON = currentHorizon;
+    window._LAST_ASTAR_ASYNC_RENDER_TS = now;
+    renderEventMcPane("astar");
+    renderLiquidityHeatmapUi(aStar);
+  }
 }
 
 async function renderLiquidityHeatmapUi(aStar) {
@@ -2091,7 +2118,7 @@ async function renderLiquidityHeatmapUi(aStar) {
   }
 
   // Table metrics
-  const isEur = aStar.symbol === "EURUSD";
+  const isEur = (CURRENT_ASTAR_ASSET === "EURUSD") || (aStar && aStar.symbol === "EURUSD");
   const pDec = isEur ? 5 : 2;
   const pPfx = isEur ? "" : "$";
 
@@ -2102,11 +2129,19 @@ async function renderLiquidityHeatmapUi(aStar) {
   const elShield = document.getElementById("val-hm-evt-shield");
   const elEta = document.getElementById("val-hm-hawkes-eta");
 
-  if (elPoc) elPoc.innerText = `${pPfx}${Number(aStar.current_price || 0).toFixed(pDec)}`;
   if (elShort) elShort.innerText = `${pPfx}${Number(liq.closest_short_liquidation_pool || 0).toFixed(pDec)}`;
   if (elLong) elLong.innerText = `${pPfx}${Number(liq.closest_long_liquidation_pool || 0).toFixed(pDec)}`;
   if (elShield) elShield.innerText = `${pPfx}${Number(evt.evt_sl_price || 0).toFixed(pDec)} (-${evt.es_99_pct || 0}%)`;
   if (elEta) elEta.innerText = `η = ${hwk.branching_ratio || 0.20} | λ = ${hwk.jump_intensity || 0.05}`;
+
+  // Use cached profile if available to prevent any layout/display flicker
+  if (window._LAST_HEATMAP_DATA && window._LAST_HEATMAP_DATA.instrument === CURRENT_ASTAR_ASSET) {
+    const cachedVp = window._LAST_HEATMAP_DATA.volume_profile;
+    if (cachedVp) {
+      if (elPoc && cachedVp.poc) elPoc.innerText = `${pPfx}${Number(cachedVp.poc).toFixed(pDec)} (${cachedVp.poc_vol_share_pct || 0}%)`;
+      if (elVa && cachedVp.val && cachedVp.vah) elVa.innerText = `${pPfx}${Number(cachedVp.val).toFixed(pDec)} - ${pPfx}${Number(cachedVp.vah).toFixed(pDec)}`;
+    }
+  }
 
   // Fetch full 50-bin profile asynchronously
   try {
@@ -2115,50 +2150,76 @@ async function renderLiquidityHeatmapUi(aStar) {
     if (!hmData || !hmData.volume_profile) return;
     const vp = hmData.volume_profile;
     const bins = vp.bins || [];
+    window._LAST_HEATMAP_DATA = { instrument: CURRENT_ASTAR_ASSET, volume_profile: vp };
     if (elPoc && vp.poc) elPoc.innerText = `${pPfx}${Number(vp.poc).toFixed(pDec)} (${vp.poc_vol_share_pct || 0}%)`;
     if (elVa && vp.val && vp.vah) elVa.innerText = `${pPfx}${Number(vp.val).toFixed(pDec)} - ${pPfx}${Number(vp.vah).toFixed(pDec)}`;
 
-    // Draw Neo-Brutalist SVG Heatmap
+    // Draw Neo-Brutalist SVG Heatmap with exact price coordinate projection
     const w = svg.clientWidth || 400;
     const h = 160;
     const n = bins.length;
     if (n === 0) return;
-    const barH = Math.max(2, (h - 20) / n);
+
+    const shortLiq = hmData.liquidation_heatmap ? Number(hmData.liquidation_heatmap.closest_short_liquidation_pool || 0) : 0;
+    const longLiq = hmData.liquidation_heatmap ? Number(hmData.liquidation_heatmap.closest_long_liquidation_pool || 0) : 0;
+    const evtSl = hmData.evt_stop_shield ? Number(hmData.evt_stop_shield.evt_sl_price || 0) : 0;
+    const spot = Number(hmData.current_price || aStar.current_price || 0);
+
+    const priceList = bins.map(b => Number(b.price)).filter(p => !isNaN(p) && p > 0);
+    if (spot > 0) priceList.push(spot);
+    if (shortLiq > 0) priceList.push(shortLiq);
+    if (longLiq > 0) priceList.push(longLiq);
+    if (evtSl > 0) priceList.push(evtSl);
+
+    let pMin = Math.min(...priceList);
+    let pMax = Math.max(...priceList);
+    const pRange = pMax - pMin || (spot * 0.01) || 1.0;
+    pMin -= pRange * 0.04;
+    pMax += pRange * 0.04;
+
+    const padT = 16, padB = 16;
+    const chartH = h - padT - padB;
+    const getY = (price) => padT + (1.0 - (price - pMin) / (pMax - pMin)) * chartH;
+
     let svgHtml = `<rect width="${w}" height="${h}" fill="#0a0a0c" rx="2"/>`;
 
-    // Draw volume profile bins
-    bins.forEach((b, idx) => {
-      const y = 10 + idx * barH;
-      const barW = Math.max(4, b.intensity * (w * 0.65));
+    // Draw volume profile bins properly mapped to price axis (high price on top)
+    const barH = Math.max(2, chartH / n);
+    bins.forEach((b) => {
+      const bPrice = Number(b.price);
+      const y = Math.max(padT, Math.min(h - padB - barH, getY(bPrice) - barH / 2));
+      const barW = Math.max(4, b.intensity * (w * 0.62));
       const col = b.is_poc ? "#00ff88" : (b.is_value_area ? "#00d2ff" : "#334455");
-      const opacity = b.is_poc ? 0.95 : (0.20 + b.intensity * 0.65);
-      svgHtml += `<rect x="10" y="${y}" width="${barW}" height="${barH - 1}" fill="${col}" fill-opacity="${opacity}" />`;
+      const opacity = b.is_poc ? 0.95 : (0.22 + b.intensity * 0.65);
+      svgHtml += `<rect x="10" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, barH - 0.5).toFixed(1)}" fill="${col}" fill-opacity="${opacity.toFixed(2)}" />`;
     });
 
     // Draw Short Liquidation Pool line (top red)
-    const shortLiq = hmData.liquidation_heatmap ? hmData.liquidation_heatmap.closest_short_liquidation_pool : 0;
-    if (shortLiq) {
-      svgHtml += `<line x1="0" y1="25" x2="${w}" y2="25" stroke="#ff3b5c" stroke-width="1.5" stroke-dasharray="4,3"/>`;
-      svgHtml += `<text x="${w - 200}" y="20" fill="#ff8095" font-size="8.5" font-family="monospace" font-weight="bold">SHORT LIQ POOL: ${pPfx}${Number(shortLiq).toFixed(pDec)}</text>`;
+    if (shortLiq > 0) {
+      const yShort = Math.max(padT, Math.min(h - padB, getY(shortLiq)));
+      svgHtml += `<line x1="0" y1="${yShort.toFixed(1)}" x2="${w}" y2="${yShort.toFixed(1)}" stroke="#ff3b5c" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+      svgHtml += `<text x="${w - 195}" y="${Math.max(11, yShort - 3).toFixed(1)}" fill="#ff8095" font-size="8.5" font-family="monospace" font-weight="bold">SHORT LIQ: ${pPfx}${shortLiq.toFixed(pDec)}</text>`;
     }
 
     // Draw Spot Price line (middle cyan)
-    const midY = h / 2;
-    svgHtml += `<line x1="0" y1="${midY}" x2="${w}" y2="${midY}" stroke="#00e5ff" stroke-width="2"/>`;
-    svgHtml += `<text x="15" y="${midY - 4}" fill="#00e5ff" font-size="9" font-family="monospace" font-weight="bold">SPOT: ${pPfx}${Number(hmData.current_price).toFixed(pDec)}</text>`;
+    if (spot > 0) {
+      const ySpot = Math.max(padT, Math.min(h - padB, getY(spot)));
+      svgHtml += `<line x1="0" y1="${ySpot.toFixed(1)}" x2="${w}" y2="${ySpot.toFixed(1)}" stroke="#00e5ff" stroke-width="2"/>`;
+      svgHtml += `<text x="15" y="${Math.max(11, ySpot - 4).toFixed(1)}" fill="#00e5ff" font-size="9" font-family="monospace" font-weight="bold">SPOT: ${pPfx}${spot.toFixed(pDec)}</text>`;
+    }
 
     // Draw Long Liquidation Pool line (bottom gold)
-    const longLiq = hmData.liquidation_heatmap ? hmData.liquidation_heatmap.closest_long_liquidation_pool : 0;
-    if (longLiq) {
-      svgHtml += `<line x1="0" y1="${h - 35}" x2="${w}" y2="${h - 35}" stroke="#ffaa00" stroke-width="1.5" stroke-dasharray="4,3"/>`;
-      svgHtml += `<text x="${w - 200}" y="${h - 40}" fill="#ffcc66" font-size="8.5" font-family="monospace" font-weight="bold">LONG LIQ POOL: ${pPfx}${Number(longLiq).toFixed(pDec)}</text>`;
+    if (longLiq > 0) {
+      const yLong = Math.max(padT, Math.min(h - padB, getY(longLiq)));
+      svgHtml += `<line x1="0" y1="${yLong.toFixed(1)}" x2="${w}" y2="${yLong.toFixed(1)}" stroke="#ffaa00" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+      svgHtml += `<text x="${w - 195}" y="${Math.min(h - 4, yLong + 10).toFixed(1)}" fill="#ffcc66" font-size="8.5" font-family="monospace" font-weight="bold">LONG LIQ: ${pPfx}${longLiq.toFixed(pDec)}</text>`;
     }
 
     // Draw EVT 99% Stop Shield (bottom purple line)
-    const evtSl = hmData.evt_stop_shield ? hmData.evt_stop_shield.evt_sl_price : 0;
-    if (evtSl) {
-      svgHtml += `<line x1="0" y1="${h - 12}" x2="${w}" y2="${h - 12}" stroke="#bd93f9" stroke-width="2"/>`;
-      svgHtml += `<text x="15" y="${h - 16}" fill="#d6b4fc" font-size="8.5" font-family="monospace" font-weight="bold">EVT 99% STOP SHIELD: ${pPfx}${Number(evtSl).toFixed(pDec)}</text>`;
+    if (evtSl > 0) {
+      const yEvt = Math.max(padT, Math.min(h - padB, getY(evtSl)));
+      svgHtml += `<line x1="0" y1="${yEvt.toFixed(1)}" x2="${w}" y2="${yEvt.toFixed(1)}" stroke="#bd93f9" stroke-width="2"/>`;
+      svgHtml += `<text x="15" y="${Math.min(h - 4, yEvt + 10).toFixed(1)}" fill="#d6b4fc" font-size="8.5" font-family="monospace" font-weight="bold">EVT 99% CVaR STOP: ${pPfx}${evtSl.toFixed(pDec)}</text>`;
     }
 
     svg.innerHTML = svgHtml;
@@ -2169,6 +2230,7 @@ async function renderLiquidityHeatmapUi(aStar) {
 
 async function fetchAstarData() {
   try {
+    window._LAST_ASTAR_ASYNC_RENDER_TS = 0;
     const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
     const [aRes, dRes] = await Promise.all([
       fetch(`/api/daily-a-star?horizon=${h}&instrument=${CURRENT_ASTAR_ASSET}`),
@@ -2607,7 +2669,10 @@ function checkScheduledReleaseFirewall() {
 
 function initAutoRefreshLoop() {
   let loopCount = 0;
+  let isLoopBusy = false;
   setInterval(async () => {
+    if (isLoopBusy) return;
+    isLoopBusy = true;
     try {
       loopCount++;
       checkScheduledReleaseFirewall();
@@ -2654,7 +2719,13 @@ function initAutoRefreshLoop() {
       }
       if (isAstar && data && data.daily_a_star) {
         applyAstarData(data.daily_a_star);
-      } else if (loopCount % 3 === 0 && ["mod-cpi", "mod-fomc", "mod-nfp", "mod-ppi"].includes(mod)) {
+        renderSetupLedgerTable();
+        renderMultiHorizonOptInMatrix();
+        if (loopCount % 3 === 0) {
+          fetchGlobalMacroMatrix();
+          fetchQuant8AuditTable();
+        }
+      } else if (["mod-cpi", "mod-fomc", "mod-nfp", "mod-ppi"].includes(mod)) {
         const ev = mod.replace("mod-", "");
         if (EVENT_STATE[ev]?.mode === "PREMARKET") {
           await fetchState();
@@ -2662,8 +2733,12 @@ function initAutoRefreshLoop() {
           renderEventMcPane(ev);
         }
       }
-    } catch (e) {}
-  }, 1000);
+    } catch (e) {
+      console.warn("Auto refresh loop error:", e);
+    } finally {
+      isLoopBusy = false;
+    }
+  }, 5000);
   document.getElementById("btn-reset-astar-session")?.addEventListener("click", async () => {
     const b = document.getElementById("btn-reset-astar-session");
     b.innerText = "WAIT REFRESHING...";

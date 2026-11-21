@@ -30,7 +30,7 @@ import quant_model
 import data_pipeline
 
 DATA_DIR = os.path.join(PARENT_DIR, "data")
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+STATIC_DIR = os.path.join(PARENT_DIR, "static") if os.path.exists(os.path.join(PARENT_DIR, "static")) else os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 SETUP_EPOCHS_FILE = os.path.join(DATA_DIR, "setup_epochs.json")
 
 def get_or_create_setup_epoch(event_type="daily", ttl_seconds=5400):
@@ -572,6 +572,67 @@ def deepseek_test():
 @app.get("/api/hypothesis-test")
 def get_hypothesis_test(event_type: str = "cpi"):
     return quant_model.get_event_hypothesis_test(event_type=event_type)
+
+@app.get("/api/liquidity-heatmap")
+def get_liquidity_heatmap(instrument: str = "BTCUSD"):
+    prices = fetch_live_quotes()
+    inst_upper = (instrument or "BTCUSD").upper()
+    if inst_upper in ["EURUSD", "EUR"]:
+        inst_key = "EURUSD"
+        price = prices.get("EURUSD_REALTIME") or prices.get("EURUSD=X", 1.08500)
+        atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        sh = prices.get("EURUSD_SESSION_HIGH") or (price + 0.0030)
+        sl = prices.get("EURUSD_SESSION_LOW") or (price - 0.0030)
+    elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+        inst_key = "BTCUSD"
+        price = prices.get("BTC_REALTIME") or prices.get("BTC-USD", 91500.0)
+        atr_val = prices.get("BTC_ATR_M30", 450.0)
+        sh = prices.get("BTC_SESSION_HIGH") or (price + 1200.0)
+        sl = prices.get("BTC_SESSION_LOW") or (price - 1200.0)
+    else:
+        inst_key = "XAUUSD"
+        price = prices.get("XAUUSD_REALTIME") or prices.get("GC=F", 3975.0)
+        atr_val = prices.get("ATR_M30", 10.50)
+        sh = prices.get("SESSION_HIGH") or (price + 25.0)
+        sl = prices.get("SESSION_LOW") or (price - 25.0)
+
+    n_sample_bars = 24
+    rng = np.random.default_rng(42)
+    offsets = rng.normal(0, atr_val * 0.4, n_sample_bars)
+    sample_closes = price + np.cumsum(offsets)
+    sample_highs = sample_closes + np.abs(rng.normal(0, atr_val * 0.5, n_sample_bars))
+    sample_lows = sample_closes - np.abs(rng.normal(0, atr_val * 0.5, n_sample_bars))
+    sample_vols = np.abs(rng.normal(1000, 300, n_sample_bars)) + 100
+
+    vol_profile = quant_model.compute_volume_profile(
+        highs=sample_highs, lows=sample_lows, closes=sample_closes, volumes=sample_vols, n_bins=50, instrument=inst_key
+    )
+    liq_heat = quant_model.compute_synthetic_liquidation_heatmap(
+        current_price=price, highs=[sh, float(np.max(sample_highs))], lows=[sl, float(np.min(sample_lows))], atr_val=atr_val, instrument=inst_key
+    )
+    evt_shield = quant_model.compute_evt_cvar_stop_shield(
+        returns=np.diff(sample_closes) / sample_closes[:-1],
+        current_price=price,
+        direction="BUY",
+        alpha=0.99,
+        instrument=inst_key
+    )
+
+    import time
+    spec = quant_model.get_instrument_spec(inst_key)
+    return {
+        "instrument": inst_key,
+        "symbol": inst_key,
+        "price_decimals": spec.get("price_decimals", 2),
+        "current_price": price,
+        "atr_m30": atr_val,
+        "session_high": sh,
+        "session_low": sl,
+        "volume_profile": vol_profile,
+        "liquidation_heatmap": liq_heat,
+        "evt_stop_shield": evt_shield,
+        "timestamp": int(time.time())
+    }
 
 @app.post("/api/reset-setup-session")
 def reset_setup_session(event_type: str = "daily", validity_seconds: int = 5400):

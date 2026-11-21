@@ -3871,6 +3871,9 @@ def calculate_daily_a_star_setup(
             "cum_p_loss": round(float(np.mean(loss_m & (tau_sl <= s)) * 100.0), 1)
         })
 
+    min_win_threshold = max(p_breakeven + 5.0, 40.0) if rr >= 2.0 else 50.0
+    ev_ok = (ev_r > 0.05) and (win_rate >= min_win_threshold)
+
     fp_analysis = {
         "is_buy": is_bullish,
         "n_paths": n_paths,
@@ -3885,7 +3888,7 @@ def calculate_daily_a_star_setup(
         "early_sl_rate_pct": early_sl_pct,
         "undecided_pct": undecided_pct,
         "profit_factor": pf,
-        "threshold_met": (ev_r > 0.05) and (win_rate >= 50.0),
+        "threshold_met": ev_ok,
         "survival_curve": survival_curve
     }
 
@@ -3896,7 +3899,6 @@ def calculate_daily_a_star_setup(
 
     vrp_ok = vrp_ann > 0.0
     har_calm_ok = rv5_ann <= 1.15 * max(1.0, rv22_ann)
-    ev_ok = (ev_r > 0.05) and (win_rate >= 50.0)
 
     # Continuous Sigmoid Confluence Scoring (zero cliff edge)
     # 1. Macro Pillar [5.0 - 25.0]
@@ -3988,7 +3990,7 @@ def calculate_daily_a_star_setup(
         "intraday_exhaustion_squeeze_gate": {"status": "PASS" if exhaustion_ok else "BLOCKED", "detail": "Intraday Tape Aligned (No Squeeze / Range Exhaustion)" if exhaustion_ok else exhaustion_reason},
         "vrp_implied_edge": {"status": "PASS" if vrp_ok else "UNMET", "detail": f"VRP = GVZ ({gvz_now:.1f}%) - RV22 ({rv22_ann:.1f}%) = {vrp_ann:+.2f}% (> 0 required)"},
         "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
-        "mark_to_market_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {win_rate}% | M2M EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}% | PF={pf}"},
+        "mark_to_market_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {win_rate}% (min {min_win_threshold:.1f}%) | M2M EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}% | PF={pf}"},
         "vpin_order_flow_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"VPIN={vpin_now:.3f} ({'< 0.65 INTRADAY / < 0.70 DAILY SAFE' if vpin_ok else 'TOXIC ORDER FLOW'}) | Kyle λ={kyles_lambda:.4f}"},
         "calculative_risk_reward": {"status": "VALID" if rr >= min_rr_threshold else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} (Max 1% of $10k) | Margin ${req_margin} (1:{standard_leverage})"},
         "hawkes_cascade_firewall": {"status": "PASS" if hawkes_ok else "LOCKED", "detail": f"Jump Cluster Safe (Branching η={hawkes_eval['branching_ratio']}, λ={hawkes_eval['jump_intensity']})" if hawkes_ok else f"Active Liquidation Avalanche (η={hawkes_eval['branching_ratio']} >= 0.85, relax in {hawkes_eval['t_relax_hours']}h)"},
@@ -4029,8 +4031,19 @@ def calculate_daily_a_star_setup(
         if not drift_ok: unmet.append(f"|{z_label}|={abs(z_eff):.2f} UNMET")
         if not vrp_ok: unmet.append(f"VRP={vrp_ann:+.1f}% <= 0")
         if not har_calm_ok: unmet.append("RV5 > 1.15*RV22 PANIC")
-        if not ev_ok: unmet.append(f"EV={ev_r:+.3f}R <= 0.05")
+        if not ev_ok:
+            if ev_r <= 0.05:
+                unmet.append(f"EV={ev_r:+.3f}R <= 0.05")
+            else:
+                unmet.append(f"P(Win)={win_rate}% < {min_win_threshold:.1f}%")
         if not vpin_ok: unmet.append("VPIN TOXIC")
+        if rr < min_rr_threshold: unmet.append(f"RR 1:{rr:.2f} < 1:{min_rr_threshold:.2f}")
+        if not hawkes_ok: unmet.append(f"HAWKES AVALANCHE (η={hawkes_eval.get('branching_ratio', 0.85)})")
+        if not hurst_ok: unmet.append(f"HURST CHOP (H={hurst_eval.get('hurst', 0.40):.2f} < 0.45)")
+        if inst_key == "EURUSD" and snr_eval and not pure_trend_pass:
+            unmet.append(snr_eval.get("reason", "SNR PURE TREND UNMET"))
+        if inst_key == "BTCUSD" and btc_eval and not pure_trend_pass:
+            unmet.append(btc_eval.get("reason", "BTC PURE TREND UNMET"))
         reason_gate = ", ".join(unmet) if unmet else f"CONFLUENCE {total_confluence}/100"
         action = f"A* GRADE NOT EXIST YET // STAND ASIDE ({reason_gate})"
         ticket_type = "NO_A_STAR_SETUP_STAND_ASIDE"
