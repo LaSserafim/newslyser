@@ -45,7 +45,7 @@
     "date": "2026-11-12",
     "time": "08:30 AM EST (20:30 WIB) [NY PRE-MARKET / US OPEN]",
     "impact": "MEDIUM",
-    "actual": "200K",
+    "actual": "202K",
     "forecast": "194K",
     "previous": "189K",
     "category": "LABOR",
@@ -65,7 +65,7 @@
     "effect_xauusd": "OFFICIAL BLS PRINT +0.35% vs 0.40% FCST // GOLD +0.08%"
   },
   {
-    "event_id": "ff_2026-11-16_3456",
+    "event_id": "ff_2026-11-16_3571",
     "title": "Fed Chairman Warsh Speaks",
     "country": "USD",
     "date": "2026-11-16",
@@ -91,7 +91,7 @@
     "effect_xauusd": "U.S. CONSUMER RESILIENCE & GDP TRACKER"
   },
   {
-    "event_id": "ff_2026-11-17_6935",
+    "event_id": "ff_2026-11-17_6701",
     "title": "Core Retail Sales m/m",
     "country": "USD",
     "date": "2026-11-17",
@@ -104,7 +104,7 @@
     "effect_xauusd": "HIGH-IMPACT USD RELEASE (NY PRE-MARKET / US OPEN)"
   },
   {
-    "event_id": "ff_2026-11-18_2644",
+    "event_id": "ff_2026-11-18_4367",
     "title": "FOMC Meeting Minutes",
     "country": "USD",
     "date": "2026-11-18",
@@ -117,7 +117,7 @@
     "effect_xauusd": "HIGH-IMPACT USD RELEASE (NY AFTERNOON)"
   },
   {
-    "event_id": "ff_2026-11-19_7970",
+    "event_id": "ff_2026-11-19_7796",
     "title": "Philly Fed Manufacturing Index",
     "country": "USD",
     "date": "2026-11-19",
@@ -130,7 +130,7 @@
     "effect_xauusd": "MEDIUM-IMPACT USD RELEASE (NY PRE-MARKET / US OPEN)"
   },
   {
-    "event_id": "ff_2026-11-19_7648",
+    "event_id": "ff_2026-11-19_5352",
     "title": "Unemployment Claims",
     "country": "USD",
     "date": "2026-11-19",
@@ -143,7 +143,7 @@
     "effect_xauusd": "MEDIUM-IMPACT USD RELEASE (NY PRE-MARKET / US OPEN)"
   },
   {
-    "event_id": "ff_2026-11-20_8868",
+    "event_id": "ff_2026-11-20_3121",
     "title": "Revised UoM Consumer Sentiment",
     "country": "USD",
     "date": "2026-11-20",
@@ -156,7 +156,7 @@
     "effect_xauusd": "MEDIUM-IMPACT USD RELEASE (NY CASH SESSION)"
   },
   {
-    "event_id": "ff_2026-11-20_4391",
+    "event_id": "ff_2026-11-20_8340",
     "title": "Revised UoM Inflation Expectations",
     "country": "USD",
     "date": "2026-11-20",
@@ -166,6 +166,19 @@
     "forecast": "",
     "previous": "4.3%",
     "category": "MACRO_WEEKLY",
+    "effect_xauusd": "MEDIUM-IMPACT USD RELEASE (NY CASH SESSION)"
+  },
+  {
+    "event_id": "ff_2026-11-20_5671",
+    "title": "President Trump Speaks",
+    "country": "USD",
+    "date": "2026-11-20",
+    "time": "12:00 EST (00:00 WIB) [NY CASH SESSION]",
+    "impact": "MEDIUM",
+    "actual": "",
+    "forecast": "",
+    "previous": "",
+    "category": "FED_SPEAK",
     "effect_xauusd": "MEDIUM-IMPACT USD RELEASE (NY CASH SESSION)"
   },
   {

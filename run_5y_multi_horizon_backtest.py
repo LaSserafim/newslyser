@@ -255,7 +255,7 @@ def run_5y_multi_horizon_suite():
             
             if (abs(z_i) >= 0.50) and (vrp_i > 0.0) and (rv5_i <= 1.15 * rv22_i) and trend_regime_ok:
                 rr_t = 2.0 if (abs(z_i) >= 1.0 or vrp_i >= 1.5) else 1.0
-                ent = float(df_raw['GC=F'].iloc[i])
+                ent = float(gc_o['Open'].iloc[i + 1]) # Strict Next-Bar Open execution
                 atrv = float(atr14.iloc[i])
                 sl_d = 1.0 * atrv
                 tp_d = rr_t * atrv
@@ -273,7 +273,7 @@ def run_5y_multi_horizon_suite():
                         if fh >= sl_p: exit_p = sl_p; held = kd; break
                         if fl <= tp_p: exit_p = tp_p; held = kd; break
                 pnl = ((exit_p - ent) if side == 1 else (ent - exit_p)) - 0.80
-                daily_trades.append({'date': df_raw.index[i].strftime('%Y-%m-%d'), 'r': pnl / sl_d, 'type': 'A*_DAILY', 'year': df_raw.index[i].year})
+                daily_trades.append({'date': df_raw.index[i + 1].strftime('%Y-%m-%d'), 'r': pnl / sl_d, 'type': 'A*_DAILY', 'year': df_raw.index[i + 1].year})
                 i += held
                 continue
         i += 1
@@ -296,7 +296,7 @@ def run_5y_multi_horizon_suite():
             regime_ok = (px >= ma) if side == 1 else (px <= ma)
             
             if (abs(z_60) >= 0.70) and (vrp_i > 0.0) and macro_div and regime_ok:
-                ent = float(df_raw['GC=F'].iloc[i])
+                ent = float(gc_o['Open'].iloc[i + 1]) # Strict Next-Bar Open execution
                 atrv = float(atr14.iloc[i])
                 sl_d = 1.5 * atrv
                 tp1_d = 1.5 * sl_d
@@ -330,7 +330,7 @@ def run_5y_multi_horizon_suite():
                     pnl = ((avg_exit - ent) if side == 1 else (ent - avg_exit)) - 1.20
                 else:
                     pnl = ((exit_p - ent) if side == 1 else (ent - exit_p)) - 1.20
-                swing_trades.append({'date': df_raw.index[i].strftime('%Y-%m-%d'), 'r': pnl / sl_d, 'type': 'A*_SWING', 'year': df_raw.index[i].year})
+                swing_trades.append({'date': df_raw.index[i + 1].strftime('%Y-%m-%d'), 'r': pnl / sl_d, 'type': 'A*_SWING', 'year': df_raw.index[i + 1].year})
                 i += held
                 continue
         i += 1
@@ -572,6 +572,8 @@ def run_5y_multi_horizon_suite():
             "time_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
             "period_years": 5,
             "instrument": "XAUUSD",
+            "leverage": 200,
+            "margin_requirement_pct": 0.50,
             "tracks": {
                 "scalping_astar": s_scalp,
                 "intraday_astar": s_intra,

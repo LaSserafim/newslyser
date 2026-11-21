@@ -693,7 +693,9 @@ INSTRUMENT_SPECS = {
         "default_atr_d1": 35.0,
         "daily_sd_pct": 1.15,
         "unit": "oz",
-        "margin_lev100_001": 37.50,
+        "default_leverage": 200,
+        "margin_lev200_001": 20.18,
+        "margin_lev100_001": 40.36,
     },
     "EURUSD": {
         "symbol": "EURUSD",
@@ -714,6 +716,8 @@ INSTRUMENT_SPECS = {
         "default_atr_d1": 0.0065,   # 65 pips D1 ATR
         "daily_sd_pct": 0.45,       # ~7.1% annualized realized volatility
         "unit": "EUR",
+        "default_leverage": 200,
+        "margin_lev200_001": 5.43,
         "margin_lev100_001": 10.85,
     },
     "GBPUSD": {
