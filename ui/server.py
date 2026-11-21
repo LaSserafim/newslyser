@@ -173,12 +173,41 @@ def get_pdf_distribution(event_type: str = "cpi"):
     return quant_model.calculate_probability_density_function(event_type=event_type)
 
 @app.get("/api/monte-carlo")
-def get_monte_carlo(horizon: int = 1, z: float = 0.0, price: float = None, event_type: str = "cpi", n_paths: int = 10000, min_confidence: int = 95):
+def get_monte_carlo(horizon: str = "1", z: str = "0.0", price: float = None, event_type: str = "cpi", n_paths: int = 10000, min_confidence: int = 95, instrument: str = "XAUUSD"):
     prices = fetch_live_quotes()
+    inst_upper = (instrument or "XAUUSD").upper()
+    if "EUR" in inst_upper:
+        inst_key = "EURUSD"
+        def_price = prices.get("EURUSD_REALTIME") or prices.get("EURUSD=X", 1.09500)
+        def_atr = prices.get("EURUSD_ATR_M30", 0.00085)
+    elif "BTC" in inst_upper:
+        inst_key = "BTCUSD"
+        def_price = prices.get("BTC_REALTIME") or prices.get("BTC-USD", 95000.0)
+        def_atr = prices.get("BTC_ATR_M30", 650.0)
+    else:
+        inst_key = "XAUUSD"
+        def_price = prices.get("XAUUSD_REALTIME") or prices.get("GC=F", 3975.0)
+        def_atr = prices.get("ATR_M30", 10.80)
+
     if price is None:
-        price = prices.get("GC=F", 3975.0)
-    atr_val = prices.get("ATR_M30", 10.80)
-    return quant_model.run_monte_carlo(current_price=price, z_shock=z, horizon_days=horizon, n_paths=n_paths, event_type=event_type, atr_m30=atr_val, min_confidence=min_confidence)
+        price = def_price
+    atr_val = def_atr
+
+    h_days = 5.0 if str(horizon).lower() in ["daily", "astar"] else (0.5 if str(horizon).lower() in ["news", "scalping"] else 1.0)
+    try:
+        h_days = float(horizon)
+    except Exception:
+        pass
+    try:
+        z_float = float(z)
+    except Exception:
+        z_float = -1.18 if event_type == "astar" else 0.0
+
+    return quant_model.run_monte_carlo(
+        current_price=price, z_shock=z_float, horizon_days=h_days,
+        n_paths=n_paths, event_type=event_type, atr_m30=atr_val,
+        min_confidence=min_confidence, instrument=inst_key
+    )
 @app.get("/api/garch-volatility-90d")
 def get_garch_volatility_90d(event_type: str = "cpi"):
     return quant_model.calculate_garch_90d_volatility(event_type=event_type)
@@ -421,15 +450,50 @@ def get_global_macro_matrix():
     return {}
 
 @app.get("/api/daily-a-star")
-def get_daily_a_star(price: float = None):
+def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: str = "XAUUSD"):
     prices = fetch_live_quotes()
-    gold = price if price is not None else prices.get("GC=F", 3975.0)
-    atr_val = prices.get("ATR_M30", 10.50)
+    inst_upper = (instrument or "XAUUSD").upper()
+    if inst_upper in ["EURUSD", "EUR"]:
+        inst_key = "EURUSD"
+        if price is None:
+            price = prices.get("EURUSD_REALTIME") or prices.get("EURUSD=X", 1.08500)
+        atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        so = prices.get("EURUSD_SESSION_OPEN")
+        sh = prices.get("EURUSD_SESSION_HIGH")
+        sl = prices.get("EURUSD_SESSION_LOW")
+        sc = prices.get("EURUSD_SESSION_CLOSE")
+    elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+        inst_key = "BTCUSD"
+        if price is None:
+            price = prices.get("BTC_REALTIME") or prices.get("BTC-USD", 91500.0)
+        atr_val = prices.get("BTC_ATR_M30", 450.0)
+        so = prices.get("BTC_SESSION_OPEN")
+        sh = prices.get("BTC_SESSION_HIGH")
+        sl = prices.get("BTC_SESSION_LOW")
+        sc = prices.get("BTC_SESSION_CLOSE")
+    else:
+        inst_key = "XAUUSD"
+        if price is None:
+            price = prices.get("XAUUSD_REALTIME") or prices.get("GC=F", 3975.0)
+        atr_val = prices.get("ATR_M30", 10.50)
+        so = prices.get("SESSION_OPEN")
+        sh = prices.get("SESSION_HIGH")
+        sl = prices.get("SESSION_LOW")
+        sc = prices.get("SESSION_CLOSE")
     dxy = prices.get("DX-Y.NYB", 102.28)
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
-    created_epoch, _ = get_or_create_setup_epoch("daily", 5400)
-    return quant_model.calculate_daily_a_star_setup(current_price=gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y, wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000, setup_created_epoch=created_epoch, session_h=prices.get("SESSION_HIGH"), session_l=prices.get("SESSION_LOW"), session_c=prices.get("SESSION_CLOSE"))
+    h_key = (horizon or "daily").lower()
+    ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
+    ttl_sec = ttl_map.get(h_key, 5400)
+    epoch_name = f"{h_key}_{inst_key.lower()}"
+    created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_sec)
+    return quant_model.calculate_daily_a_star_setup(
+        current_price=price, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
+        wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000,
+        setup_created_epoch=created_epoch, session_h=sh, session_l=sl, session_c=sc,
+        horizon=h_key, instrument=inst_key, de10y_val=prices.get("DE10Y"), session_o=so
+    )
 
 @app.get("/api/dynamic-levels")
 def get_dynamic_levels(price: float = None):
