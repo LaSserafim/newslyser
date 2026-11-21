@@ -2079,7 +2079,7 @@ function applyAstarData(aStar) {
   const currentHorizon = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
 
   const stateChanged = (lastAsset !== currentAsset) || (lastHorizon !== currentHorizon);
-  const timeThresholdMet = (now - lastRenderTs) >= 15000;
+  const timeThresholdMet = (now - lastRenderTs) >= 4000;
 
   if (stateChanged || timeThresholdMet) {
     window._LAST_RENDERED_ASTAR_ASSET = currentAsset;
@@ -2669,7 +2669,10 @@ function checkScheduledReleaseFirewall() {
 
 function initAutoRefreshLoop() {
   let loopCount = 0;
+  let isLoopBusy = false;
   setInterval(async () => {
+    if (isLoopBusy) return;
+    isLoopBusy = true;
     try {
       loopCount++;
       checkScheduledReleaseFirewall();
@@ -2716,7 +2719,13 @@ function initAutoRefreshLoop() {
       }
       if (isAstar && data && data.daily_a_star) {
         applyAstarData(data.daily_a_star);
-      } else if (loopCount % 3 === 0 && ["mod-cpi", "mod-fomc", "mod-nfp", "mod-ppi"].includes(mod)) {
+        renderSetupLedgerTable();
+        renderMultiHorizonOptInMatrix();
+        if (loopCount % 3 === 0) {
+          fetchGlobalMacroMatrix();
+          fetchQuant8AuditTable();
+        }
+      } else if (["mod-cpi", "mod-fomc", "mod-nfp", "mod-ppi"].includes(mod)) {
         const ev = mod.replace("mod-", "");
         if (EVENT_STATE[ev]?.mode === "PREMARKET") {
           await fetchState();
@@ -2724,8 +2733,12 @@ function initAutoRefreshLoop() {
           renderEventMcPane(ev);
         }
       }
-    } catch (e) {}
-  }, 1000);
+    } catch (e) {
+      console.warn("Auto refresh loop error:", e);
+    } finally {
+      isLoopBusy = false;
+    }
+  }, 5000);
   document.getElementById("btn-reset-astar-session")?.addEventListener("click", async () => {
     const b = document.getElementById("btn-reset-astar-session");
     b.innerText = "WAIT REFRESHING...";
