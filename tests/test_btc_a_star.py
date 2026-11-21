@@ -588,6 +588,24 @@ class TestBtcAStarEngine(unittest.TestCase):
             self.assertIn("GOLD (XAU/USD)", all_msg)
             self.assertIn("BITCOIN (BTC/USD)", all_msg)
 
+            # Test Mobile Touch Reply Buttons
+            touch_buttons = [
+                ("📈 EUR/USD", "EUR/USD"),
+                ("🥇 GOLD", "GOLD"),
+                ("₿ BTC/USD", "BITCOIN"),
+                ("📊 All Markets", "TRIAD LIVE TELEMETRY"),
+                ("⚙️ My Sizing", "CURRENT TRADING CONFIGURATION"),
+                ("🛡️ Max Loss $25", "MAXIMUM RISK PER TRADE UPDATED")
+            ]
+            for btn_label, expected_snippet in touch_buttons:
+                ok, status = telegram_bot.handle_telegram_command(btn_label, from_id=6107718785)
+                self.assertTrue(ok)
+                btn_msg = mock_send.call_args[0][0]
+                self.assertIn(expected_snippet, btn_msg)
+                call_kwargs = mock_send.call_args[1]
+                self.assertIn("reply_markup", call_kwargs)
+                self.assertIn("keyboard", call_kwargs["reply_markup"])
+
             # Test HTML safety on unknown command
             telegram_bot.handle_telegram_command("/test <script>alert(1)</script>", from_id=6107718785)
             err_msg = mock_send.call_args[0][0]

@@ -398,11 +398,12 @@ def handle_telegram_command(text_raw, from_id):
         return False, "Unauthorized user"
 
     text = (text_raw or "").strip()
+    fl = text.lower()
     cmd = text.split()[0].lower() if text else ""
     cfg = get_user_config()
 
-    # 1. /start, /menu, /help
-    if cmd in ("/start", "/menu", "/help", "help", "menu", "❓ help"):
+    # 1. /start, /menu, /help, "❓ Help"
+    if cmd in ("/start", "/menu", "/help", "help", "menu") or fl in ("❓ help", "help", "menu", "start") or "❓" in text:
         max_l = cfg.get("max_loss_usd", 25.0)
         acc = cfg.get("account_balance", 10000.0)
         help_text = (
@@ -424,9 +425,11 @@ def handle_telegram_command(text_raw, from_id):
         return send_telegram_message(help_text, reply_markup=get_main_reply_keyboard())
 
     # 2. Maximum Dollar Loss Adjustment: /loss, /maxloss, "🛡️ Max Loss $25"
-    if cmd in ("/loss", "/maxloss") or "max loss $25" in text.lower():
-        if "max loss $25" in text.lower():
-            val = 25.0
+    if cmd in ("/loss", "/maxloss") or "max loss" in fl or "🛡️" in text:
+        if "max loss" in fl or "🛡️" in text:
+            parts = text.replace("$", " ").split()
+            nums = [float(p) for p in parts if p.replace(".", "", 1).isdigit()]
+            val = nums[0] if nums else 25.0
         else:
             parts = text.split()
             if len(parts) >= 2:
@@ -453,7 +456,7 @@ def handle_telegram_command(text_raw, from_id):
         return send_telegram_message("❌ Usage: <code>/loss 25</code> (between $5 and $5,000 per trade)")
 
     # 3. Account Size Adjustment: /size, /balance
-    if cmd in ("/size", "/balance"):
+    if cmd in ("/size", "/balance") or fl.startswith("size ") or fl.startswith("balance "):
         parts = text.split()
         if len(parts) >= 2:
             raw_val = parts[1].lower().replace("$", "").replace(",", "")
@@ -477,7 +480,7 @@ def handle_telegram_command(text_raw, from_id):
         return send_telegram_message("❌ Usage: <code>/size 10000</code> (between $100 and $1,000,000)")
 
     # 4. Risk Adjustment: /risk
-    if cmd in ("/risk",):
+    if cmd in ("/risk",) or fl.startswith("risk "):
         parts = text.split()
         if len(parts) >= 2:
             raw_val = parts[1].replace("$", "")
@@ -513,7 +516,7 @@ def handle_telegram_command(text_raw, from_id):
         return send_telegram_message("❌ Usage: <code>/loss 25</code> or <code>/risk 0.5%</code>")
 
     # 5. Leverage Adjustment: /leverage, /lev
-    if cmd in ("/leverage", "/lev"):
+    if cmd in ("/leverage", "/lev") or fl.startswith("leverage ") or fl.startswith("lev "):
         parts = text.split()
         if len(parts) >= 2:
             val = int(parts[1].replace("1:", ""))
@@ -525,7 +528,7 @@ def handle_telegram_command(text_raw, from_id):
         return send_telegram_message("❌ Usage: <code>/leverage 200</code>")
 
     # 6. /config, /settings, "⚙️ My Sizing"
-    if cmd in ("/config", "/settings", "config", "settings", "⚙️ my sizing"):
+    if cmd in ("/config", "/settings", "config", "settings") or "sizing" in fl or "⚙️" in text:
         acc = cfg.get("account_balance", 10000.0)
         max_l = cfg.get("max_loss_usd", 25.0)
         risk_pct = cfg.get("max_risk_pct", (max_l / acc) * 100.0)
@@ -546,29 +549,8 @@ def handle_telegram_command(text_raw, from_id):
         )
         return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
 
-    # 7. Manual Asset Queries: EURUSD
-    if cmd in ("/eur", "/eurusd", "eur", "eurusd", "eur/usd", "📈 eur/usd"):
-        horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
-        setup, inst_key = get_live_market_setup("EURUSD", horizon=horizon)
-        msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE EUR/USD SNAPSHOT")
-        return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
-
-    # 8. Manual Asset Queries: Gold (XAUUSD)
-    if cmd in ("/gold", "/xau", "/xauusd", "gold", "xau", "🥇 gold"):
-        horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
-        setup, inst_key = get_live_market_setup("XAUUSD", horizon=horizon)
-        msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE GOLD SNAPSHOT")
-        return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
-
-    # 9. Manual Asset Queries: Bitcoin (BTCUSD)
-    if cmd in ("/btc", "/btcusd", "btc", "bitcoin", "₿ btc/usd"):
-        horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
-        setup, inst_key = get_live_market_setup("BTCUSD", horizon=horizon)
-        msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE BITCOIN SNAPSHOT")
-        return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
-
-    # 10. All Markets Triad Overview: /all, /status, "📊 All Markets"
-    if cmd in ("/all", "/status", "all", "status", "overview", "📊 all markets"):
+    # 7. All Markets Triad Overview: /all, /status, "📊 All Markets"
+    if "all markets" in fl or cmd in ("/all", "/status", "all", "status", "overview") or "📊" in text:
         eur, _ = get_live_market_setup("EURUSD", horizon="scalping")
         gold, _ = get_live_market_setup("XAUUSD", horizon="scalping")
         btc, _ = get_live_market_setup("BTCUSD", horizon="scalping")
@@ -579,24 +561,69 @@ def handle_telegram_command(text_raw, from_id):
 
         max_l = cfg.get("max_loss_usd", 25.0)
 
+        def _fmt_row(setup, inst_key, sz):
+            is_a_star = "A*" in str(setup.get("setup_grade") or "") or setup.get("is_a_star", False)
+            act = str(setup.get("action") or "")
+            if is_a_star and "STAND ASIDE" not in act:
+                status_str = "🟢 BUY LIMIT" if "BUY" in act.upper() else "🔴 SELL LIMIT"
+            else:
+                status_str = "⚪ STAND ASIDE"
+            score = setup.get("confluence_score", 0)
+
+            fp = setup.get("first_passage_analysis", {})
+            cur_p = setup.get("current_price", 0.0)
+            sl_p = setup.get("stop_loss") or fp.get("sl_price") or (cur_p - sz["sl_dist"])
+            tp_p = setup.get("take_profit_1") or fp.get("tp_price") or (cur_p + 2.5 * sz["sl_dist"])
+
+            if inst_key == "EURUSD":
+                sl_fmt = f"${sl_p:.5f}"
+                tp_fmt = f"${tp_p:.5f}"
+            elif inst_key == "XAUUSD":
+                sl_fmt = f"${sl_p:,.2f}"
+                tp_fmt = f"${tp_p:,.2f}"
+            else:
+                sl_fmt = f"${sl_p:,.1f}"
+                tp_fmt = f"${tp_p:,.1f}"
+
+            return (
+                f"• Status: <b>{status_str}</b> | Score: <b>{score}/100</b>\n"
+                f"• Key Levels: <code>{sl_fmt}</code> - <code>{tp_fmt}</code>\n"
+                f"• Sizing for ${max_l:.0f} Risk: <b>{sz['lot_size']:.2f} Lot</b> (-${sz['actual_max_loss']:.2f} at SL)"
+            )
+
         msg = (
             f"📊 <b>NEWSLYSER // TRIAD LIVE TELEMETRY</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"💶 <b>EUR/USD:</b> <code>${eur['current_price']:.5f}</code>\n"
-            f"• Status: <b>⚪ STAND ASIDE</b> | Score: <b>{eur.get('confluence_score', 0)}/100</b>\n"
-            f"• Key Levels: <code>${eur.get('stop_loss', 1.0950):.5f}</code> - <code>${eur.get('take_profit_1', 1.1008):.5f}</code>\n"
-            f"• Sizing for ${max_l:.0f} Risk: <b>{eur_sz['lot_size']:.2f} Lot</b> (-${eur_sz['actual_max_loss']:.2f} at SL)\n\n"
+            f"{_fmt_row(eur, 'EURUSD', eur_sz)}\n\n"
             f"🥇 <b>GOLD (XAU/USD):</b> <code>${gold['current_price']:,.2f}</code>\n"
-            f"• Status: <b>⚪ STAND ASIDE</b> | Score: <b>{gold.get('confluence_score', 0)}/100</b>\n"
-            f"• Key Levels: <code>${gold.get('stop_loss', 3511.0):,.2f}</code> - <code>${gold.get('take_profit_1', 3565.0):,.2f}</code>\n"
-            f"• Sizing for ${max_l:.0f} Risk: <b>{gold_sz['lot_size']:.2f} Lot</b> (-${gold_sz['actual_max_loss']:.2f} at SL)\n\n"
+            f"{_fmt_row(gold, 'XAUUSD', gold_sz)}\n\n"
             f"₿ <b>BITCOIN (BTC/USD):</b> <code>${btc['current_price']:,.1f}</code>\n"
-            f"• Status: <b>⚪ STAND ASIDE</b> | Score: <b>{btc.get('confluence_score', 0)}/100</b>\n"
-            f"• Key Levels: <code>${btc.get('stop_loss', 59196.0):,.1f}</code> - <code>${btc.get('take_profit_1', 60796.0):,.1f}</code>\n"
-            f"• Sizing for ${max_l:.0f} Risk: <b>{btc_sz['lot_size']:.2f} Lot</b> (-${btc_sz['actual_max_loss']:.2f} at SL)\n"
+            f"{_fmt_row(btc, 'BTCUSD', btc_sz)}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"🛡️ <i>Guaranteed Risk Ceiling: ${max_l:.2f} Max Loss (Send /loss {int(max_l)} to adjust).</i>"
         )
+        return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
+
+    # 8. Manual Asset Queries: EURUSD ("📈 EUR/USD")
+    if cmd in ("/eur", "/eurusd", "eur", "eurusd", "eur/usd") or "eur" in fl or "📈" in text:
+        horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
+        setup, inst_key = get_live_market_setup("EURUSD", horizon=horizon)
+        msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE EUR/USD SNAPSHOT")
+        return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
+
+    # 9. Manual Asset Queries: Gold (XAUUSD) ("🥇 GOLD")
+    if cmd in ("/gold", "/xau", "/xauusd", "gold", "xau") or "gold" in fl or "xau" in fl or "🥇" in text:
+        horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
+        setup, inst_key = get_live_market_setup("XAUUSD", horizon=horizon)
+        msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE GOLD SNAPSHOT")
+        return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
+
+    # 10. Manual Asset Queries: Bitcoin (BTCUSD) ("₿ BTC/USD")
+    if cmd in ("/btc", "/btcusd", "btc", "bitcoin") or "btc" in fl or "bitcoin" in fl or "₿" in text:
+        horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
+        setup, inst_key = get_live_market_setup("BTCUSD", horizon=horizon)
+        msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE BITCOIN SNAPSHOT")
         return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
 
     # Default fallback
