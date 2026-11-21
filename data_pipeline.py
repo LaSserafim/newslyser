@@ -23,6 +23,12 @@ import subprocess
 import urllib.request
 import numpy as np
 import pandas as pd
+
+# Export live feeds for backward compatibility
+try:
+    from market_feed import fetch_live_macro_data, fetch_tradingview_live_quotes
+except ImportError:
+    pass
 import yfinance as yf
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")

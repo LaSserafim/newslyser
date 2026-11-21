@@ -1,5 +1,5 @@
 {
   "account_balance": 10000.0,
-  "max_risk_pct": 0.5,
+  "max_loss_usd": 25.0,
   "leverage": 200
 }

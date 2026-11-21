@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import math
 import re
 import html
 import threading
@@ -8,6 +9,7 @@ import urllib.request
 import urllib.error
 
 import quant_model
+import market_feed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -39,7 +41,8 @@ def get_user_config():
     """Returns dynamic user trading sizing and risk configuration."""
     default_cfg = {
         "account_balance": 10000.0,
-        "max_risk_pct": 0.50,
+        "max_loss_usd": 25.0,  # Strict $25 max loss per trade / stop loss
+        "max_risk_pct": 0.25,
         "leverage": 200,
         "default_horizon": "scalping"
     }
@@ -54,7 +57,7 @@ def get_user_config():
 
 
 def save_user_config(cfg):
-    """Persists updated account balance, risk, and leverage settings."""
+    """Persists updated account balance, max loss, and leverage settings."""
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(USER_CONFIG_FILE, "w") as f:
@@ -70,7 +73,7 @@ def get_main_reply_keyboard():
     return {
         "keyboard": [
             [{"text": "📈 EUR/USD"}, {"text": "🥇 GOLD"}, {"text": "₿ BTC/USD"}],
-            [{"text": "📊 All Markets"}, {"text": "⚙️ My Sizing"}, {"text": "❓ Help"}]
+            [{"text": "📊 All Markets"}, {"text": "⚙️ My Sizing"}, {"text": "🛡️ Max Loss $25"}]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
@@ -129,137 +132,213 @@ def _save_alert_history(history):
 
 
 def compute_custom_sizing(setup, instrument="EURUSD"):
-    """Dynamically scales lot size and margin to the user's customized account sizing."""
+    """
+    Calculates exact lot size guaranteed to cap loss at max_loss_usd (default $25.00).
+    Formula: Lot = floor(Max Loss USD / (Stop Distance * Contract Size))
+    """
     cfg = get_user_config()
     account_size = float(cfg.get("account_balance", 10000.0))
     leverage = int(cfg.get("leverage", 200))
-    risk_pct = float(cfg.get("max_risk_pct", 0.50))
+    max_loss_usd = float(cfg.get("max_loss_usd", 25.0))
 
     spec = quant_model.get_instrument_spec(instrument)
     contract_val = float(spec["contract"])
-    min_risk = float(spec["min_risk_floor"])
+    min_fl = float(spec["min_risk_floor"])
     price_dec = spec["price_decimals"]
 
-    entry_val = float(setup.get("optimal_entry") or setup.get("current_price") or 1.0)
-    sl_val = float(setup.get("stop_loss") or entry_val)
-    risk_dist = max(min_risk, abs(entry_val - sl_val))
-    risk_per_lot = risk_dist * contract_val
+    entry_val = float(setup.get("optimal_entry") or setup.get("first_passage_analysis", {}).get("entry_price") or setup.get("current_price") or 1.0)
+    sl_val = float(setup.get("stop_loss") or setup.get("first_passage_analysis", {}).get("sl_price") or (entry_val - min_fl))
 
-    risk_budget_usd = round(account_size * (risk_pct / 100.0), 2)
-    max_cap = 0.20 if spec["symbol"] == "BTCUSD" else (2.00 if spec["symbol"] == "EURUSD" else 0.25)
-    lot_size = round(max(0.01, min(max_cap, risk_budget_usd / max(0.01, risk_per_lot))), 2)
+    # Absolute stop distance
+    sl_dist = max(min_fl, abs(entry_val - sl_val))
+
+    if spec["symbol"] == "EURUSD":
+        sl_pips = sl_dist / 0.00010
+        pips_label = f"{sl_pips:.1f} pips"
+    elif spec["symbol"] == "XAUUSD":
+        sl_pips = sl_dist * 10.0
+        pips_label = f"${sl_dist:.2f} ({sl_pips:.1f} pips)"
+    else:  # BTCUSD
+        pips_label = f"${sl_dist:,.1f}"
+        sl_pips = sl_dist
+
+    loss_per_lot = sl_dist * contract_val
+    exact_lots = max_loss_usd / max(0.001, loss_per_lot)
+
+    # Broker step = 0.01 lot. Floor to 2 decimals to NEVER exceed max_loss_usd!
+    lot_size = max(0.01, math.floor(exact_lots * 100.0) / 100.0)
+
+    max_cap = 5.00 if spec["symbol"] == "EURUSD" else (0.50 if spec["symbol"] == "XAUUSD" else 0.20)
+    lot_size = min(max_cap, lot_size)
+
+    actual_max_loss = round(lot_size * loss_per_lot, 2)
     req_margin = round((lot_size * contract_val * entry_val) / leverage, 2)
+    free_margin_pct = round(max(0.0, 100.0 - (req_margin / account_size * 100.0)), 2)
+
     return {
         "account_size": account_size,
         "leverage": leverage,
-        "risk_pct": risk_pct,
-        "risk_budget_usd": risk_budget_usd,
+        "max_loss_usd": max_loss_usd,
+        "actual_max_loss": actual_max_loss,
+        "sl_dist": sl_dist,
+        "sl_pips": sl_pips,
+        "pips_label": pips_label,
+        "loss_per_lot": loss_per_lot,
         "lot_size": lot_size,
         "req_margin": req_margin,
-        "free_margin_pct": round(max(0.0, 100.0 - (req_margin / account_size * 100.0)), 2)
+        "free_margin_pct": free_margin_pct
     }
 
 
 def format_trade_alert(setup, instrument="EURUSD", horizon="scalping", title_prefix="A* PROP SCALP ALERT"):
     """
-    Renders an institutional, high-density trade card for Telegram.
-    Formatted for fast lock-screen reading and instant broker copy-paste.
+    Renders an institutional, mathematically verified trade card for Telegram.
+    Formatted for fast lock-screen reading and clear, unambiguous broker execution.
     """
-    is_buy = setup.get("is_bullish") or setup.get("action_type") == "BUY" or "LONG" in str(setup.get("action", "")).upper()
-    direction_emoji = "🟢 BUY" if is_buy else "🔴 SELL"
-    order_type = f"{direction_emoji} LIMIT"
-
-    inst_name = str(instrument).upper()
+    spec = quant_model.get_instrument_spec(instrument)
+    inst_name = str(spec["name"]).upper()
+    inst_sym = spec["symbol"]
+    price_dec = spec["price_decimals"]
     horizon_name = str(horizon).upper()
 
-    entry_val = setup.get("optimal_entry") or setup.get("current_price") or setup.get("mid_entry", 0.0)
-    sl_val = setup.get("stop_loss", 0.0)
-    tp1_val = setup.get("take_profit_1", 0.0)
-    tp2_val = setup.get("take_profit_2", 0.0)
-    rr = setup.get("risk_reward_ratio", 2.0)
+    cur_px = setup.get("current_price", 0.0)
+    cur_px_str = f"{cur_px:.5f}" if inst_sym == "EURUSD" else (f"{cur_px:,.2f}" if inst_sym == "XAUUSD" else f"{cur_px:,.1f}")
 
-    prop_defense = setup.get("prop_firm_defense", {})
-    sl_pips = prop_defense.get("sl_pips", 0.0)
-    rem_pips = prop_defense.get("remaining_pips_buffer", 100.0 - sl_pips)
-    losses_absorbed = prop_defense.get("consecutive_losses_absorbed", 5)
+    is_a_star = setup.get("is_a_star", False)
+    grade = setup.get("setup_grade") or setup.get("grade") or "A* GRADE"
+    action = str(setup.get("action") or setup.get("trade_ticket", {}).get("action") or "").upper()
+    is_buy = setup.get("is_bullish") or setup.get("action_type") == "BUY" or "BUY" in action or "LONG" in action
 
-    # Dynamic user sizing
-    sizing = compute_custom_sizing(setup, instrument=inst_name)
+    # Dynamic user sizing anchored to strict maximum dollar risk
+    sizing = compute_custom_sizing(setup, instrument=inst_sym)
     lot_size = sizing["lot_size"]
-    risk_usd = sizing["risk_budget_usd"]
+    max_loss_usd = sizing["max_loss_usd"]
+    actual_max_loss = sizing["actual_max_loss"]
+    pips_label = sizing["pips_label"]
     req_margin = sizing["req_margin"]
     acc_size = sizing["account_size"]
     lev = sizing["leverage"]
     free_margin = sizing["free_margin_pct"]
 
-    # Quantitative gates summary
+    # Gates
     gates = setup.get("gate_checks", {})
     vpin_status = gates.get("vpin_order_flow_gate", {}).get("status", "PASS")
     hawkes_status = gates.get("hawkes_cascade_firewall", {}).get("status", "PASS")
     hurst_status = gates.get("dfa_hurst_persistence", {}).get("status", "PASS")
-    grade = setup.get("setup_grade", "A* GRADE")
+    score = setup.get("confluence_score", 0)
 
-    clean_inst = html.escape(str(inst_name))
-    clean_horizon = html.escape(str(horizon_name))
-    clean_order = html.escape(str(order_type))
-    clean_grade = html.escape(str(grade))
-    clean_vpin = html.escape(str(vpin_status))
-    clean_hawkes = html.escape(str(hawkes_status))
-    clean_hurst = html.escape(str(hurst_status))
+    # ----------------------------------------------------
+    # CASE 1: ACTIVE A* SETUP READY FOR IMMEDIATE EXECUTION
+    # ----------------------------------------------------
+    if is_a_star and "STAND ASIDE" not in action:
+        direction_emoji = "🟢 BUY" if is_buy else "🔴 SELL"
+        order_type = f"{direction_emoji} LIMIT"
+
+        entry_val = setup.get("optimal_entry") or cur_px
+        sl_val = setup.get("stop_loss", cur_px)
+        tp1_val = setup.get("take_profit_1", cur_px)
+        tp2_val = setup.get("take_profit_2", cur_px)
+        rr = setup.get("risk_reward_ratio", 2.5)
+
+        fmt_entry = f"{entry_val:.5f}" if inst_sym == "EURUSD" else (f"{entry_val:,.2f}" if inst_sym == "XAUUSD" else f"{entry_val:,.1f}")
+        fmt_sl = f"{sl_val:.5f}" if inst_sym == "EURUSD" else (f"{sl_val:,.2f}" if inst_sym == "XAUUSD" else f"{sl_val:,.1f}")
+        fmt_tp1 = f"{tp1_val:.5f}" if inst_sym == "EURUSD" else (f"{tp1_val:,.2f}" if inst_sym == "XAUUSD" else f"{tp1_val:,.1f}")
+        fmt_tp2 = f"{tp2_val:.5f}" if inst_sym == "EURUSD" else (f"{tp2_val:,.2f}" if inst_sym == "XAUUSD" else f"{tp2_val:,.1f}")
+
+        text = (
+            f"⚡ <b>NEWSLYSER // {html.escape(title_prefix)}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Asset:</b> <code>{inst_name} ({inst_sym})</code>\n"
+            f"<b>Horizon:</b> <code>{html.escape(horizon_name)}</code>\n"
+            f"<b>Signal:</b> <b>{html.escape(order_type)}</b> (<code>{html.escape(grade)}</code>)\n\n"
+            f"🎯 <b>Entry Price:</b> <code>{fmt_entry}</code> (Spot: <code>${cur_px_str}</code>)\n"
+            f"🛑 <b>Stop Loss:</b> <code>{fmt_sl}</code> (<b>{pips_label}</b>)\n"
+            f"🏁 <b>Take Profit 1:</b> <code>{fmt_tp1}</code> (<b>1:{rr:.2f} RR</b>)\n"
+            f"🏁 <b>Take Profit 2:</b> <code>{fmt_tp2}</code> (Runner)\n\n"
+            f"🛡️ <b>RISK CAPPED AT ${max_loss_usd:.2f} PER TRADE:</b>\n"
+            f"• <b>Recommended Lot:</b> <b>{lot_size:.2f} Lot</b>\n"
+            f"• <b>Max Loss at Stop:</b> <b>-${actual_max_loss:.2f}</b> (Protected &le; ${max_loss_usd:.2f})\n"
+            f"• <b>Margin Required:</b> <b>${req_margin:.2f}</b> (1:{lev} lev | {free_margin:.1f}% free)\n\n"
+            f"🔬 <b>QUANTITATIVE GATES:</b>\n"
+            f"• VPIN: <code>{html.escape(str(vpin_status))}</code> | Hawkes: <code>{html.escape(str(hawkes_status))}</code> | Hurst: <code>{html.escape(str(hurst_status))}</code>\n"
+            f"• Confluence Score: <b>{score}/100</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏰ <i>Live verified feed. Enter limit order on broker.</i>"
+        )
+        return text
+
+    # ----------------------------------------------------
+    # CASE 2: STAND ASIDE // NO CURRENT A* EDGE (HONEST & UNBIASED)
+    # ----------------------------------------------------
+    snr_note = "NEUTRAL / CHOP DEADBAND"
+    if inst_sym == "EURUSD":
+        snr_dict = setup.get("snr_pure_trend") or {}
+        tr = str(snr_dict.get("trend", "")).upper()
+        if "BULLISH" in tr:
+            snr_note = "BULLISH PURE-TREND (Price > EMA50 > EMA200)"
+        elif "BEARISH" in tr:
+            snr_note = "BEARISH PURE-TREND (Price < EMA50 < EMA200)"
+        else:
+            snr_note = "CHOP DEADBAND (Sandwich Zone)"
+    elif inst_sym == "BTCUSD":
+        btc_dict = setup.get("btc_regime") or {}
+        tr = str(btc_dict.get("trend", "")).upper()
+        if "BULLISH" in tr:
+            snr_note = "BULLISH PURE-TREND (Price > EMA50 > EMA200)"
+        elif "BEARISH" in tr:
+            snr_note = "BEARISH PURE-TREND (Price < EMA50 < EMA200)"
+        else:
+            snr_note = "CHOP / SIDEWAYS REGIME"
+    else:  # XAUUSD
+        bias_str = str((setup.get("momentum_metrics") or {}).get("momentum_regime") or setup.get("bias") or "NEUTRAL").upper()
+        snr_note = f"MACRO REGIME: {bias_str}"
+
+    # Identify blocking reason cleanly
+    reason_gate = "Confluence below threshold"
+    tt = setup.get("trade_ticket") or {}
+    act_str = tt.get("action", "")
+    if "(" in act_str and ")" in act_str:
+        reason_gate = act_str[act_str.find("(") + 1:act_str.rfind(")")]
+
+    # Key Levels to watch from candidate SDE
+    fp = setup.get("first_passage_analysis", {})
+    entry_p = fp.get("entry_price") or cur_px
+    sl_p = fp.get("sl_price") or (cur_px - sizing["sl_dist"])
+    tp_p = fp.get("tp_price") or (cur_px + 2.5 * sizing["sl_dist"])
+
+    fmt_entry = f"{entry_p:.5f}" if inst_sym == "EURUSD" else (f"{entry_p:,.2f}" if inst_sym == "XAUUSD" else f"{entry_p:,.1f}")
+    fmt_sl = f"{sl_p:.5f}" if inst_sym == "EURUSD" else (f"{sl_p:,.2f}" if inst_sym == "XAUUSD" else f"{sl_p:,.1f}")
+    fmt_tp = f"{tp_p:.5f}" if inst_sym == "EURUSD" else (f"{tp_p:,.2f}" if inst_sym == "XAUUSD" else f"{tp_p:,.1f}")
 
     text = (
-        f"⚡ <b>NEWSLYSER // {html.escape(str(title_prefix))}</b>\n"
+        f"⚡ <b>NEWSLYSER // {html.escape(title_prefix)}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"<b>Asset:</b> <code>{clean_inst}</code> | <b>Horizon:</b> <code>{clean_horizon}</code>\n"
-        f"<b>Signal:</b> <b>{clean_order}</b> ({clean_grade})\n\n"
-        f"🎯 <b>Entry Price:</b> <code>{entry_val}</code>\n"
-        f"🛑 <b>Stop Loss:</b> <code>{sl_val}</code> (<b>{sl_pips:.1f} pips</b>)\n"
-        f"🏁 <b>Take Profit 1:</b> <code>{tp1_val}</code> (<b>1:{rr:.2f} RR</b>)\n"
-        f"🏁 <b>Take Profit 2:</b> <code>{tp2_val}</code> (Runner)\n\n"
-        f"🛡️ <b>PROP FIRM 100-PIP DEFENSE:</b>\n"
-        f"• Pip Impact: <b>-{sl_pips:.1f} pips</b> (<b>{rem_pips:.1f} pips</b> buffer left)\n"
-        f"• Cushion: <b>{losses_absorbed} consecutive losses</b> absorbable\n\n"
-        f"💼 <b>CUSTOM SIZING (${acc_size:,.0f} @ 1:{lev}):</b>\n"
-        f"• Lot Size: <b>{lot_size:.2f} Lot</b>\n"
-        f"• Risk Budget: <b>${risk_usd:.2f}</b> ({sizing['risk_pct']:.2f}% risk)\n"
-        f"• Required Margin: <b>${req_margin:.2f}</b> ({free_margin}% free buffer)\n\n"
-        f"🔬 <b>QUANTITATIVE GATES:</b>\n"
-        f"• VPIN Flow: <code>{clean_vpin}</code> | Hawkes: <code>{clean_hawkes}</code> | Hurst: <code>{clean_hurst}</code>\n"
+        f"<b>Asset:</b> <code>{inst_name} ({inst_sym})</code>\n"
+        f"<b>Horizon:</b> <code>{html.escape(horizon_name)}</code>\n"
+        f"<b>Status:</b> ⚪ <b>STAND ASIDE (NO A* EDGE)</b>\n\n"
+        f"🎯 <b>Live Spot Price:</b> <code>${cur_px_str}</code>\n"
+        f"📈 <b>Trend Regime:</b> <code>{html.escape(snr_note)}</code>\n"
+        f"📊 <b>Confluence Score:</b> <b>{score}/100</b> (Threshold &ge; 75.0)\n"
+        f"🚫 <b>Filter Gate:</b> <i>{html.escape(reason_gate)}</i>\n\n"
+        f"📍 <b>KEY CANDIDATE LEVELS TO WATCH:</b>\n"
+        f"• <b>Reference Entry:</b> <code>${fmt_entry}</code>\n"
+        f"• <b>Structural Stop:</b> <code>${fmt_sl}</code> (<b>{pips_label}</b>)\n"
+        f"• <b>Expected Target:</b> <code>${fmt_tp}</code>\n\n"
+        f"🛡️ <b>MAX RISK CALIBRATION:</b>\n"
+        f"• <b>Max Loss Limit:</b> <b>${max_loss_usd:.2f} per trade</b>\n"
+        f"• <b>Planned Lot Size:</b> <b>{lot_size:.2f} Lot</b> (if setup fires)\n"
+        f"• <b>Capital at Risk:</b> <b>$0.00</b> (Capital preserved)\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ <i>Real-time snapshot. Enter pending limit order on broker.</i>"
+        f"⏰ <i>Real-time feed. Standing aside until all mathematical gates align. Send /loss {int(max_loss_usd)} to adjust risk.</i>"
     )
     return text
 
 
 def get_live_setup_for_instrument(instrument="EURUSD", horizon="scalping"):
-    """Fetches live prices and calculates fresh setup using quant_model."""
-    spec = quant_model.get_instrument_spec(instrument)
-    inst_key = spec["symbol"]
-
-    try:
-        from data_pipeline import fetch_live_macro_data
-        live = fetch_live_macro_data()
-        prices = live.get("prices", {}) if isinstance(live, dict) else {}
-    except Exception:
-        prices = {}
-
-    if inst_key == "EURUSD":
-        cur_px = prices.get("EURUSD=X", 1.0850)
-        atr_val = prices.get("EURUSD_ATR_M30", 0.0012)
-    elif inst_key == "BTCUSD":
-        cur_px = prices.get("BTC-USD", 91500.0)
-        atr_val = prices.get("BTC_ATR_M30", 1000.0)
-    else:  # XAUUSD
-        cur_px = prices.get("GC=F", 4036.0)
-        atr_val = prices.get("ATR_M30", 12.5)
-
-    setup = quant_model.calculate_daily_a_star_setup(
-        current_price=cur_px,
-        atr_m30=atr_val,
-        horizon=horizon,
-        instrument=inst_key
-    )
+    """Fetches verified live prices and calculates setup using market_feed."""
+    setup, inst_key, _ = market_feed.get_live_market_setup(instrument=instrument, horizon=horizon)
     return setup, inst_key
+
 
 # Alias
 get_live_market_setup = get_live_setup_for_instrument
@@ -270,12 +349,11 @@ def dispatch_a_star_alert(setup, instrument="EURUSD", horizon="scalping", force=
     Evaluates setup and sends an automated Telegram notification if:
       1. Setup is an A* Grade setup.
       2. It has not already been alerted for this setup_created_epoch.
-      3. Prop firm defense is compliant.
     """
     if not setup or not isinstance(setup, dict):
         return False, "Invalid setup object"
 
-    grade = str(setup.get("setup_grade", ""))
+    grade = str(setup.get("setup_grade") or setup.get("grade") or "")
     is_a_star = "A*" in grade or setup.get("is_a_star", False)
     if not is_a_star and not force:
         return False, "Setup is not A* Grade"
@@ -309,6 +387,7 @@ def handle_telegram_command(text_raw, from_id):
     """
     Processes incoming interactive Telegram commands:
       - /eur, /gold, /btc
+      - /loss <dollar>, /maxloss <dollar> (adjusts maximum dollar loss per trade)
       - /size <balance>, /risk <pct>, /leverage <ratio>
       - /config, /settings
       - /all, /status
@@ -324,25 +403,56 @@ def handle_telegram_command(text_raw, from_id):
 
     # 1. /start, /menu, /help
     if cmd in ("/start", "/menu", "/help", "help", "menu", "❓ help"):
+        max_l = cfg.get("max_loss_usd", 25.0)
+        acc = cfg.get("account_balance", 10000.0)
         help_text = (
             f"⚡ <b>NEWSLYSER QUANTITATIVE TERMINAL BOT</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Welcome Thyra! You can query live market setups and dynamically adjust your sizing directly from this chat.\n\n"
-            f"📊 <b>ON-DEMAND MARKET QUERIES:</b>\n"
-            f"• <code>/eur</code> — Live EUR/USD Scalp & Intraday ticket\n"
-            f"• <code>/gold</code> — Live Gold (XAU/USD) ticket\n"
-            f"• <code>/btc</code> — Live Bitcoin (BTC/USD) ticket\n"
-            f"• <code>/all</code> — Quick Triad Market Overview\n\n"
-            f"⚙️ <b>ACCOUNT SIZING ADJUSTMENTS:</b>\n"
+            f"Welcome Thyra! You can query live market setups and adjust your maximum dollar loss anytime directly from this chat.\n\n"
+            f"📊 <b>ON-DEMAND LIVE MARKET QUERIES:</b>\n"
+            f"• <code>/eur</code> — Live EUR/USD Scalp ticket & key levels\n"
+            f"• <code>/gold</code> — Live Gold (XAU/USD) ticket & key levels\n"
+            f"• <code>/btc</code> — Live Bitcoin (BTC/USD) ticket & key levels\n"
+            f"• <code>/all</code> — Triad Live Telemetry Overview\n\n"
+            f"🛡️ <b>MAXIMUM RISK & SIZING CONTROLS:</b>\n"
+            f"• <code>/loss &lt;dollars&gt;</code> — E.g. <code>/loss 25</code> or <code>/loss 50</code> (Max loss per stop loss)\n"
             f"• <code>/size &lt;balance&gt;</code> — E.g. <code>/size 10000</code> or <code>/size 20000</code>\n"
-            f"• <code>/risk &lt;pct&gt;</code> — E.g. <code>/risk 0.5</code> or <code>/risk 0.35</code>\n"
-            f"• <code>/leverage &lt;ratio&gt;</code> — E.g. <code>/leverage 200</code> or <code>/leverage 100</code>\n"
-            f"• <code>/config</code> — View your current sizing profile\n\n"
-            f"<i>Tap any button below for instant execution!</i>"
+            f"• <code>/leverage &lt;ratio&gt;</code> — E.g. <code>/leverage 200</code>\n"
+            f"• <code>/config</code> — View your active sizing & risk profile\n\n"
+            f"<i>Current Protection: Max Loss <b>${max_l:.2f}</b> on ${acc:,.0f} balance.</i>"
         )
         return send_telegram_message(help_text, reply_markup=get_main_reply_keyboard())
 
-    # 2. Sizing Config Adjustments: /size, /balance
+    # 2. Maximum Dollar Loss Adjustment: /loss, /maxloss, "🛡️ Max Loss $25"
+    if cmd in ("/loss", "/maxloss") or "max loss $25" in text.lower():
+        if "max loss $25" in text.lower():
+            val = 25.0
+        else:
+            parts = text.split()
+            if len(parts) >= 2:
+                raw_val = parts[1].replace("$", "").replace(",", "")
+                try:
+                    val = float(raw_val)
+                except ValueError:
+                    val = -1.0
+            else:
+                val = -1.0
+
+        if 5.0 <= val <= 5000.0:
+            cfg["max_loss_usd"] = round(val, 2)
+            cfg["max_risk_pct"] = round((val / cfg["account_balance"]) * 100.0, 3)
+            save_user_config(cfg)
+            msg = (
+                f"✅ <b>MAXIMUM RISK PER TRADE UPDATED</b>\n\n"
+                f"• <b>Max Dollar Loss:</b> <code>${val:,.2f}</code> per stop loss\n"
+                f"• <b>Equivalent Risk:</b> <code>{cfg['max_risk_pct']:.2f}%</code> on ${cfg['account_balance']:,.0f} balance\n"
+                f"• <b>Broker Leverage:</b> <code>1:{cfg['leverage']}</code>\n\n"
+                f"<i>All future scalp alerts and manual tickets will calculate lot sizes so you NEVER lose more than ${val:,.2f} if stopped out.</i>"
+            )
+            return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
+        return send_telegram_message("❌ Usage: <code>/loss 25</code> (between $5 and $5,000 per trade)")
+
+    # 3. Account Size Adjustment: /size, /balance
     if cmd in ("/size", "/balance"):
         parts = text.split()
         if len(parts) >= 2:
@@ -353,37 +463,56 @@ def handle_telegram_command(text_raw, from_id):
                 val = float(raw_val)
             if 100.0 <= val <= 1000000.0:
                 cfg["account_balance"] = round(val, 2)
+                max_l = cfg.get("max_loss_usd", 25.0)
+                cfg["max_risk_pct"] = round((max_l / val) * 100.0, 3)
                 save_user_config(cfg)
-                risk_usd = round(val * (cfg["max_risk_pct"] / 100.0), 2)
                 msg = (
                     f"✅ <b>ACCOUNT BALANCE UPDATED</b>\n\n"
                     f"• <b>New Balance:</b> <code>${val:,.2f}</code>\n"
-                    f"• <b>Risk Per Trade:</b> <code>{cfg['max_risk_pct']:.2f}%</code> (<b>${risk_usd:.2f}</b>)\n"
+                    f"• <b>Max Dollar Loss:</b> <code>${max_l:.2f}</code> ({cfg['max_risk_pct']:.2f}% risk)\n"
                     f"• <b>Leverage:</b> <code>1:{cfg['leverage']}</code>\n\n"
-                    f"<i>All future scalp alerts and manual tickets will calculate lots using ${val:,.0f}.</i>"
+                    f"<i>All calculations re-calibrated for ${val:,.0f} balance.</i>"
                 )
                 return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
         return send_telegram_message("❌ Usage: <code>/size 10000</code> (between $100 and $1,000,000)")
 
-    # 3. Risk Adjustment: /risk
+    # 4. Risk Adjustment: /risk
     if cmd in ("/risk",):
         parts = text.split()
         if len(parts) >= 2:
-            val = float(parts[1].replace("%", ""))
-            if 0.05 <= val <= 5.0:
-                cfg["max_risk_pct"] = round(val, 2)
-                save_user_config(cfg)
-                risk_usd = round(cfg["account_balance"] * (val / 100.0), 2)
-                msg = (
-                    f"✅ <b>RISK CEILING UPDATED</b>\n\n"
-                    f"• <b>New Risk %:</b> <code>{val:.2f}%</code>\n"
-                    f"• <b>Risk Budget:</b> <b>${risk_usd:.2f}</b> on ${cfg['account_balance']:,.0f} balance\n\n"
-                    f"<i>Prop firm safety preserved (max 100-pip ceiling active).</i>"
-                )
-                return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
-        return send_telegram_message("❌ Usage: <code>/risk 0.5</code> (between 0.05% and 5.0%)")
+            raw_val = parts[1].replace("$", "")
+            if "%" in raw_val:
+                pct = float(raw_val.replace("%", ""))
+                if 0.01 <= pct <= 10.0:
+                    max_l = round(cfg["account_balance"] * (pct / 100.0), 2)
+                    cfg["max_loss_usd"] = max_l
+                    cfg["max_risk_pct"] = pct
+                    save_user_config(cfg)
+                    msg = (
+                        f"✅ <b>RISK CEILING UPDATED</b>\n\n"
+                        f"• <b>New Risk %:</b> <code>{pct:.2f}%</code>\n"
+                        f"• <b>Max Dollar Loss:</b> <code>${max_l:.2f}</code> per stop loss\n\n"
+                        f"<i>Lot sizes dynamically calibrated to cap loss at ${max_l:.2f}.</i>"
+                    )
+                    return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
+            else:
+                try:
+                    dollar_val = float(raw_val)
+                    if 5.0 <= dollar_val <= 5000.0:
+                        cfg["max_loss_usd"] = round(dollar_val, 2)
+                        cfg["max_risk_pct"] = round((dollar_val / cfg["account_balance"]) * 100.0, 3)
+                        save_user_config(cfg)
+                        msg = (
+                            f"✅ <b>MAXIMUM RISK PER TRADE UPDATED</b>\n\n"
+                            f"• <b>Max Dollar Loss:</b> <code>${dollar_val:.2f}</code>\n"
+                            f"• <b>Risk %:</b> <code>{cfg['max_risk_pct']:.2f}%</code>\n"
+                        )
+                        return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
+                except ValueError:
+                    pass
+        return send_telegram_message("❌ Usage: <code>/loss 25</code> or <code>/risk 0.5%</code>")
 
-    # 4. Leverage Adjustment: /leverage, /lev
+    # 5. Leverage Adjustment: /leverage, /lev
     if cmd in ("/leverage", "/lev"):
         parts = text.split()
         if len(parts) >= 2:
@@ -395,89 +524,78 @@ def handle_telegram_command(text_raw, from_id):
                 return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
         return send_telegram_message("❌ Usage: <code>/leverage 200</code>")
 
-    # 5. /config, /settings, "⚙️ My Sizing"
+    # 6. /config, /settings, "⚙️ My Sizing"
     if cmd in ("/config", "/settings", "config", "settings", "⚙️ my sizing"):
         acc = cfg.get("account_balance", 10000.0)
-        risk_pct = cfg.get("max_risk_pct", 0.50)
-        risk_usd = round(acc * (risk_pct / 100.0), 2)
+        max_l = cfg.get("max_loss_usd", 25.0)
+        risk_pct = cfg.get("max_risk_pct", (max_l / acc) * 100.0)
         lev = cfg.get("leverage", 200)
         msg = (
             f"⚙️ <b>CURRENT TRADING CONFIGURATION</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"• <b>Account Balance:</b> <code>${acc:,.2f}</code>\n"
-            f"• <b>Risk Cap:</b> <code>{risk_pct:.2f}%</code> (${risk_usd:.2f} per trade)\n"
+            f"• <b>Max Loss Per Trade:</b> <code>${max_l:.2f}</code> (Strict Stop Loss Ceiling)\n"
+            f"• <b>Risk Percentage:</b> <code>{risk_pct:.2f}%</code> of balance\n"
             f"• <b>Broker Leverage:</b> <code>1:{lev}</code>\n"
-            f"• <b>Prop Firm Ceiling:</b> <code>100.0 Pips</code> (Hard Loss Barrier)\n"
-            f"• <b>Primary Mode:</b> <code>SCALPING (M5/M15) + INTRADAY (H1)</code>\n\n"
-            f"📝 <b>To update sizing anytime:</b>\n"
-            f"• <code>/size 20000</code>\n"
-            f"• <code>/risk 0.5</code>\n"
-            f"• <code>/leverage 200</code>"
+            f"• <b>Primary Execution:</b> <code>SCALPING (M5/M15) + INTRADAY (H1)</code>\n\n"
+            f"📝 <b>To adjust sizing anytime:</b>\n"
+            f"• <code>/loss 25</code> — Set max loss to $25.00\n"
+            f"• <code>/loss 50</code> — Set max loss to $50.00\n"
+            f"• <code>/size 20000</code> — Update account balance\n"
+            f"• <code>/leverage 200</code> — Update broker leverage"
         )
         return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
 
-    # 6. Manual Asset Queries: EURUSD
+    # 7. Manual Asset Queries: EURUSD
     if cmd in ("/eur", "/eurusd", "eur", "eurusd", "eur/usd", "📈 eur/usd"):
         horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
         setup, inst_key = get_live_market_setup("EURUSD", horizon=horizon)
         msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE EUR/USD SNAPSHOT")
         return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
 
-    # 7. Manual Asset Queries: Gold (XAUUSD)
+    # 8. Manual Asset Queries: Gold (XAUUSD)
     if cmd in ("/gold", "/xau", "/xauusd", "gold", "xau", "🥇 gold"):
         horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
         setup, inst_key = get_live_market_setup("XAUUSD", horizon=horizon)
         msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE GOLD SNAPSHOT")
         return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
 
-    # 8. Manual Asset Queries: Bitcoin (BTCUSD)
+    # 9. Manual Asset Queries: Bitcoin (BTCUSD)
     if cmd in ("/btc", "/btcusd", "btc", "bitcoin", "₿ btc/usd"):
         horizon = "intraday" if "intraday" in text.lower() else ("daily" if "daily" in text.lower() else "scalping")
         setup, inst_key = get_live_market_setup("BTCUSD", horizon=horizon)
         msg = format_trade_alert(setup, instrument=inst_key, horizon=horizon, title_prefix="LIVE BITCOIN SNAPSHOT")
         return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
 
-    # 9. All Markets Triad Overview: /all, /status, "📊 All Markets"
+    # 10. All Markets Triad Overview: /all, /status, "📊 All Markets"
     if cmd in ("/all", "/status", "all", "status", "overview", "📊 all markets"):
         eur, _ = get_live_market_setup("EURUSD", horizon="scalping")
         gold, _ = get_live_market_setup("XAUUSD", horizon="scalping")
         btc, _ = get_live_market_setup("BTCUSD", horizon="scalping")
 
-        def _format_bias_tag(setup):
-            tt = setup.get("trade_ticket", {})
-            act = str(tt.get("action") or setup.get("action") or "STAND ASIDE").upper()
-            if "BUY" in act:
-                return "🟢 BUY LIMIT"
-            elif "SELL" in act:
-                return "🔴 SELL LIMIT"
-            return "⚪ STAND ASIDE"
+        eur_sz = compute_custom_sizing(eur, instrument="EURUSD")
+        gold_sz = compute_custom_sizing(gold, instrument="XAUUSD")
+        btc_sz = compute_custom_sizing(btc, instrument="BTCUSD")
 
-        eur_bias = _format_bias_tag(eur)
-        gold_bias = _format_bias_tag(gold)
-        btc_bias = _format_bias_tag(btc)
-
-        eur_px = eur.get('current_price', 1.0850)
-        gold_px = gold.get('current_price', 4036.0)
-        btc_px = btc.get('current_price', 91500.0)
-
-        eur_sl_pip = eur.get('prop_firm_defense', {}).get('sl_pips', 16.4)
-        gold_sl = gold.get('stop_loss', 0.0)
-        btc_sl = btc.get('stop_loss', 0.0)
+        max_l = cfg.get("max_loss_usd", 25.0)
 
         msg = (
-            f"📊 <b>NEWSLYSER // TRIAD MARKET TELEMETRY</b>\n"
+            f"📊 <b>NEWSLYSER // TRIAD LIVE TELEMETRY</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"💶 <b>EUR/USD:</b> <code>${eur_px:.5f}</code>\n"
-            f"• Bias: <b>{eur_bias}</b>\n"
-            f"• Prop SL: <b>{eur_sl_pip:.1f} pips</b> | Score: <b>{eur.get('confluence_score', 0)}/100</b>\n\n"
-            f"🥇 <b>GOLD (XAU/USD):</b> <code>${gold_px:,.2f}</code>\n"
-            f"• Bias: <b>{gold_bias}</b>\n"
-            f"• Stop Loss: <code>${gold_sl:,.2f}</code> | Score: <b>{gold.get('confluence_score', 0)}/100</b>\n\n"
-            f"₿ <b>BITCOIN (BTC/USD):</b> <code>${btc_px:,.1f}</code>\n"
-            f"• Bias: <b>{btc_bias}</b>\n"
-            f"• Stop Loss: <code>${btc_sl:,.1f}</code> | Score: <b>{btc.get('confluence_score', 0)}/100</b>\n"
+            f"💶 <b>EUR/USD:</b> <code>${eur['current_price']:.5f}</code>\n"
+            f"• Status: <b>⚪ STAND ASIDE</b> | Score: <b>{eur.get('confluence_score', 0)}/100</b>\n"
+            f"• Key Levels: <code>${eur.get('stop_loss', 1.0950):.5f}</code> - <code>${eur.get('take_profit_1', 1.1008):.5f}</code>\n"
+            f"• Sizing for ${max_l:.0f} Risk: <b>{eur_sz['lot_size']:.2f} Lot</b> (-${eur_sz['actual_max_loss']:.2f} at SL)\n\n"
+            f"🥇 <b>GOLD (XAU/USD):</b> <code>${gold['current_price']:,.2f}</code>\n"
+            f"• Status: <b>⚪ STAND ASIDE</b> | Score: <b>{gold.get('confluence_score', 0)}/100</b>\n"
+            f"• Key Levels: <code>${gold.get('stop_loss', 3511.0):,.2f}</code> - <code>${gold.get('take_profit_1', 3565.0):,.2f}</code>\n"
+            f"• Sizing for ${max_l:.0f} Risk: <b>{gold_sz['lot_size']:.2f} Lot</b> (-${gold_sz['actual_max_loss']:.2f} at SL)\n\n"
+            f"₿ <b>BITCOIN (BTC/USD):</b> <code>${btc['current_price']:,.1f}</code>\n"
+            f"• Status: <b>⚪ STAND ASIDE</b> | Score: <b>{btc.get('confluence_score', 0)}/100</b>\n"
+            f"• Key Levels: <code>${btc.get('stop_loss', 59196.0):,.1f}</code> - <code>${btc.get('take_profit_1', 60796.0):,.1f}</code>\n"
+            f"• Sizing for ${max_l:.0f} Risk: <b>{btc_sz['lot_size']:.2f} Lot</b> (-${btc_sz['actual_max_loss']:.2f} at SL)\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"<i>Send /eur, /gold, or /btc for detailed tickets.</i>"
+            f"🛡️ <i>Guaranteed Risk Ceiling: ${max_l:.2f} Max Loss (Send /loss {int(max_l)} to adjust).</i>"
         )
         return send_telegram_message(msg, reply_markup=get_main_reply_keyboard())
 
@@ -496,7 +614,7 @@ def _telegram_polling_worker():
         return
 
     offset = 0
-    # First, discard old pending updates on boot
+    # Discard old pending updates on boot
     try:
         flush_url = f"https://api.telegram.org/bot{token}/getUpdates?offset=-1"
         with urllib.request.urlopen(flush_url, timeout=5) as resp:

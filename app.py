@@ -23,6 +23,7 @@ import yfinance as yf
 import quant_model
 import data_pipeline
 import telegram_bot
+import market_feed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -126,26 +127,12 @@ def _background_telegram_monitor():
     time.sleep(15)  # Initial grace period after startup
     while True:
         try:
-            live = fetch_live_macro_data()
-            prices = live.get("prices", {}) if isinstance(live, dict) else {}
             for inst in ("EURUSD", "BTCUSD", "XAUUSD"):
                 for hz in ("scalping", "intraday"):
                     try:
-                        cur_px = prices.get(f"{inst}_PRICE")
-                        if not cur_px:
-                            if inst == "EURUSD": cur_px = prices.get("EURUSD=X", 1.0850)
-                            elif inst == "BTCUSD": cur_px = prices.get("BTC-USD", 91500.0)
-                            else: cur_px = prices.get("GC=F", 4036.0)
-
-                        atr_val = prices.get(f"{inst}_ATR_M30", 0.0012 if inst == "EURUSD" else (1000.0 if inst == "BTCUSD" else 12.5))
-                        st = quant_model.calculate_daily_a_star_setup(
-                            current_price=cur_px,
-                            atr_m30=atr_val,
-                            horizon=hz,
-                            instrument=inst
-                        )
+                        st, inst_key, _ = market_feed.get_live_market_setup(instrument=inst, horizon=hz)
                         if st.get("is_a_star"):
-                            telegram_bot.dispatch_a_star_alert(st, instrument=inst, horizon=hz)
+                            telegram_bot.dispatch_a_star_alert(st, instrument=inst_key, horizon=hz)
                     except Exception:
                         pass
         except Exception:
@@ -1398,20 +1385,7 @@ def get_telegram_status():
 
 @app.post("/api/telegram/test-alert")
 def send_telegram_test_alert(instrument: str = "EURUSD", horizon: str = "scalping"):
-    live = fetch_live_macro_data()
-    prices = live.get("prices", {}) if isinstance(live, dict) else {}
-    inst_key = quant_model.get_instrument_spec(instrument)["symbol"]
-    if inst_key == "EURUSD": cur_px = prices.get("EURUSD=X", 1.0850)
-    elif inst_key == "BTCUSD": cur_px = prices.get("BTC-USD", 91500.0)
-    else: cur_px = prices.get("GC=F", 4036.0)
-
-    atr_val = prices.get(f"{inst_key}_ATR_M30", 0.0012 if inst_key == "EURUSD" else (1000.0 if inst_key == "BTCUSD" else 12.5))
-    st = quant_model.calculate_daily_a_star_setup(
-        current_price=cur_px,
-        atr_m30=atr_val,
-        horizon=horizon,
-        instrument=inst_key
-    )
+    st, inst_key, _ = market_feed.get_live_market_setup(instrument=instrument, horizon=horizon)
     ok, msg = telegram_bot.dispatch_a_star_alert(st, instrument=inst_key, horizon=horizon, force=True)
     return {"status": "SUCCESS" if ok else "ERROR", "message": msg, "instrument": inst_key, "horizon": horizon}
 

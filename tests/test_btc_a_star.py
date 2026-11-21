@@ -491,7 +491,7 @@ class TestBtcAStarEngine(unittest.TestCase):
         }
         card = telegram_bot.format_trade_alert(mock_setup, instrument="EURUSD", horizon="scalping")
         self.assertIn("NEWSLYSER // A* PROP SCALP ALERT", card)
-        self.assertIn("PROP FIRM 100-PIP DEFENSE", card)
+        self.assertIn("RISK CAPPED AT $25.00 PER TRADE", card)
         self.assertIn("15.0 pips", card)
 
     def test_telegram_interactive_commands_and_sizing(self):
@@ -510,27 +510,38 @@ class TestBtcAStarEngine(unittest.TestCase):
         self.assertIn("max_risk_pct", cfg)
         self.assertIn("leverage", cfg)
 
-        # 3. Test dynamic sizing calculations
-        mock_setup = {
-            "optimal_entry": 1.08500,
-            "stop_loss": 1.08350,
-            "current_price": 1.08500
+        # 3. Test dynamic sizing calculations with strict $25.00 maximum dollar loss
+        mock_setup_eur = {
+            "optimal_entry": 1.09674,
+            "stop_loss": 1.09510,
+            "current_price": 1.09674
         }
-        # Balance = 10,000, Risk = 0.5% ($50)
-        telegram_bot.save_user_config({"account_balance": 10000.0, "max_risk_pct": 0.50, "leverage": 200})
-        sizing_10k = telegram_bot.compute_custom_sizing(mock_setup, instrument="EURUSD")
-        self.assertEqual(sizing_10k["account_size"], 10000.0)
-        self.assertEqual(sizing_10k["risk_budget_usd"], 50.0)
+        # Balance = 10,000, Max Loss = $25.00
+        telegram_bot.save_user_config({"account_balance": 10000.0, "max_loss_usd": 25.0, "leverage": 200})
+        sizing_25 = telegram_bot.compute_custom_sizing(mock_setup_eur, instrument="EURUSD")
+        self.assertEqual(sizing_25["max_loss_usd"], 25.0)
+        self.assertLessEqual(sizing_25["actual_max_loss"], 25.0) # Guaranteed <= $25
+        self.assertEqual(sizing_25["lot_size"], 0.15) # 16.4 pips * $10/pip = $164/lot -> $25/$164 = 0.15 lot
 
-        # Balance = 20,000, Risk = 1.0% ($200)
-        telegram_bot.save_user_config({"account_balance": 20000.0, "max_risk_pct": 1.0, "leverage": 200})
-        sizing_20k = telegram_bot.compute_custom_sizing(mock_setup, instrument="EURUSD")
-        self.assertEqual(sizing_20k["account_size"], 20000.0)
-        self.assertEqual(sizing_20k["risk_budget_usd"], 200.0)
-        self.assertGreater(sizing_20k["lot_size"], sizing_10k["lot_size"])
+        # Test Gold sizing with $25.00 Max Loss ($4.26 stop distance)
+        mock_setup_gold = {
+            "optimal_entry": 3538.26,
+            "stop_loss": 3534.00,
+            "current_price": 3538.26
+        }
+        sizing_gold_25 = telegram_bot.compute_custom_sizing(mock_setup_gold, instrument="XAUUSD")
+        self.assertLessEqual(sizing_gold_25["actual_max_loss"], 25.0)
+        self.assertEqual(sizing_gold_25["lot_size"], 0.05) # $4.26 * 100 = $426/lot -> $25/$426 = 0.05 lot
 
-        # Reset back to 10k default
-        telegram_bot.save_user_config({"account_balance": 10000.0, "max_risk_pct": 0.50, "leverage": 200})
+        # Test scaling up to $50.00 Max Loss
+        telegram_bot.save_user_config({"account_balance": 10000.0, "max_loss_usd": 50.0, "leverage": 200})
+        sizing_50 = telegram_bot.compute_custom_sizing(mock_setup_eur, instrument="EURUSD")
+        self.assertEqual(sizing_50["max_loss_usd"], 50.0)
+        self.assertLessEqual(sizing_50["actual_max_loss"], 50.0)
+        self.assertGreater(sizing_50["lot_size"], sizing_25["lot_size"])
+
+        # Reset back to 25.0 default
+        telegram_bot.save_user_config({"account_balance": 10000.0, "max_loss_usd": 25.0, "leverage": 200})
 
         # 4. Mock send_telegram_message to verify command dispatching without network I/O
         with patch("telegram_bot.send_telegram_message") as mock_send:
@@ -541,17 +552,21 @@ class TestBtcAStarEngine(unittest.TestCase):
             self.assertTrue(mock_send.called)
             help_msg = mock_send.call_args[0][0]
             self.assertIn("NEWSLYSER QUANTITATIVE TERMINAL BOT", help_msg)
-            self.assertIn("/size", help_msg)
+            self.assertIn("/loss", help_msg)
+
+            # Test /loss 25 and /loss 50
+            telegram_bot.handle_telegram_command("/loss 50", from_id=6107718785)
+            cfg_now = telegram_bot.get_user_config()
+            self.assertEqual(cfg_now["max_loss_usd"], 50.0)
+
+            telegram_bot.handle_telegram_command("/loss 25", from_id=6107718785)
+            cfg_now = telegram_bot.get_user_config()
+            self.assertEqual(cfg_now["max_loss_usd"], 25.0)
 
             # Test /size
             telegram_bot.handle_telegram_command("/size 15000", from_id=6107718785)
             cfg_now = telegram_bot.get_user_config()
             self.assertEqual(cfg_now["account_balance"], 15000.0)
-
-            # Test /risk
-            telegram_bot.handle_telegram_command("/risk 0.75", from_id=6107718785)
-            cfg_now = telegram_bot.get_user_config()
-            self.assertEqual(cfg_now["max_risk_pct"], 0.75)
 
             # Test /leverage
             telegram_bot.handle_telegram_command("/leverage 200", from_id=6107718785)
@@ -563,11 +578,12 @@ class TestBtcAStarEngine(unittest.TestCase):
             conf_msg = mock_send.call_args[0][0]
             self.assertIn("CURRENT TRADING CONFIGURATION", conf_msg)
             self.assertIn("$15,000.00", conf_msg)
+            self.assertIn("$25.00", conf_msg)
 
             # Test /all Triad Telemetry
             telegram_bot.handle_telegram_command("/all", from_id=6107718785)
             all_msg = mock_send.call_args[0][0]
-            self.assertIn("TRIAD MARKET TELEMETRY", all_msg)
+            self.assertIn("TRIAD LIVE TELEMETRY", all_msg)
             self.assertIn("EUR/USD", all_msg)
             self.assertIn("GOLD (XAU/USD)", all_msg)
             self.assertIn("BITCOIN (BTC/USD)", all_msg)
@@ -578,8 +594,8 @@ class TestBtcAStarEngine(unittest.TestCase):
             self.assertIn("&lt;script&gt;", err_msg)
             self.assertNotIn("<script>", err_msg)
 
-        # Restore default 10k config
-        telegram_bot.save_user_config({"account_balance": 10000.0, "max_risk_pct": 0.50, "leverage": 200})
+        # Restore default 10k config with 25.0 max loss
+        telegram_bot.save_user_config({"account_balance": 10000.0, "max_loss_usd": 25.0, "leverage": 200})
 
 
 if __name__ == "__main__":
