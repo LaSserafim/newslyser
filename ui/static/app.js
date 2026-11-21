@@ -1941,6 +1941,37 @@ function applyAstarData(aStar) {
   }
   if (ticketPane) ticketPane.style.borderStyle = aStar.is_a_star ? "solid" : "dashed";
 
+  // Horizon Strategy & Guidance Banner (Institutional Core vs HFT Dynamic Agility)
+  const stratNotes = aStar.horizon_strategy_notes || {};
+  const stratBadge = document.getElementById("astar-strategy-badge");
+  const stratSummary = document.getElementById("astar-strategy-summary");
+  const stratDetails = document.getElementById("astar-strategy-details");
+  const stratBanner = document.getElementById("astar-horizon-banner");
+
+  const isCore = (h === "daily" || h === "swing");
+  if (stratBadge) {
+    stratBadge.innerText = stratNotes.badge ? stratNotes.badge.replace(/[★⚡]/g, "").trim() : (isCore ? "CORE INSTITUTIONAL" : "HFT DYNAMIC AGILITY");
+    stratBadge.style.background = isCore ? "var(--amber-cmd)" : "#00e5ff";
+    stratBadge.style.color = "#000000";
+  }
+  if (stratSummary) {
+    stratSummary.innerText = stratNotes.summary || (isCore 
+      ? "DAILY & SWING PRIMARY FOCUS // Macro Persistence, Low Turnover, 1:2.0+ RR"
+      : "HFT DYNAMIC AGILITY // Fast Microstructure Execution with Strict Accuracy Gates");
+    stratSummary.style.color = isCore ? "var(--fg-bright)" : "#00e5ff";
+  }
+  if (stratDetails) {
+    if (isCore) {
+      stratDetails.innerText = `EVT 99% Tail Shield Active • 4th-Moment Kelly • $10k–$20k 1:200 Leverage (1.0% Risk Cap = $100 / $200)`;
+    } else {
+      stratDetails.innerText = `VPIN < 0.65 Microstructure Gate • Hawkes Cascade Firewall • DFA Hurst Trend Persistence • Micro-Scaled Risk (0.35% - 0.50%)`;
+    }
+  }
+  if (stratBanner) {
+    stratBanner.style.borderColor = isCore ? "#553300" : "#004455";
+    stratBanner.style.background = isCore ? "#0c0a05" : "#021014";
+  }
+
   if (document.getElementById("astar-entry")) document.getElementById("astar-entry").innerText = ticket.entry_zone || "--";
   if (document.getElementById("astar-sl")) document.getElementById("astar-sl").innerText = ticket.stop_loss || "--";
   if (document.getElementById("astar-tp1")) document.getElementById("astar-tp1").innerText = ticket.take_profit_1 || "--";

@@ -20,24 +20,24 @@
     "expires_at": 1795014206
   },
   "daily_eurusd": {
-    "created_at": 1795242107,
-    "expires_at": 1795247507
+    "created_at": 1795247563,
+    "expires_at": 1795252963
   },
   "news_xauusd": {
     "created_at": 1795183747,
     "expires_at": 1795187347
   },
   "daily_xauusd": {
-    "created_at": 1795240141,
-    "expires_at": 1795245541
+    "created_at": 1795247565,
+    "expires_at": 1795252965
   },
   "intraday_xauusd": {
-    "created_at": 1795231937,
-    "expires_at": 1795246337
+    "created_at": 1795247567,
+    "expires_at": 1795261967
   },
   "scalping_xauusd": {
-    "created_at": 1795242117,
-    "expires_at": 1795245717
+    "created_at": 1795247566,
+    "expires_at": 1795251166
   },
   "swing_xauusd": {
     "created_at": 1795184671,
@@ -50,5 +50,9 @@
   "intraday_btcusd": {
     "created_at": 1795240147,
     "expires_at": 1795254547
+  },
+  "scalping_btcusd": {
+    "created_at": 1795247690,
+    "expires_at": 1795251290
   }
 }

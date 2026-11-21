@@ -953,12 +953,15 @@
           <button class="bbg-btn-mini astar-asset-btn" data-asset="EURUSD">EURO (EURUSD)</button>
           <button class="bbg-btn-mini astar-asset-btn" data-asset="BTCUSD" style="border-color:#ff9900; color:#ff9900;">BITCOIN (BTCUSD)</button>
           <span style="color:#555; margin:0 4px;">|</span>
-          <span style="color:var(--amber-cmd); font-weight:800; font-size:10px;">[ A* HORIZON: ]</span>
-          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="scalping">SCALPING (M5/M15 // 1:1.5 RR)</button>
-          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="intraday">INTRADAY (H1/4H // 1:2.0 RR)</button>
-          <button class="bbg-btn-mini astar-horizon-btn active" data-horizon="daily">DAILY (D1 // 1:2.0 RR)</button>
-          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="swing">SWING (10D CYCLE // 1:2.0 RR)</button>
-          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="news">NEWS (T+3m // 1:4.0 RR)</button>
+          <span style="color:var(--amber-cmd); font-weight:800; font-size:10px;">[ HORIZONS: ]</span>
+          <!-- CORE INSTITUTIONAL (PRIMARY FOCUS) -->
+          <button class="bbg-btn-mini astar-horizon-btn active" data-horizon="daily" style="border-color:var(--amber-cmd); color:var(--amber-cmd); font-weight:800;">★ DAILY (D1 // CORE)</button>
+          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="swing" style="border-color:var(--amber-cmd); color:var(--amber-cmd); font-weight:800;">★ SWING (10D // CORE)</button>
+          <span style="color:#444; margin:0 2px;">|</span>
+          <!-- HFT DYNAMIC AGILITY (FLEXIBLE HIGH-ACCURACY FAST TRADING) -->
+          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="scalping" style="border-color:#00e5ff; color:#00e5ff;">⚡ SCALPING (M5/M15 HFT)</button>
+          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="intraday" style="border-color:#00e5ff; color:#00e5ff;">⚡ INTRADAY (H1/4H HFT)</button>
+          <button class="bbg-btn-mini astar-horizon-btn" data-horizon="news">NEWS (T+3m)</button>
         </div>
         <div style="display:flex; align-items:center; gap:16px;">
           <div>[ ASTR.TTL &lt;GO&gt; ] <span style="color:var(--fg-dim);">VALIDITY WINDOW:</span> <strong id="astar-ttl-timer" style="color:var(--amber-cmd);">--m --s</strong></div>
@@ -968,6 +971,17 @@
         <button class="bbg-btn" id="btn-reset-astar-session" style="background:var(--amber-cmd); color:#000; font-weight:800;">
           FORCE RE-EVALUATE SESSION &lt;GO&gt;
         </button>
+      </div>
+
+      <!-- HORIZON STRATEGY & HFT ACCURACY GUIDANCE BANNER -->
+      <div id="astar-horizon-banner" style="background:#0c0a05; border:1px solid #332200; padding:8px 12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; font-family:var(--font-mono); font-size:10px;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span id="astar-strategy-badge" style="background:var(--amber-cmd); color:#000; font-weight:900; padding:2px 6px; letter-spacing:0.5px;">CORE INSTITUTIONAL</span>
+          <span id="astar-strategy-summary" style="color:var(--fg-bright); font-weight:700;">DAILY &amp; SWING PRIMARY FOCUS // Macro Persistence, Low Turnover, 1:2.0+ RR</span>
+        </div>
+        <div id="astar-strategy-details" style="color:#aaa; font-size:9.5px;">
+          EVT 99% Tail Shield Active • 4th-Moment Kelly • $10k–$20k 1:200 Leverage (1.0% Risk Cap)
+        </div>
       </div>
 
       <div class="bbg-workstation-grid">

@@ -393,6 +393,47 @@ class TestBtcAStarEngine(unittest.TestCase):
         self.assertAlmostEqual(res20k["required_margin"], 59.48, delta=0.50)
         self.assertGreater(res20k["free_margin"], 19900.0)
 
+    def test_horizon_strategy_and_hft_accuracy_gates(self):
+        """Verifies Core Institutional (Daily/Swing) Focus vs HFT Dynamic Agility (Scalping/Intraday) Accuracy Gates."""
+        # 1. Daily Core Institutional
+        daily = qm.calculate_daily_a_star_setup(current_price=91500.0, atr_m30=450.0, horizon="daily", instrument="BTCUSD")
+        self.assertIn("horizon_strategy_notes", daily)
+        d_strat = daily["horizon_strategy_notes"]
+        self.assertEqual(d_strat["category"], "CORE_INSTITUTIONAL")
+        self.assertTrue(d_strat["is_primary_focus"])
+        self.assertEqual(d_strat["recommended_risk_pct"], 1.0)
+        self.assertIn("★", d_strat["badge"])
+
+        # 2. Swing Core Institutional
+        swing = qm.calculate_daily_a_star_setup(current_price=91500.0, atr_m30=450.0, horizon="swing", instrument="BTCUSD")
+        s_strat = swing["horizon_strategy_notes"]
+        self.assertEqual(s_strat["category"], "CORE_INSTITUTIONAL")
+        self.assertTrue(s_strat["is_primary_focus"])
+        self.assertEqual(s_strat["recommended_risk_pct"], 1.0)
+
+        # 3. Scalping HFT Dynamic Agility
+        scalp = qm.calculate_daily_a_star_setup(current_price=91500.0, atr_m30=450.0, horizon="scalping", instrument="BTCUSD")
+        sc_strat = scalp["horizon_strategy_notes"]
+        self.assertEqual(sc_strat["category"], "HFT_DYNAMIC_AGILITY")
+        self.assertFalse(sc_strat["is_primary_focus"])
+        self.assertEqual(sc_strat["recommended_risk_pct"], 0.35)
+        self.assertIn("⚡", sc_strat["badge"])
+        self.assertIn("hft_accuracy_gates", sc_strat)
+        gates = sc_strat["hft_accuracy_gates"]
+        self.assertIn("vpin_ok", gates)
+        self.assertIn("hawkes_ok", gates)
+        self.assertIn("hurst_ok", gates)
+        self.assertIn("evt_shield_price", gates)
+
+        # 4. EVT Horizon Dynamic Scaling
+        rng = np.random.default_rng(42)
+        rets = rng.normal(0, 0.02, 100)
+        rets[0:5] = [-0.07, -0.09, -0.06, -0.08, -0.10]
+        shield_d1 = qm.compute_evt_cvar_stop_shield(rets, current_price=91500.0, horizon_scale=1.00, instrument="BTCUSD")
+        shield_scalp = qm.compute_evt_cvar_stop_shield(rets, current_price=91500.0, horizon_scale=0.25, instrument="BTCUSD")
+        self.assertAlmostEqual(shield_scalp["evt_distance_usd"], shield_d1["evt_distance_usd"] * 0.25, delta=1.0)
+        self.assertGreater(shield_scalp["evt_sl_price"], shield_d1["evt_sl_price"]) # Scalping stop is tighter to entry
+
 
 if __name__ == "__main__":
     unittest.main()

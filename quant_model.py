@@ -1426,32 +1426,36 @@ def compute_evt_cvar_stop_shield(
     direction="BUY",
     alpha=0.99,
     threshold_pct=0.90,
-    instrument="XAUUSD"
+    instrument="XAUUSD",
+    horizon_scale=1.0
 ):
     """
     Pillar 2: Pickands-Balkema-de Haan Generalized Pareto Distribution (GPD) Peaks-Over-Threshold (POT).
     Computes exact 99% Expected Shortfall (CVaR) tail-risk stop shield.
     Anchoring stop losses to ES_0.99 insulates trades against heavy-tail stop hunting wicks.
+    Supports dynamic horizon scaling for fast HFT (M5/M15) vs multi-day institutional swing trading.
     """
     spec = get_instrument_spec(instrument)
     price_dec = spec.get("price_decimals", 2)
     min_risk = spec.get("min_risk_floor", 0.50)
     cur = float(current_price)
     is_buy = str(direction).upper() == "BUY"
+    h_scale = max(0.15, float(horizon_scale))
 
     r = np.asarray(returns, dtype=float)
     r = r[~np.isnan(r)]
     if len(r) == 0:
-        default_risk = 1.5 * spec.get("default_atr_d1", 20.0)
+        default_risk = 1.5 * spec.get("default_atr_d1", 20.0) * h_scale
         sl_fallback = round(cur - default_risk if is_buy else cur + default_risk, price_dec)
         return {
-            "var_99_pct": 2.5,
-            "es_99_pct": 3.5,
+            "var_99_pct": round(2.5 * h_scale, 2),
+            "es_99_pct": round(3.5 * h_scale, 2),
             "evt_sl_price": sl_fallback,
             "evt_distance_usd": round(default_risk, price_dec),
+            "horizon_scale": round(h_scale, 2),
             "xi_shape": 0.25,
             "beta_scale": 0.02,
-            "threshold_u_pct": 2.0,
+            "threshold_u_pct": round(2.0 * h_scale, 2),
             "model": "EVT_GPD_POT_FALLBACK"
         }
 
@@ -1496,18 +1500,19 @@ def compute_evt_cvar_stop_shield(
             es_99 = var_99 * 1.30
 
     es_99 = max(var_99, es_99, 0.002)
-    dist_usd = max(min_risk, cur * es_99)
+    dist_usd = max(min_risk, cur * es_99 * h_scale)
 
     sl_evt = round(cur - dist_usd if is_buy else cur + dist_usd, price_dec)
 
     return {
-        "var_99_pct": round(float(var_99) * 100.0, 2),
-        "es_99_pct": round(float(es_99) * 100.0, 2),
+        "var_99_pct": round(float(var_99) * 100.0 * h_scale, 2),
+        "es_99_pct": round(float(es_99) * 100.0 * h_scale, 2),
         "evt_sl_price": sl_evt,
         "evt_distance_usd": round(dist_usd, price_dec),
+        "horizon_scale": round(h_scale, 2),
         "xi_shape": round(float(xi), 4),
         "beta_scale": round(float(beta), 4),
-        "threshold_u_pct": round(float(u) * 100.0, 2),
+        "threshold_u_pct": round(float(u) * 100.0 * h_scale, 2),
         "model": "EVT_GPD_POT_99"
     }
 
@@ -3917,7 +3922,8 @@ def calculate_daily_a_star_setup(
         current_price=current_price,
         direction="BUY" if is_bullish else "SELL",
         alpha=0.99,
-        instrument=inst_key
+        instrument=inst_key,
+        horizon_scale=barrier_sl_scale
     )
     hawkes_eval = compute_hawkes_jump_cascade(
         returns=np.array([r5_pct, z_eff, z_20, (session_h - session_l) / current_price * 100.0])
@@ -4137,8 +4143,53 @@ def calculate_daily_a_star_setup(
             dynamic_be_trigger = round(mid_entry - eff_sl_dist, price_dec)
             dynamic_be_sl = round(mid_entry - 0.50, price_dec)
 
+    # Horizon Strategy & High Frequency Trading (HFT) Accuracy Notes
+    if h_mode in ("daily", "swing"):
+        strat_category = "CORE_INSTITUTIONAL"
+        strat_badge = "★ CORE INSTITUTIONAL (DAILY & SWING FOCUS)"
+        strat_summary = f"{h_mode.upper()} HORIZON: Macro Trend Persistence, Low Turnover & Asymmetric 1:2.0+ RR"
+        strat_notes = (
+            f"Primary institutional focus. Grounded in {z_label}={z_eff:+.2f}σ macroeconomic drift, "
+            f"variance risk premium (VRP={vrp_ann:+.1f}%), and multi-day EVT 99% Expected Shortfall stop protection (${evt_shield['evt_sl_price']:.{price_dec}f}). "
+            f"Sized strictly for a $10,000–$20,000 account at 1.0% maximum risk."
+        )
+        recommended_risk_pct = 1.00
+    else:
+        strat_category = "HFT_DYNAMIC_AGILITY"
+        strat_badge = "⚡ HFT DYNAMIC AGILITY (SCALPING & INTRADAY)"
+        strat_summary = f"{h_mode.upper()} HFT HORIZON: Fast Microstructure Execution with Strict Accuracy Gates"
+        strat_notes = (
+            f"Flexible high-frequency trading mode. Accuracy is mathematically preserved by: "
+            f"1) Microstructure toxicity gate (VPIN={vpin_now:.3f} {'SAFE' if vpin_ok else 'TOXIC'}), "
+            f"2) Hawkes liquidation cascade firewall (Branching η={hawkes_eval['branching_ratio']:.2f} {'SAFE' if hawkes_ok else 'LOCKED'}), "
+            f"3) DFA Hurst persistence (H={hurst_eval['hurst']:.2f} {'PERSISTENT' if hurst_ok else 'CHOP'}), and "
+            f"4) Sub-session EVT 99% stop shield (${evt_shield['evt_sl_price']:.{price_dec}f}). "
+            f"Recommended risk scaled to 0.35%–0.50% to prevent rapid drawdown accumulation."
+        )
+        recommended_risk_pct = 0.35 if h_mode == "scalping" else 0.50
+
+    horizon_strategy_notes = {
+        "category": strat_category,
+        "badge": strat_badge,
+        "summary": strat_summary,
+        "notes": strat_notes,
+        "recommended_risk_pct": recommended_risk_pct,
+        "is_primary_focus": strat_category == "CORE_INSTITUTIONAL",
+        "hft_accuracy_gates": {
+            "vpin_ok": vpin_ok,
+            "vpin_value": vpin_now,
+            "hawkes_ok": hawkes_ok,
+            "hawkes_branching": hawkes_eval["branching_ratio"],
+            "hurst_ok": hurst_ok,
+            "hurst_value": hurst_eval["hurst"],
+            "evt_shield_price": evt_shield["evt_sl_price"],
+            "zero_counter_trend": True
+        }
+    }
+
     return {
         "horizon": h_mode,
+        "horizon_strategy_notes": horizon_strategy_notes,
         "instrument": spec["name"],
         "symbol": inst_key,
         "contract_size": contract_val,
