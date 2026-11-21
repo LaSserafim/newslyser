@@ -1047,11 +1047,16 @@ async function renderEventMcPane(ev) {
   const sv = mc.bs_stoch_vol || {};
 
   if (ev === "astar") {
-    if (document.getElementById("val-ast-pwin")) {
-      document.getElementById("val-ast-pwin").innerText = `${m.p_positive_return_pct}% win (${mc.n_paths.toLocaleString()} paths, ±${pPfx}${mc.mc_moe_terminal_dollars} SE)`;
-    }
-    if (document.getElementById("val-ast-var")) {
-      document.getElementById("val-ast-var").innerText = `${m.var_95_pct > 0 ? "+" : ""}${m.var_95_pct.toFixed(2)}% / CVaR ${m.cvar_95_pct.toFixed(2)}% (P+: ${m.p_positive_return_pct}% | P-: ${m.p_negative_return_pct}%)`;
+    const aStar = window._LAST_ASTAR_DATA;
+    if (aStar) {
+      const fpa = aStar.first_passage_analysis || {};
+      const mcq = aStar.monte_carlo_quantiles || {};
+      if (document.getElementById("val-ast-pwin") && fpa.win_probability_pct !== undefined) {
+        document.getElementById("val-ast-pwin").innerText = `${fpa.win_probability_pct}% (M2M EV: ${fpa.expected_value_r >= 0 ? "+" : ""}${fpa.expected_value_r}R / Kelly: ${fpa.quarter_kelly_pct}%)`;
+      }
+      if (document.getElementById("val-ast-var") && mcq.var_95_pct !== undefined) {
+        document.getElementById("val-ast-var").innerText = `${mcq.var_95_pct}% (CVaR: ${mcq.cvar_95_pct}% | ${(mcq.n_paths || 10000).toLocaleString()} paths)`;
+      }
     }
   } else {
     if (document.getElementById(medId)) {
@@ -2066,8 +2071,23 @@ function applyAstarData(aStar) {
     initTtlCountdown(aStar.time_to_live.expires_at_epoch, aStar.time_to_live.max_validity_seconds || 5400);
   }
 
-  renderEventMcPane("astar");
-  renderLiquidityHeatmapUi(aStar);
+  const now = Date.now();
+  const lastAsset = window._LAST_RENDERED_ASTAR_ASSET;
+  const lastHorizon = window._LAST_RENDERED_ASTAR_HORIZON;
+  const lastRenderTs = window._LAST_ASTAR_ASYNC_RENDER_TS || 0;
+  const currentAsset = CURRENT_ASTAR_ASSET;
+  const currentHorizon = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
+
+  const stateChanged = (lastAsset !== currentAsset) || (lastHorizon !== currentHorizon);
+  const timeThresholdMet = (now - lastRenderTs) >= 15000;
+
+  if (stateChanged || timeThresholdMet) {
+    window._LAST_RENDERED_ASTAR_ASSET = currentAsset;
+    window._LAST_RENDERED_ASTAR_HORIZON = currentHorizon;
+    window._LAST_ASTAR_ASYNC_RENDER_TS = now;
+    renderEventMcPane("astar");
+    renderLiquidityHeatmapUi(aStar);
+  }
 }
 
 async function renderLiquidityHeatmapUi(aStar) {
@@ -2109,11 +2129,19 @@ async function renderLiquidityHeatmapUi(aStar) {
   const elShield = document.getElementById("val-hm-evt-shield");
   const elEta = document.getElementById("val-hm-hawkes-eta");
 
-  if (elPoc) elPoc.innerText = `${pPfx}${Number(aStar.current_price || 0).toFixed(pDec)}`;
   if (elShort) elShort.innerText = `${pPfx}${Number(liq.closest_short_liquidation_pool || 0).toFixed(pDec)}`;
   if (elLong) elLong.innerText = `${pPfx}${Number(liq.closest_long_liquidation_pool || 0).toFixed(pDec)}`;
   if (elShield) elShield.innerText = `${pPfx}${Number(evt.evt_sl_price || 0).toFixed(pDec)} (-${evt.es_99_pct || 0}%)`;
   if (elEta) elEta.innerText = `η = ${hwk.branching_ratio || 0.20} | λ = ${hwk.jump_intensity || 0.05}`;
+
+  // Use cached profile if available to prevent any layout/display flicker
+  if (window._LAST_HEATMAP_DATA && window._LAST_HEATMAP_DATA.instrument === CURRENT_ASTAR_ASSET) {
+    const cachedVp = window._LAST_HEATMAP_DATA.volume_profile;
+    if (cachedVp) {
+      if (elPoc && cachedVp.poc) elPoc.innerText = `${pPfx}${Number(cachedVp.poc).toFixed(pDec)} (${cachedVp.poc_vol_share_pct || 0}%)`;
+      if (elVa && cachedVp.val && cachedVp.vah) elVa.innerText = `${pPfx}${Number(cachedVp.val).toFixed(pDec)} - ${pPfx}${Number(cachedVp.vah).toFixed(pDec)}`;
+    }
+  }
 
   // Fetch full 50-bin profile asynchronously
   try {
@@ -2122,6 +2150,7 @@ async function renderLiquidityHeatmapUi(aStar) {
     if (!hmData || !hmData.volume_profile) return;
     const vp = hmData.volume_profile;
     const bins = vp.bins || [];
+    window._LAST_HEATMAP_DATA = { instrument: CURRENT_ASTAR_ASSET, volume_profile: vp };
     if (elPoc && vp.poc) elPoc.innerText = `${pPfx}${Number(vp.poc).toFixed(pDec)} (${vp.poc_vol_share_pct || 0}%)`;
     if (elVa && vp.val && vp.vah) elVa.innerText = `${pPfx}${Number(vp.val).toFixed(pDec)} - ${pPfx}${Number(vp.vah).toFixed(pDec)}`;
 
@@ -2201,6 +2230,7 @@ async function renderLiquidityHeatmapUi(aStar) {
 
 async function fetchAstarData() {
   try {
+    window._LAST_ASTAR_ASYNC_RENDER_TS = 0;
     const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
     const [aRes, dRes] = await Promise.all([
       fetch(`/api/daily-a-star?horizon=${h}&instrument=${CURRENT_ASTAR_ASSET}`),
