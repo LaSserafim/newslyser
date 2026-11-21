@@ -54,5 +54,9 @@
   "scalping_btcusd": {
     "created_at": 1795247690,
     "expires_at": 1795251290
+  },
+  "swing_btcusd": {
+    "created_at": 1795248737,
+    "expires_at": 1795680737
   }
 }
