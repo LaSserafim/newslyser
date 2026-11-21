@@ -1083,6 +1083,40 @@
           </div>
         </section>
 
+        <!-- PILLAR 5: NEO-BRUTALIST SYNTHETIC LIQUIDITY HEATMAP & EVT STOP SHIELD -->
+        <section class="bbg-pane" id="pane-ast-liquidity-heatmap" style="grid-column: span 2; border: 1px solid #332211;">
+          <div class="bbg-pane-header" style="background:#110800; border-bottom:1px solid #442200;">
+            <div class="bbg-pane-title">
+              <span class="tag" style="background:#ff9900; color:#000;">04B // HEATMAP &lt;GO&gt;</span>
+              <span style="color:#ffaa00; font-weight:900;">SYNTHETIC LIQUIDITY DENSITY HEATMAP &amp; EVT 99% TAIL STOP SHIELD</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span id="badge-hawkes-cascade" style="font-size:9px; padding:2px 6px; background:#112211; border:1px solid #00e676; color:#00e676; font-weight:800;">HAWKES: CASCADE SAFE</span>
+              <span id="badge-hurst-regime" style="font-size:9px; padding:2px 6px; background:#112233; border:1px solid #00d2ff; color:#00d2ff; font-weight:800;">DFA HURST: PERSISTENT</span>
+              <span id="badge-evt-shield" style="font-size:9px; padding:2px 6px; background:#221122; border:1px solid #bd93f9; color:#d6b4fc; font-weight:800;">EVT 99% CVaR SHIELD ACTIVE</span>
+            </div>
+          </div>
+          <div class="bbg-pane-body" style="padding:10px;">
+            <div style="display:grid; grid-template-columns: 2fr 1fr; gap:12px;">
+              <!-- Interactive SVG Heatmap Rendering -->
+              <div id="container-liquidity-heatmap" style="background:#050505; border:1px solid #222; border-radius:3px; padding:8px; min-height:160px; position:relative;">
+                <svg id="svg-liquidity-heatmap" width="100%" height="160" style="display:block;"></svg>
+              </div>
+              <!-- Telemetry Metrics Table -->
+              <div>
+                <table class="bbg-mini-table">
+                  <tr><td class="label">VOLUME POC (POINT OF CONTROL):</td><td class="val" id="val-hm-poc" style="color:#00ff88; font-weight:900;">--</td></tr>
+                  <tr><td class="label">VALUE AREA (70%):</td><td class="val" id="val-hm-va" style="color:#00e5ff; font-weight:800;">--</td></tr>
+                  <tr><td class="label">NEAREST SHORT LIQ POOL:</td><td class="val" id="val-hm-short-pool" style="color:#ff4444; font-weight:800;">--</td></tr>
+                  <tr><td class="label">NEAREST LONG LIQ POOL:</td><td class="val" id="val-hm-long-pool" style="color:#ffaa00; font-weight:800;">--</td></tr>
+                  <tr><td class="label">EVT 99% CVaR STOP SHIELD:</td><td class="val" id="val-hm-evt-shield" style="color:#d6b4fc; font-weight:900;">--</td></tr>
+                  <tr><td class="label">BRANCHING RATIO (α/β):</td><td class="val" id="val-hm-hawkes-eta" style="color:#fff;">--</td></tr>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="bbg-pane" id="pane-ast-macro" style="grid-column: span 2;">
           <div class="bbg-pane-header">
             <div class="bbg-pane-title"><span class="tag">05 // G7 &lt;GO&gt;</span><span>GLOBAL MACRO SOVEREIGN SPILLOVER MATRIX (G7 &amp; BRICS)</span></div>
@@ -1140,17 +1174,17 @@
             <div>
               <div style="display:flex; justify-content:space-between; font-size:9.5px; color:#aaa; margin-bottom:3px;">
                 <span>ACCOUNT EQUITY ($ USD):</span>
-                <span id="lbl-equity-val" style="color:#fff; font-weight:800;">$1,000.00</span>
+                <span id="lbl-equity-val" style="color:#fff; font-weight:800;">$10,000.00</span>
               </div>
               <div style="display:flex; gap:6px;">
-                <input type="number" id="calc-equity" style="background:#000; color:#fff; border:1px solid #333; padding:4px 8px; font-family:var(--font-mono); font-size:11px; width:100%;" value="1000" min="50" step="50">
+                <input type="number" id="calc-equity" style="background:#000; color:#fff; border:1px solid #333; padding:4px 8px; font-family:var(--font-mono); font-size:11px; width:100%;" value="10000" min="100" step="500">
               </div>
               <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
-                <button class="bbg-btn-mini btn-eq-preset" data-eq="500">$500</button>
-                <button class="bbg-btn-mini btn-eq-preset active" data-eq="1000">$1,000</button>
                 <button class="bbg-btn-mini btn-eq-preset" data-eq="2500">$2,500</button>
                 <button class="bbg-btn-mini btn-eq-preset" data-eq="5000">$5,000</button>
-                <button class="bbg-btn-mini btn-eq-preset" data-eq="10000">$10,000</button>
+                <button class="bbg-btn-mini btn-eq-preset active" data-eq="10000">$10,000</button>
+                <button class="bbg-btn-mini btn-eq-preset" data-eq="15000">$15,000</button>
+                <button class="bbg-btn-mini btn-eq-preset" data-eq="20000">$20,000</button>
                 <button class="bbg-btn-mini btn-eq-preset" data-eq="50000">$50,000</button>
               </div>
             </div>
@@ -1160,7 +1194,7 @@
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
                 <span style="font-size:9.5px; color:#aaa;">RISK DEDUCTION MODEL:</span>
                 <div style="display:flex; gap:4px;">
-                  <button class="bbg-btn-mini active" id="btn-mode-pct" style="font-weight:800;">OPTION 1: % OF EQUITY</button>
+                  <button class="bbg-btn-mini active" id="btn-mode-pct" style="font-weight:800;">OPTION 1: % OF EQUITY (MAX 1%)</button>
                   <button class="bbg-btn-mini" id="btn-mode-cash" style="font-weight:800;">OPTION 2: MAX RISK ($)</button>
                 </div>
               </div>
@@ -1169,18 +1203,18 @@
               <div id="wrap-risk-pct">
                 <div style="display:flex; justify-content:space-between; font-size:9.5px; color:#aaa; margin-bottom:3px;">
                   <span>RISK OF EQUITY (%):</span>
-                  <span id="lbl-risk-cash" style="color:var(--amber-cmd); font-weight:800;">2.0% ($20.00 USD)</span>
+                  <span id="lbl-risk-cash" style="color:var(--amber-cmd); font-weight:800;">1.0% ($100.00 USD)</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                  <input type="range" id="calc-risk-range" class="bbg-slider" min="0.25" max="5.0" step="0.25" value="2.0" style="flex:1;">
-                  <input type="number" id="calc-risk-pct" style="width:65px; background:#000; color:var(--amber-cmd); border:1px solid #333; padding:3px 6px; font-family:var(--font-mono); font-size:11px; text-align:right;" value="2.0" step="0.1" min="0.1" max="10.0">
+                  <input type="range" id="calc-risk-range" class="bbg-slider" min="0.25" max="3.0" step="0.25" value="1.0" style="flex:1;">
+                  <input type="number" id="calc-risk-pct" style="width:65px; background:#000; color:var(--amber-cmd); border:1px solid #333; padding:3px 6px; font-family:var(--font-mono); font-size:11px; text-align:right;" value="1.0" step="0.1" min="0.1" max="5.0">
                 </div>
                 <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
                   <button class="bbg-btn-mini btn-risk-preset" data-risk="0.5">0.5% (Safe)</button>
-                  <button class="bbg-btn-mini btn-risk-preset" data-risk="1.0">1.0% (Prop Desk)</button>
+                  <button class="bbg-btn-mini btn-risk-preset" data-risk="0.75">0.75% (Conservative)</button>
+                  <button class="bbg-btn-mini btn-risk-preset active" data-risk="1.0">1.0% (Institutional Max)</button>
                   <button class="bbg-btn-mini btn-risk-preset" data-risk="1.5">1.5%</button>
-                  <button class="bbg-btn-mini btn-risk-preset active" data-risk="2.0">2.0% (Standard)</button>
-                  <button class="bbg-btn-mini btn-risk-preset" data-risk="3.0">3.0% (Max)</button>
+                  <button class="bbg-btn-mini btn-risk-preset" data-risk="2.0">2.0% (Aggressive)</button>
                 </div>
               </div>
 
@@ -1188,17 +1222,16 @@
               <div id="wrap-risk-cash" style="display:none;">
                 <div style="display:flex; justify-content:space-between; font-size:9.5px; color:#aaa; margin-bottom:3px;">
                   <span>FIXED MAX CASH RISK ($ USD):</span>
-                  <span id="lbl-cash-equiv-pct" style="color:#00e5ff; font-weight:800;">$50.00 (5.00% eq)</span>
+                  <span id="lbl-cash-equiv-pct" style="color:#00e5ff; font-weight:800;">$100.00 (1.00% eq)</span>
                 </div>
                 <div style="display:flex; gap:6px;">
-                  <input type="number" id="calc-max-risk-cash" style="background:#000; color:#00e5ff; border:1px solid #113333; padding:4px 8px; font-family:var(--font-mono); font-size:11px; width:100%; font-weight:800;" value="50" min="5" step="5">
+                  <input type="number" id="calc-max-risk-cash" style="background:#000; color:#00e5ff; border:1px solid #113333; padding:4px 8px; font-family:var(--font-mono); font-size:11px; width:100%; font-weight:800;" value="100" min="10" step="10">
                 </div>
                 <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
-                  <button class="bbg-btn-mini btn-cash-preset" data-cash="20">$20 Cash</button>
-                  <button class="bbg-btn-mini btn-cash-preset" data-cash="30">$30 (Daily A*)</button>
-                  <button class="bbg-btn-mini btn-cash-preset active" data-cash="50">$50 Cash</button>
-                  <button class="bbg-btn-mini btn-cash-preset" data-cash="100">$100 Cash</button>
-                  <button class="bbg-btn-mini btn-cash-preset" data-cash="250">$250 Cash</button>
+                  <button class="bbg-btn-mini btn-cash-preset" data-cash="50">$50 Cash</button>
+                  <button class="bbg-btn-mini btn-cash-preset active" data-cash="100">$100 (1.0% on $10k)</button>
+                  <button class="bbg-btn-mini btn-cash-preset" data-cash="150">$150 Cash</button>
+                  <button class="bbg-btn-mini btn-cash-preset" data-cash="200">$200 (1.0% on $20k)</button>
                 </div>
               </div>
             </div>
@@ -1210,8 +1243,8 @@
                 <select id="calc-leverage" style="width:100%; background:#000; color:#fff; border:1px solid #333; padding:4px; font-family:var(--font-mono); font-size:10px;">
                   <option value="30">1:30 (EU/Regulated)</option>
                   <option value="50">1:50 (US Regulated)</option>
-                  <option value="100" selected>1:100 (Standard)</option>
-                  <option value="200">1:200 (Competitive)</option>
+                  <option value="100">1:100 (Standard)</option>
+                  <option value="200" selected>1:200 (Specialized / Competitive)</option>
                   <option value="500">1:500 (Offshore / Prop)</option>
                   <option value="1000">1:1000 (High Leverage)</option>
                   <option value="2000">1:2000 (Exness Max)</option>

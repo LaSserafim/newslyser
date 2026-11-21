@@ -2029,6 +2029,111 @@ function applyAstarData(aStar) {
   }
 
   renderEventMcPane("astar");
+  renderLiquidityHeatmapUi(aStar);
+}
+
+async function renderLiquidityHeatmapUi(aStar) {
+  const svg = document.getElementById("svg-liquidity-heatmap");
+  if (!svg) return;
+  const adv = aStar.advanced_microstructure || {};
+  const hwk = adv.hawkes_cascade || {};
+  const hurst = adv.dfa_hurst || {};
+  const evt = adv.evt_tail_shield || {};
+  const liq = adv.liquidation_heatmap || {};
+
+  // Badges
+  const bHwk = document.getElementById("badge-hawkes-cascade");
+  const bHurst = document.getElementById("badge-hurst-regime");
+  const bEvt = document.getElementById("badge-evt-shield");
+  if (bHwk) {
+    bHwk.innerText = hwk.is_cascade_active ? `HAWKES: CASCADE ACTIVE (${hwk.t_relax_hours}h RELAX)` : `HAWKES: CASCADE SAFE (η=${hwk.branching_ratio || 0.20})`;
+    bHwk.style.background = hwk.is_cascade_active ? "#221111" : "#112211";
+    bHwk.style.borderColor = hwk.is_cascade_active ? "#ff4444" : "#00e676";
+    bHwk.style.color = hwk.is_cascade_active ? "#ff6b6b" : "#00e676";
+  }
+  if (bHurst) {
+    bHurst.innerText = `DFA HURST: H=${hurst.hurst || 0.50} (${hurst.regime || "RANDOM_WALK"})`;
+    bHurst.style.color = hurst.is_trending ? "#00e676" : (hurst.regime === "MEAN_REVERTING" ? "#ff4444" : "#00d2ff");
+  }
+  if (bEvt && evt.es_99_pct) {
+    bEvt.innerText = `EVT 99% CVaR: ES=${evt.es_99_pct}% (VaR=${evt.var_99_pct}%)`;
+  }
+
+  // Table metrics
+  const isEur = aStar.symbol === "EURUSD";
+  const pDec = isEur ? 5 : 2;
+  const pPfx = isEur ? "" : "$";
+
+  const elPoc = document.getElementById("val-hm-poc");
+  const elVa = document.getElementById("val-hm-va");
+  const elShort = document.getElementById("val-hm-short-pool");
+  const elLong = document.getElementById("val-hm-long-pool");
+  const elShield = document.getElementById("val-hm-evt-shield");
+  const elEta = document.getElementById("val-hm-hawkes-eta");
+
+  if (elPoc) elPoc.innerText = `${pPfx}${Number(aStar.current_price || 0).toFixed(pDec)}`;
+  if (elShort) elShort.innerText = `${pPfx}${Number(liq.closest_short_liquidation_pool || 0).toFixed(pDec)}`;
+  if (elLong) elLong.innerText = `${pPfx}${Number(liq.closest_long_liquidation_pool || 0).toFixed(pDec)}`;
+  if (elShield) elShield.innerText = `${pPfx}${Number(evt.evt_sl_price || 0).toFixed(pDec)} (-${evt.es_99_pct || 0}%)`;
+  if (elEta) elEta.innerText = `η = ${hwk.branching_ratio || 0.20} | λ = ${hwk.jump_intensity || 0.05}`;
+
+  // Fetch full 50-bin profile asynchronously
+  try {
+    const res = await fetch(`/api/liquidity-heatmap?instrument=${CURRENT_ASTAR_ASSET}`);
+    const hmData = await res.json();
+    if (!hmData || !hmData.volume_profile) return;
+    const vp = hmData.volume_profile;
+    const bins = vp.bins || [];
+    if (elPoc && vp.poc) elPoc.innerText = `${pPfx}${Number(vp.poc).toFixed(pDec)} (${vp.poc_vol_share_pct || 0}%)`;
+    if (elVa && vp.val && vp.vah) elVa.innerText = `${pPfx}${Number(vp.val).toFixed(pDec)} - ${pPfx}${Number(vp.vah).toFixed(pDec)}`;
+
+    // Draw Neo-Brutalist SVG Heatmap
+    const w = svg.clientWidth || 400;
+    const h = 160;
+    const n = bins.length;
+    if (n === 0) return;
+    const barH = Math.max(2, (h - 20) / n);
+    let svgHtml = `<rect width="${w}" height="${h}" fill="#0a0a0c" rx="2"/>`;
+
+    // Draw volume profile bins
+    bins.forEach((b, idx) => {
+      const y = 10 + idx * barH;
+      const barW = Math.max(4, b.intensity * (w * 0.65));
+      const col = b.is_poc ? "#00ff88" : (b.is_value_area ? "#00d2ff" : "#334455");
+      const opacity = b.is_poc ? 0.95 : (0.20 + b.intensity * 0.65);
+      svgHtml += `<rect x="10" y="${y}" width="${barW}" height="${barH - 1}" fill="${col}" fill-opacity="${opacity}" />`;
+    });
+
+    // Draw Short Liquidation Pool line (top red)
+    const shortLiq = hmData.liquidation_heatmap ? hmData.liquidation_heatmap.closest_short_liquidation_pool : 0;
+    if (shortLiq) {
+      svgHtml += `<line x1="0" y1="25" x2="${w}" y2="25" stroke="#ff3b5c" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+      svgHtml += `<text x="${w - 200}" y="20" fill="#ff8095" font-size="8.5" font-family="monospace" font-weight="bold">SHORT LIQ POOL: ${pPfx}${Number(shortLiq).toFixed(pDec)}</text>`;
+    }
+
+    // Draw Spot Price line (middle cyan)
+    const midY = h / 2;
+    svgHtml += `<line x1="0" y1="${midY}" x2="${w}" y2="${midY}" stroke="#00e5ff" stroke-width="2"/>`;
+    svgHtml += `<text x="15" y="${midY - 4}" fill="#00e5ff" font-size="9" font-family="monospace" font-weight="bold">SPOT: ${pPfx}${Number(hmData.current_price).toFixed(pDec)}</text>`;
+
+    // Draw Long Liquidation Pool line (bottom gold)
+    const longLiq = hmData.liquidation_heatmap ? hmData.liquidation_heatmap.closest_long_liquidation_pool : 0;
+    if (longLiq) {
+      svgHtml += `<line x1="0" y1="${h - 35}" x2="${w}" y2="${h - 35}" stroke="#ffaa00" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+      svgHtml += `<text x="${w - 200}" y="${h - 40}" fill="#ffcc66" font-size="8.5" font-family="monospace" font-weight="bold">LONG LIQ POOL: ${pPfx}${Number(longLiq).toFixed(pDec)}</text>`;
+    }
+
+    // Draw EVT 99% Stop Shield (bottom purple line)
+    const evtSl = hmData.evt_stop_shield ? hmData.evt_stop_shield.evt_sl_price : 0;
+    if (evtSl) {
+      svgHtml += `<line x1="0" y1="${h - 12}" x2="${w}" y2="${h - 12}" stroke="#bd93f9" stroke-width="2"/>`;
+      svgHtml += `<text x="15" y="${h - 16}" fill="#d6b4fc" font-size="8.5" font-family="monospace" font-weight="bold">EVT 99% STOP SHIELD: ${pPfx}${Number(evtSl).toFixed(pDec)}</text>`;
+    }
+
+    svg.innerHTML = svgHtml;
+  } catch (err) {
+    console.warn("renderLiquidityHeatmapUi error:", err);
+  }
 }
 
 async function fetchAstarData() {
@@ -2036,7 +2141,7 @@ async function fetchAstarData() {
     const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "daily";
     const [aRes, dRes] = await Promise.all([
       fetch(`/api/daily-a-star?horizon=${h}&instrument=${CURRENT_ASTAR_ASSET}`),
-      fetch("/api/dynamic-levels")
+      fetch(`/api/dynamic-levels?instrument=${CURRENT_ASTAR_ASSET}`)
     ]);
     const aStar = await aRes.json();
     const dyn = await dRes.json();
@@ -2527,7 +2632,7 @@ function initAutoRefreshLoop() {
         }
       }
     } catch (e) {}
-  }, 2000);
+  }, 1000);
   document.getElementById("btn-reset-astar-session")?.addEventListener("click", async () => {
     const b = document.getElementById("btn-reset-astar-session");
     b.innerText = "WAIT REFRESHING...";

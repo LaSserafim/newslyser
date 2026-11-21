@@ -9,6 +9,7 @@ test_btc_a_star.py - Unit & Integration Tests for Bitcoin (BTCUSD) A* Quantitati
 
 import os
 import unittest
+import numpy as np
 import quant_model as qm
 
 class TestBtcAStarEngine(unittest.TestCase):
@@ -285,6 +286,113 @@ class TestBtcAStarEngine(unittest.TestCase):
         self.assertGreaterEqual(split["in_sample"]["profit_factor"], 1.30)
         self.assertGreater(split["out_of_sample"]["sum_r"], 20.0)
         self.assertGreaterEqual(split["out_of_sample"]["profit_factor"], 1.25)
+
+    def test_evt_cvar_stop_shield_pot(self):
+        """Verifies Pillar 2: Pickands-Balkema-de Haan GPD 99% Expected Shortfall stop shield."""
+        rng = np.random.default_rng(42)
+        rets = rng.normal(0, 0.02, 100)
+        rets[0:5] = [-0.07, -0.09, -0.06, -0.08, -0.10] # Injected heavy losses
+        shield = qm.compute_evt_cvar_stop_shield(rets, current_price=90000.0, direction="BUY", alpha=0.99, instrument="BTCUSD")
+        self.assertIn("evt_sl_price", shield)
+        self.assertIn("es_99_pct", shield)
+        self.assertGreater(shield["es_99_pct"], shield["var_99_pct"])
+        self.assertLess(shield["evt_sl_price"], 90000.0)
+        self.assertGreater(shield["evt_distance_usd"], 500.0)
+
+    def test_hawkes_jump_cascade_firewall(self):
+        """Verifies Pillar 3: Hawkes (1971) self-exciting point process and cascade detection."""
+        # 1. Normal calm market
+        calm_rets = np.random.normal(0, 0.01, 100)
+        hwk_calm = qm.compute_hawkes_jump_cascade(calm_rets)
+        self.assertFalse(hwk_calm["is_cascade_active"])
+
+        # 2. Clustered avalanche shocks
+        shock_rets = np.zeros(60)
+        shock_rets[-10:] = np.random.choice([-1, 1], 10) * np.random.uniform(0.08, 0.15, 10)
+        hwk_shock = qm.compute_hawkes_jump_cascade(shock_rets)
+        self.assertIn("branching_ratio", hwk_shock)
+        self.assertIn("jump_intensity", hwk_shock)
+
+    def test_dfa_hurst_persistence(self):
+        """Verifies Pillar 4: Detrended Fluctuation Analysis (DFA) Hurst Exponent."""
+        rng = np.random.default_rng(42)
+        white_noise = rng.normal(0, 1, 300)
+        h_res = qm.compute_dfa_hurst(white_noise)
+        self.assertIn("hurst", h_res)
+        self.assertGreater(h_res["hurst"], 0.10)
+        self.assertLess(h_res["hurst"], 0.90)
+        self.assertIn(h_res["regime"], ["RANDOM_WALK", "PERSISTENT", "MEAN_REVERTING"])
+
+    def test_volume_profile_poc_and_value_area(self):
+        """Verifies Pillar 1: 50-bin Volume Profile POC, VAH, and VAL geometry."""
+        hi = [92000, 92500, 93000, 92800, 93500]
+        lo = [90500, 91000, 91500, 91200, 91800]
+        cl = [91500, 92000, 92500, 92400, 93200]
+        vol = [1000, 1500, 2000, 1200, 2500]
+        vp = qm.compute_volume_profile(hi, lo, cl, vol, n_bins=50)
+        self.assertIn("poc", vp)
+        self.assertIn("vah", vp)
+        self.assertIn("val", vp)
+        self.assertGreater(vp["vah"], vp["val"])
+        self.assertGreaterEqual(vp["poc"], vp["val"])
+        self.assertLessEqual(vp["poc"], vp["vah"])
+        self.assertEqual(len(vp["bins"]), 50)
+
+    def test_synthetic_liquidation_heatmap_clusters(self):
+        """Verifies Pillar 5: Synthetic Perpetual Liquidation Heatmap clusters."""
+        cur = 91500.0
+        hi = [92000, 92500, 93000]
+        lo = [90000, 90500, 91000]
+        heat = qm.compute_synthetic_liquidation_heatmap(cur, hi, lo, atr_val=450.0, instrument="BTCUSD")
+        self.assertIn("closest_short_liquidation_pool", heat)
+        self.assertIn("closest_long_liquidation_pool", heat)
+        self.assertGreater(heat["closest_short_liquidation_pool"], cur)
+        self.assertLess(heat["closest_long_liquidation_pool"], cur)
+        self.assertGreaterEqual(heat["short_clusters_count"], 4)
+        self.assertGreaterEqual(heat["long_clusters_count"], 4)
+
+    def test_specialized_10k_account_sizing_1pct_risk(self):
+        """
+        Verifies Specialized 10-20k USD Account Constraints:
+        - $10,000 equity default, 1:200 broker leverage, 1.0% maximum risk ($100 budget).
+        - 1500 pip SL distance on BTCUSD (1.0 contract) = 0.07 lot.
+        - Required Margin = (0.07 * 1.0 * 91500) / 200 = $32.02.
+        - Margin Utilization = 0.32% (< 1.0% threshold), Free Margin > 99.6%.
+        """
+        # Baseline $10,000 account @ 1.0% risk
+        res10k = qm.calculate_lot_and_risk(
+            equity=10000.0,
+            risk_pct=1.0,
+            leverage=200,
+            entry_price=91500.0,
+            sl_price=90000.0, # 1500 pips
+            tp1_price=94500.0,
+            instrument="BTCUSD"
+        )
+        self.assertEqual(res10k["equity"], 10000.0)
+        self.assertEqual(res10k["leverage"], 200)
+        self.assertEqual(res10k["risk_pct"], 1.0)
+        self.assertAlmostEqual(res10k["target_risk_dollars"], 100.0, places=1)
+        self.assertEqual(res10k["computed_lot"], 0.07)
+        self.assertAlmostEqual(res10k["required_margin"], 32.02, delta=0.50)
+        self.assertGreater(res10k["free_margin"], 9900.0)
+
+        # Scaled $20,000 account @ 1.0% risk ($200 budget)
+        res20k = qm.calculate_lot_and_risk(
+            equity=20000.0,
+            risk_pct=1.0,
+            leverage=200,
+            entry_price=91500.0,
+            sl_price=90000.0,
+            tp1_price=94500.0,
+            instrument="BTCUSD"
+        )
+        self.assertEqual(res20k["equity"], 20000.0)
+        self.assertAlmostEqual(res20k["target_risk_dollars"], 200.0, places=1)
+        self.assertEqual(res20k["computed_lot"], 0.13)
+        self.assertAlmostEqual(res20k["required_margin"], 59.48, delta=0.50)
+        self.assertGreater(res20k["free_margin"], 19900.0)
+
 
 if __name__ == "__main__":
     unittest.main()

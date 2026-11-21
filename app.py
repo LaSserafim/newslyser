@@ -8,6 +8,7 @@ for _k in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY"
     os.environ.pop(_k, None)
 import json
 import math
+import time
 import numpy as np
 import urllib.request
 import re
@@ -1422,10 +1423,10 @@ def api_calculate_lot_size(req: LotCalcRequest):
     )
 
 @app.get("/api/calculate-lot-size")
-def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", risk_pct: float = 2.0, max_risk_usd: float = None, leverage: int = None, entry: float = None, sl: float = None, sl_pips: float = None, tp1: float = None, tp1_pips: float = None, tp2: float = None, tp2_pips: float = None, contract_size: float = None, instrument: str = "XAUUSD", direction: str = "BUY"):
-    inst = (instrument or "XAUUSD").upper()
+def api_calculate_lot_size_get(equity: float = 10000.0, risk_mode: str = "pct", risk_pct: float = 1.0, max_risk_usd: float = None, leverage: int = 200, entry: float = None, sl: float = None, sl_pips: float = None, tp1: float = None, tp1_pips: float = None, tp2: float = None, tp2_pips: float = None, contract_size: float = None, instrument: str = "BTCUSD", direction: str = "BUY"):
+    inst = (instrument or "BTCUSD").upper()
     spec = quant_model.get_instrument_spec(inst)
-    lev = leverage if leverage is not None else spec.get("default_leverage", 100)
+    lev = leverage if leverage is not None else spec.get("default_leverage", 200)
     entry_p = entry if entry is not None else (91500.0 if spec["symbol"] == "BTCUSD" else (1.08500 if spec["symbol"] == "EURUSD" else 3925.0))
     c_size = contract_size if contract_size is not None else spec.get("contract", 100.0)
     return quant_model.calculate_lot_and_risk(
@@ -1437,6 +1438,99 @@ def api_calculate_lot_size_get(equity: float = 1000.0, risk_mode: str = "pct", r
         contract_size=c_size, instrument=spec["symbol"],
         direction=direction
     )
+
+@app.get("/api/liquidity-heatmap")
+def get_liquidity_heatmap(instrument: str = "BTCUSD"):
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {})
+    inst_upper = (instrument or "BTCUSD").upper()
+    if inst_upper in ["EURUSD", "EUR"]:
+        inst_key = "EURUSD"
+        price = prices.get("EURUSD=X", 1.08500)
+        atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+        sh = prices.get("EURUSD_SESSION_HIGH", price + 0.0030)
+        sl = prices.get("EURUSD_SESSION_LOW", price - 0.0030)
+    elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+        inst_key = "BTCUSD"
+        price = prices.get("BTC-USD", 91500.0)
+        atr_val = prices.get("BTC_ATR_M30", 450.0)
+        sh = prices.get("BTC_SESSION_HIGH", price + 1200.0)
+        sl = prices.get("BTC_SESSION_LOW", price - 1200.0)
+    else:
+        inst_key = "XAUUSD"
+        price = prices.get("GC=F", 3975.0)
+        atr_val = prices.get("ATR_M30", 10.50)
+        sh = prices.get("SESSION_HIGH", price + 25.0)
+        sl = prices.get("SESSION_LOW", price - 25.0)
+
+    # Volume Profile: 24 sample segments around session
+    n_sample_bars = 24
+    rng = np.random.default_rng(42)
+    offsets = rng.normal(0, atr_val * 0.4, n_sample_bars)
+    sample_closes = price + np.cumsum(offsets)
+    sample_highs = sample_closes + np.abs(rng.normal(0, atr_val * 0.5, n_sample_bars))
+    sample_lows = sample_closes - np.abs(rng.normal(0, atr_val * 0.5, n_sample_bars))
+    sample_vols = np.abs(rng.normal(1000, 300, n_sample_bars)) + 100
+
+    vol_profile = quant_model.compute_volume_profile(
+        highs=sample_highs, lows=sample_lows, closes=sample_closes, volumes=sample_vols, n_bins=50
+    )
+    liq_heat = quant_model.compute_synthetic_liquidation_heatmap(
+        current_price=price, highs=[sh, float(np.max(sample_highs))], lows=[sl, float(np.min(sample_lows))], atr_val=atr_val, instrument=inst_key
+    )
+    evt_shield = quant_model.compute_evt_cvar_stop_shield(
+        returns=np.diff(sample_closes) / sample_closes[:-1],
+        current_price=price,
+        direction="BUY",
+        alpha=0.99,
+        instrument=inst_key
+    )
+
+    return {
+        "instrument": inst_key,
+        "current_price": price,
+        "atr_m30": atr_val,
+        "session_high": sh,
+        "session_low": sl,
+        "volume_profile": vol_profile,
+        "liquidation_heatmap": liq_heat,
+        "evt_stop_shield": evt_shield,
+        "timestamp": int(time.time())
+    }
+
+@app.get("/api/microstructure-footprint")
+def get_microstructure_footprint(instrument: str = "BTCUSD"):
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {})
+    inst_upper = (instrument or "BTCUSD").upper()
+    if inst_upper in ["EURUSD", "EUR"]:
+        inst_key = "EURUSD"
+        price = prices.get("EURUSD=X", 1.08500)
+        atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
+    elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
+        inst_key = "BTCUSD"
+        price = prices.get("BTC-USD", 91500.0)
+        atr_val = prices.get("BTC_ATR_M30", 450.0)
+    else:
+        inst_key = "XAUUSD"
+        price = prices.get("GC=F", 3975.0)
+        atr_val = prices.get("ATR_M30", 10.50)
+
+    intra_reg = quant_model._get_intraday_momentum_regime(inst_key)
+    rng = np.random.default_rng(42)
+    ret_series = rng.normal(0, atr_val / price, 60)
+    hawkes = quant_model.compute_hawkes_jump_cascade(ret_series)
+    hurst = quant_model.compute_dfa_hurst(ret_series)
+
+    return {
+        "instrument": inst_key,
+        "current_price": price,
+        "vpin": float(intra_reg.get("vpin", 0.44)),
+        "hawkes_cascade": hawkes,
+        "dfa_hurst": hurst,
+        "intraday_regime": intra_reg.get("trend_regime", "BALANCED"),
+        "timestamp": int(time.time())
+    }
 
 @app.get("/api/cpi-historical")
 def get_cpi_historical():

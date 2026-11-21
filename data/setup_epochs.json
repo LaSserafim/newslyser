@@ -1,7 +1,7 @@
 {
   "daily": {
-    "created_at": 1795193848,
-    "expires_at": 1795199248
+    "created_at": 1795244686,
+    "expires_at": 1795250086
   },
   "intraday": {
     "created_at": 1795183078,
@@ -20,31 +20,35 @@
     "expires_at": 1795014206
   },
   "daily_eurusd": {
-    "created_at": 1795189544,
-    "expires_at": 1795194944
+    "created_at": 1795242107,
+    "expires_at": 1795247507
   },
   "news_xauusd": {
     "created_at": 1795183747,
     "expires_at": 1795187347
   },
   "daily_xauusd": {
-    "created_at": 1795190040,
-    "expires_at": 1795195440
+    "created_at": 1795240141,
+    "expires_at": 1795245541
   },
   "intraday_xauusd": {
-    "created_at": 1795184642,
-    "expires_at": 1795199042
+    "created_at": 1795231937,
+    "expires_at": 1795246337
   },
   "scalping_xauusd": {
-    "created_at": 1795194180,
-    "expires_at": 1795197780
+    "created_at": 1795242117,
+    "expires_at": 1795245717
   },
   "swing_xauusd": {
     "created_at": 1795184671,
     "expires_at": 1795616671
   },
   "daily_btcusd": {
-    "created_at": 1795185277,
-    "expires_at": 1795190677
+    "created_at": 1795244684,
+    "expires_at": 1795250084
+  },
+  "intraday_btcusd": {
+    "created_at": 1795240147,
+    "expires_at": 1795254547
   }
 }

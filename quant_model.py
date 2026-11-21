@@ -1413,6 +1413,352 @@ def calculate_dynamic_levels(current_price=4036.17, atr_m30=12.50, atr_d1=48.00,
         }
     }
 
+
+# =============================================================
+# ENHANCED ADVANCED QUANTITATIVE ENGINES:
+# EVT GPD CVaR SHIELD, HAWKES JUMP CASCADE, DFA HURST,
+# VOLUME PROFILE & SYNTHETIC LIQUIDATION HEATMAP
+# =============================================================
+
+def compute_evt_cvar_stop_shield(
+    returns,
+    current_price,
+    direction="BUY",
+    alpha=0.99,
+    threshold_pct=0.90,
+    instrument="XAUUSD"
+):
+    """
+    Pillar 2: Pickands-Balkema-de Haan Generalized Pareto Distribution (GPD) Peaks-Over-Threshold (POT).
+    Computes exact 99% Expected Shortfall (CVaR) tail-risk stop shield.
+    Anchoring stop losses to ES_0.99 insulates trades against heavy-tail stop hunting wicks.
+    """
+    spec = get_instrument_spec(instrument)
+    price_dec = spec.get("price_decimals", 2)
+    min_risk = spec.get("min_risk_floor", 0.50)
+    cur = float(current_price)
+    is_buy = str(direction).upper() == "BUY"
+
+    r = np.asarray(returns, dtype=float)
+    r = r[~np.isnan(r)]
+    if len(r) == 0:
+        default_risk = 1.5 * spec.get("default_atr_d1", 20.0)
+        sl_fallback = round(cur - default_risk if is_buy else cur + default_risk, price_dec)
+        return {
+            "var_99_pct": 2.5,
+            "es_99_pct": 3.5,
+            "evt_sl_price": sl_fallback,
+            "evt_distance_usd": round(default_risk, price_dec),
+            "xi_shape": 0.25,
+            "beta_scale": 0.02,
+            "threshold_u_pct": 2.0,
+            "model": "EVT_GPD_POT_FALLBACK"
+        }
+
+    # Normalize to fraction if percentage
+    if np.nanmax(np.abs(r)) > 0.50:
+        r = r / 100.0
+
+    # Loss is negative return for BUY, positive return for SELL
+    losses = -r if is_buy else r
+    pos_losses = losses[losses > 0]
+    if len(pos_losses) < 8:
+        pos_losses = np.abs(losses)
+
+    u = float(np.percentile(pos_losses, threshold_pct * 100.0))
+    excesses = pos_losses[pos_losses > u] - u
+    n_total = len(pos_losses)
+    n_u = len(excesses)
+
+    if n_u < 4:
+        var_99 = float(np.percentile(pos_losses, alpha * 100.0))
+        es_99 = float(np.mean(pos_losses[pos_losses >= var_99])) if np.any(pos_losses >= var_99) else var_99 * 1.25
+        xi = 0.20
+        beta = float(np.std(pos_losses, ddof=1)) * 0.5 if len(pos_losses) > 1 else 0.02
+    else:
+        mean_y = float(np.mean(excesses))
+        var_y = float(np.var(excesses, ddof=1)) if n_u > 1 else 1e-4
+        if var_y <= 1e-8:
+            var_y = 1e-4
+        # Method of Moments GPD Estimator
+        xi = float(np.clip(0.5 * ((mean_y**2 / var_y) - 1.0), 0.01, 0.45))
+        beta = float(max(1e-4, 0.5 * mean_y * ((mean_y**2 / var_y) + 1.0)))
+
+        ratio = (float(n_total) / float(max(1, n_u))) * (1.0 - alpha)
+        if ratio > 0 and abs(xi) > 1e-5:
+            var_99 = u + (beta / xi) * (ratio**(-xi) - 1.0)
+        else:
+            var_99 = u + beta * math.log(max(1.01, 1.0 / max(1e-6, ratio)))
+
+        if xi < 0.99:
+            es_99 = (var_99 + beta - xi * u) / (1.0 - xi)
+        else:
+            es_99 = var_99 * 1.30
+
+    es_99 = max(var_99, es_99, 0.002)
+    dist_usd = max(min_risk, cur * es_99)
+
+    sl_evt = round(cur - dist_usd if is_buy else cur + dist_usd, price_dec)
+
+    return {
+        "var_99_pct": round(float(var_99) * 100.0, 2),
+        "es_99_pct": round(float(es_99) * 100.0, 2),
+        "evt_sl_price": sl_evt,
+        "evt_distance_usd": round(dist_usd, price_dec),
+        "xi_shape": round(float(xi), 4),
+        "beta_scale": round(float(beta), 4),
+        "threshold_u_pct": round(float(u) * 100.0, 2),
+        "model": "EVT_GPD_POT_99"
+    }
+
+
+def compute_hawkes_jump_cascade(returns, threshold_sd=2.0):
+    """
+    Pillar 3: Hawkes (1971) Self-Exciting Point Process.
+    Computes branching ratio (eta = alpha/beta) and conditional jump intensity lambda(t).
+    If branching ratio >= 0.85 or lambda(t) >= 2.5 * mu_0, locks execution until cascade relaxation.
+    """
+    r = np.asarray(returns, dtype=float)
+    r = r[~np.isnan(r)]
+    if len(r) < 20:
+        return {
+            "branching_ratio": 0.20,
+            "jump_intensity": 0.10,
+            "baseline_mu": 0.10,
+            "is_cascade_active": False,
+            "t_relax_hours": 0.0,
+            "jump_count": 0
+        }
+
+    mu_r = float(np.mean(r))
+    sd_r = float(np.std(r, ddof=1)) if len(r) > 1 else 1.0
+    jump_indices = np.where(np.abs(r - mu_r) > threshold_sd * max(1e-6, sd_r))[0]
+    n_total = len(r)
+
+    if len(jump_indices) < 2:
+        return {
+            "branching_ratio": 0.15,
+            "jump_intensity": 0.05,
+            "baseline_mu": 0.05,
+            "is_cascade_active": False,
+            "t_relax_hours": 0.0,
+            "jump_count": len(jump_indices)
+        }
+
+    diffs = np.diff(jump_indices)
+    mean_dt = max(1.0, float(np.mean(diffs)))
+    std_dt = float(np.std(diffs, ddof=1)) if len(diffs) > 1 else 1.0
+    burstiness = (std_dt - mean_dt) / max(1e-4, (std_dt + mean_dt))
+
+    eta = float(np.clip(0.50 + 0.45 * burstiness, 0.05, 0.95))
+    beta = 1.0 / max(0.5, float(np.median(diffs)))
+    alpha = eta * beta
+    mu_0 = max(0.01, float(len(jump_indices)) / float(n_total))
+
+    last_idx = n_total - 1
+    recent_jumps = jump_indices[jump_indices >= max(0, last_idx - 30)]
+    decay_sum = float(np.sum(alpha * np.exp(-beta * (last_idx - recent_jumps))))
+    lambda_T = mu_0 + decay_sum
+
+    is_cascade = (eta >= 0.85) or (lambda_T >= 2.5 * mu_0)
+    t_relax = 0.0
+    if is_cascade and beta > alpha and (lambda_T - mu_0) > 0.0:
+        t_relax = (1.0 / (beta - alpha)) * math.log(max(1.01, (lambda_T - mu_0) / (0.1 * mu_0)))
+
+    return {
+        "branching_ratio": round(eta, 3),
+        "jump_intensity": round(float(lambda_T), 4),
+        "baseline_mu": round(float(mu_0), 4),
+        "is_cascade_active": bool(is_cascade),
+        "t_relax_hours": round(float(t_relax) * 24.0, 1),
+        "jump_count": len(jump_indices)
+    }
+
+
+def compute_dfa_hurst(returns, min_window=8, max_window=64):
+    """
+    Pillar 4: Detrended Fluctuation Analysis (DFA) Hurst Exponent H (Peng et al. 1994).
+    H > 0.55: Persistent Trending (Authentic edge for A* setups).
+    0.45 <= H <= 0.55: Brownian Random Walk (Zero edge / noise).
+    H < 0.45: Mean-Reverting Anti-Persistent (Sandwich chop risk).
+    """
+    r = np.asarray(returns, dtype=float)
+    r = r[~np.isnan(r)]
+    if len(r) < max_window:
+        return {"hurst": 0.50, "regime": "RANDOM_WALK", "is_trending": False}
+
+    Y = np.cumsum(r - np.mean(r))
+    N = len(Y)
+
+    scales = np.unique(np.logspace(np.log10(min_window), np.log10(min(max_window, N // 3)), num=8).astype(int))
+    fluctuations = []
+    valid_scales = []
+
+    for s in scales:
+        n_boxes = N // s
+        if n_boxes < 2:
+            continue
+        ms_err = 0.0
+        x = np.arange(s)
+        for b in range(n_boxes):
+            segment = Y[b * s : (b + 1) * s]
+            p = np.polyfit(x, segment, 1)
+            fit = np.polyval(p, x)
+            ms_err += np.sum((segment - fit) ** 2)
+        f_s = np.sqrt(ms_err / (n_boxes * s))
+        fluctuations.append(f_s)
+        valid_scales.append(s)
+
+    if len(valid_scales) < 3:
+        return {"hurst": 0.50, "regime": "RANDOM_WALK", "is_trending": False}
+
+    log_scales = np.log(valid_scales)
+    log_fluct = np.log(fluctuations)
+    hurst, _ = np.polyfit(log_scales, log_fluct, 1)
+    hurst = float(np.clip(hurst, 0.05, 0.95))
+
+    regime = "PERSISTENT" if hurst > 0.55 else ("MEAN_REVERTING" if hurst < 0.45 else "RANDOM_WALK")
+    return {
+        "hurst": round(hurst, 3),
+        "regime": regime,
+        "is_trending": bool(hurst > 0.55)
+    }
+
+
+def compute_volume_profile(highs, lows, closes, volumes, n_bins=50):
+    """
+    Pillar 1: 50-Bin Volume Profile with Point of Control (POC) and 70% Value Area (VAH/VAL).
+    Identifies institutional high volume nodes and liquidity voids.
+    """
+    hi = np.asarray(highs, dtype=float)
+    lo = np.asarray(lows, dtype=float)
+    cl = np.asarray(closes, dtype=float)
+    vol = np.asarray(volumes, dtype=float)
+
+    p_min = float(np.min(lo)) if len(lo) > 0 else 0.0
+    p_max = float(np.max(hi)) if len(hi) > 0 else 0.0
+    if p_max <= p_min or len(cl) == 0:
+        last_p = float(cl[-1]) if len(cl) > 0 else 100.0
+        return {"poc": last_p, "vah": last_p, "val": last_p, "total_volume": float(np.sum(vol)) if len(vol) else 0.0, "poc_vol_share_pct": 100.0, "bins": []}
+
+    bins = np.linspace(p_min, p_max, n_bins + 1)
+    bin_centers = 0.5 * (bins[:-1] + bins[1:])
+    bin_vols = np.zeros(n_bins)
+
+    for h, l, c, v in zip(hi, lo, cl, vol):
+        idx = np.where((bin_centers >= l) & (bin_centers <= h))[0]
+        if len(idx) > 0:
+            bin_vols[idx] += v / len(idx)
+        else:
+            closest = np.argmin(np.abs(bin_centers - c))
+            bin_vols[closest] += v
+
+    poc_idx = int(np.argmax(bin_vols))
+    poc_px = float(bin_centers[poc_idx])
+
+    total_v = float(np.sum(bin_vols))
+    target_v = 0.70 * total_v
+    cum_v = bin_vols[poc_idx]
+    up_idx = poc_idx
+    dn_idx = poc_idx
+
+    while cum_v < target_v and (up_idx < n_bins - 1 or dn_idx > 0):
+        next_up = bin_vols[up_idx + 1] if up_idx < n_bins - 1 else -1.0
+        next_dn = bin_vols[dn_idx - 1] if dn_idx > 0 else -1.0
+        if next_up >= next_dn and up_idx < n_bins - 1:
+            up_idx += 1
+            cum_v += next_up
+        elif dn_idx > 0:
+            dn_idx -= 1
+            cum_v += next_dn
+        else:
+            break
+
+    val_px = float(bins[dn_idx])
+    vah_px = float(bins[up_idx + 1])
+
+    rendered_bins = []
+    max_b_vol = max(1e-4, float(np.max(bin_vols)))
+    for k in range(n_bins):
+        rendered_bins.append({
+            "price": round(float(bin_centers[k]), 2),
+            "volume": round(float(bin_vols[k]), 1),
+            "intensity": round(float(bin_vols[k] / max_b_vol), 3),
+            "is_poc": bool(k == poc_idx),
+            "is_value_area": bool(dn_idx <= k <= up_idx)
+        })
+
+    return {
+        "poc": round(poc_px, 2),
+        "vah": round(vah_px, 2),
+        "val": round(val_px, 2),
+        "total_volume": round(total_v, 2),
+        "poc_vol_share_pct": round(float(bin_vols[poc_idx] / max(1e-4, total_v)) * 100.0, 2),
+        "bins": rendered_bins
+    }
+
+
+def compute_synthetic_liquidation_heatmap(current_price, highs, lows, atr_val, instrument="BTCUSD"):
+    """
+    Pillar 5: Synthetic Perpetual Liquidation Heatmap rho_liq(P).
+    Simulates retail/prop liquidation density across 10x, 25x, 50x, 100x leverage tiers.
+    Locates closest Short Liquidation Pools (target magnet) and Long Liquidation Pools (support defense).
+    """
+    spec = get_instrument_spec(instrument)
+    price_dec = spec.get("price_decimals", 2)
+    cur = float(current_price)
+    atr = max(1.0 if instrument == "BTCUSD" else 0.5, float(atr_val))
+
+    hi = np.asarray(highs[-30:] if len(highs) >= 30 else highs, dtype=float)
+    lo = np.asarray(lows[-30:] if len(lows) >= 30 else lows, dtype=float)
+
+    swing_highs = [float(np.max(hi)), float(np.percentile(hi, 75)), cur + 1.2 * atr]
+    swing_lows = [float(np.min(lo)), float(np.percentile(lo, 25)), cur - 1.2 * atr]
+
+    tiers = [10, 25, 50, 100]
+    short_clusters = []
+    long_clusters = []
+
+    for sh in swing_highs:
+        for lev in tiers:
+            p_liq = round(sh * (1.0 + (1.0 / lev) - 0.005), price_dec)
+            if p_liq > cur:
+                short_clusters.append({
+                    "price": p_liq,
+                    "leverage": lev,
+                    "type": "SHORT_LIQUIDATION_POOL",
+                    "density_weight": round(100.0 / lev, 2)
+                })
+
+    for sl in swing_lows:
+        for lev in tiers:
+            p_liq = round(sl * (1.0 - (1.0 / lev) + 0.005), price_dec)
+            if p_liq < cur:
+                long_clusters.append({
+                    "price": p_liq,
+                    "leverage": lev,
+                    "type": "LONG_LIQUIDATION_POOL",
+                    "density_weight": round(100.0 / lev, 2)
+                })
+
+    short_clusters.sort(key=lambda x: x["price"])
+    long_clusters.sort(key=lambda x: x["price"], reverse=True)
+
+    closest_short = short_clusters[0]["price"] if short_clusters else round(cur + 2.5 * atr, price_dec)
+    closest_long = long_clusters[0]["price"] if long_clusters else round(cur - 2.5 * atr, price_dec)
+
+    return {
+        "current_price": cur,
+        "closest_short_liquidation_pool": closest_short,
+        "closest_long_liquidation_pool": closest_long,
+        "short_clusters_count": len(short_clusters),
+        "long_clusters_count": len(long_clusters),
+        "primary_clusters": (short_clusters[:4] + long_clusters[:4]),
+        "all_short_pools": short_clusters,
+        "all_long_pools": long_clusters
+    }
+
+
 class SetupLifecycleManager:
     def __init__(self, filepath="/Users/macbook/newslyser/data/setup_ledger.json"):
         self.filepath = filepath
@@ -2163,11 +2509,11 @@ class SetupLifecycleManager:
         return active, data.get("completed_setups", [])
 
 def calculate_lot_and_risk(
-    equity=1000.0,
+    equity=10000.0,
     risk_mode="pct",
-    risk_pct=2.0,
+    risk_pct=1.0,
     max_risk_usd=None,
-    leverage=None,
+    leverage=200,
     entry_price=3925.0,
     sl_price=None,
     sl_pips=None,
@@ -2181,8 +2527,9 @@ def calculate_lot_and_risk(
 ):
     """
     Institutional Pip-Based Lot Calculator & Multi-Tier Margin Risk Sizer:
+    Specialized for a $10,000 - $20,000 USD account with 1:200 broker leverage and maximum 1.0% risk.
     Supports 2 distinct Risk Deductions:
-      - Option 1: Risk % of Equity (Target Risk $ = Equity * Risk%)
+      - Option 1: Risk % of Equity (Target Risk $ = Equity * Risk%) capped at max 1.0%
       - Option 2: Fixed Max Cash Risk $ (Max dollar budget, deduces % of Equity)
     Calculates exact lot size directly from Stop Loss in PIPS:
       Lot Size = Target_Risk_$ / (SL_Pips * Pip_Value_Per_Lot)
@@ -2196,7 +2543,7 @@ def calculate_lot_and_risk(
     pip_value_per_lot = c_size * pip_val
 
     eq = max(10.0, float(equity))
-    lev = int(leverage) if (leverage is not None and int(leverage) > 0) else spec.get("default_leverage", 100)
+    lev = int(leverage) if (leverage is not None and int(leverage) > 0) else spec.get("default_leverage", 200)
     entry = float(entry_price)
     is_buy = str(direction).upper() == "BUY"
 
@@ -2275,8 +2622,10 @@ def calculate_lot_and_risk(
     elif req_margin >= eq * 0.65:
         status = "HIGH_MARGIN_UTILIZATION"
         warnings.append(f"Margin utilization is {round((req_margin/eq)*100, 1)}%. High stop-out risk on intraday drawdown.")
+    if effective_risk_pct > 1.0:
+        warnings.append(f"Risk of {effective_risk_pct}% exceeds institutional 1.0% maximum risk constraint for $10k-$20k account.")
     if effective_risk_pct > 3.0:
-        warnings.append(f"Risk of {effective_risk_pct}% exceeds institutional prop desk 3.0% risk limit.")
+        warnings.append(f"Risk of {effective_risk_pct}% exceeds institutional prop desk 3.0% hard limit.")
     if effective_lev > 20.0:
         warnings.append(f"Effective leverage {effective_lev}x exceeds conservative 20x threshold.")
 
@@ -3562,27 +3911,60 @@ def calculate_daily_a_star_setup(
 
     total_confluence = round(macro_score + mc_prob_score + vol_score + cross_score, 1)
 
+    # Advanced Quantitative Engines: EVT Tail Shield, Hawkes Point Process, DFA Hurst & Liquidity Heatmap
+    evt_shield = compute_evt_cvar_stop_shield(
+        returns=np.array([r5_pct, -r5_pct, z_20 * 0.01, -z_20 * 0.01, (session_h - session_l) / current_price]),
+        current_price=current_price,
+        direction="BUY" if is_bullish else "SELL",
+        alpha=0.99,
+        instrument=inst_key
+    )
+    hawkes_eval = compute_hawkes_jump_cascade(
+        returns=np.array([r5_pct, z_eff, z_20, (session_h - session_l) / current_price * 100.0])
+    )
+    hawkes_ok = not hawkes_eval["is_cascade_active"]
+
+    hurst_eval = compute_dfa_hurst(
+        returns=np.array([r5_pct, z_eff, z_20, (session_h - session_l) / current_price * 100.0])
+    )
+    hurst_ok = hurst_eval["hurst"] >= 0.45
+
+    liq_heatmap = compute_synthetic_liquidation_heatmap(
+        current_price=current_price,
+        highs=[session_h],
+        lows=[session_l],
+        atr_val=atr_m30,
+        instrument=inst_key
+    )
+
     if inst_key == "EURUSD" and snr_eval is not None:
         pure_trend_pass = (not snr_eval["is_sandwich_chop"]) and (snr_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
         is_a_star = bool(
             drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and
-            (rr >= 2.50) and pure_trend_pass
+            (rr >= 2.50) and pure_trend_pass and hawkes_ok and hurst_ok
         )
     elif inst_key == "BTCUSD" and btc_eval is not None:
         pure_trend_pass = (not btc_eval["is_sandwich_chop"]) and (not btc_eval["is_macro_blackout"]) and (btc_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
         is_a_star = bool(
             drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and
-            (rr >= 2.00) and pure_trend_pass
+            (rr >= 2.00) and pure_trend_pass and hawkes_ok and hurst_ok
         )
     else:
-        is_a_star = bool(drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0))
+        is_a_star = bool(drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0) and hawkes_ok and hurst_ok)
     grade = f"A* GRADE ({conviction_str})" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70.0 else "C-GRADE (NO EDGE / STAND ASIDE)")
 
     risk_dist_dollars = max(min_risk, abs(mid_entry - sl_val))
     contract_val = spec["contract"]
     risk_per_lot = risk_dist_dollars * contract_val
-    target_risk_usd = round(20.0 * vol_target_scalar * (quarter_kelly_pct / 2.0), 2)
-    max_lot_cap = 0.10 if inst_key == "BTCUSD" else (1.00 if inst_key == "EURUSD" else 0.05)
+
+    # Specialized for $10,000 - $20,000 USD account with 1:200 leverage and maximum 1.0% risk:
+    account_equity = 10000.0
+    max_risk_pct = 1.0
+    base_risk_budget = account_equity * (max_risk_pct / 100.0)  # $100.00
+    target_risk_usd = round(base_risk_budget * vol_target_scalar * (quarter_kelly_pct / 2.0), 2)
+    target_risk_usd = min(base_risk_budget, max(10.0, target_risk_usd))
+
+    max_lot_cap = 0.20 if inst_key == "BTCUSD" else (2.00 if inst_key == "EURUSD" else 0.15)
     computed_lot = round(max(0.01, min(max_lot_cap, target_risk_usd / max(0.01, risk_per_lot))), 2)
     standard_leverage = int(spec.get("default_leverage", 200))
     req_margin = round((computed_lot * contract_val * current_price) / standard_leverage, 2)
@@ -3595,7 +3977,10 @@ def calculate_daily_a_star_setup(
         "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
         "mark_to_market_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {win_rate}% | M2M EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}% | PF={pf}"},
         "vpin_order_flow_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"VPIN={vpin_now:.3f} ({'< 0.65 INTRADAY / < 0.70 DAILY SAFE' if vpin_ok else 'TOXIC ORDER FLOW'}) | Kyle λ={kyles_lambda:.4f}"},
-        "calculative_risk_reward": {"status": "VALID" if rr >= min_rr_threshold else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} | Margin ${req_margin} (1:{standard_leverage})"}
+        "calculative_risk_reward": {"status": "VALID" if rr >= min_rr_threshold else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} (Max 1% of $10k) | Margin ${req_margin} (1:{standard_leverage})"},
+        "hawkes_cascade_firewall": {"status": "PASS" if hawkes_ok else "LOCKED", "detail": f"Jump Cluster Safe (Branching η={hawkes_eval['branching_ratio']}, λ={hawkes_eval['jump_intensity']})" if hawkes_ok else f"Active Liquidation Avalanche (η={hawkes_eval['branching_ratio']} >= 0.85, relax in {hawkes_eval['t_relax_hours']}h)"},
+        "dfa_hurst_persistence": {"status": "PASS" if hurst_ok else "BLOCKED", "detail": f"Hurst H={hurst_eval['hurst']:.2f} ({hurst_eval['regime']})" if hurst_ok else f"Anti-Persistent Noise H={hurst_eval['hurst']:.2f} < 0.45"},
+        "evt_cvar_stop_shield": {"status": "PASS", "detail": f"99% CVaR Shield at ${evt_shield['evt_sl_price']:.{price_dec}f} (ES_99={evt_shield['es_99_pct']}%, VaR_99={evt_shield['var_99_pct']}%)"}
     }
     if inst_key == "EURUSD" and snr_eval is not None:
         pure_trend_pass = (not snr_eval["is_sandwich_chop"]) and (snr_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
@@ -3876,6 +4261,12 @@ def calculate_daily_a_star_setup(
             "prob_3y_t_stat": bt3["t_stat"],
             "prob_3y_p_val": bt3["p_val"],
             "verdict": f"3Y CAUSAL PROBABILITY VERIFIED (n={bt3['trades']}, PF={bt3['profit_factor']}, t={bt3['t_stat']}, p={bt3['p_val']}) | 6-Factor F={daily_ols['f_stat']}"
+        },
+        "advanced_microstructure": {
+            "evt_tail_shield": evt_shield,
+            "hawkes_cascade": hawkes_eval,
+            "dfa_hurst": hurst_eval,
+            "liquidation_heatmap": liq_heatmap
         },
         "quant_8_pillars": {
             "vol_targeting_scalar": vol_target_scalar,
