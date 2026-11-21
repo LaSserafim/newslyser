@@ -837,8 +837,8 @@ def get_garch_predicted_shock(event_type: str = "cpi"):
     wti_22d = lead.get("wti_22d_pct", 0.0)
     return quant_model.predict_garch_shock_dispersion(event_type=event_type, vix_val=vix_val, wti_change_pct=wti_22d)
 @app.get("/api/garch-volatility-90d")
-def get_garch_volatility_90d(event_type: str = "cpi"):
-    return quant_model.calculate_garch_90d_volatility(event_type=event_type)
+def get_garch_volatility_90d(event_type: str = "cpi", instrument: str = "XAUUSD"):
+    return quant_model.calculate_garch_90d_volatility(event_type=event_type, instrument=instrument)
 @app.get("/api/yoy-timeline")
 def get_yoy_timeline():
     with open(os.path.join(DATA_DIR, "cpi_yoy_timeline.json")) as f:
@@ -852,12 +852,26 @@ def get_academic_literature():
     return data
 
 @app.get("/api/monte-carlo")
-def get_monte_carlo(horizon: str = "1", z: str = "0.0", price: float = None, event_type: str = "cpi", n_paths: int = 10000, min_confidence: int = 95):
+def get_monte_carlo(horizon: str = "1", z: str = "0.0", price: float = None, event_type: str = "cpi", n_paths: int = 10000, min_confidence: int = 95, instrument: str = "XAUUSD"):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
+    inst_upper = (instrument or "XAUUSD").upper()
+    if "EUR" in inst_upper:
+        inst_key = "EURUSD"
+        def_price = prices.get("EURUSD_REALTIME") or prices.get("EURUSD=X", 1.09500)
+        def_atr = prices.get("EURUSD_ATR_M30", 0.00085)
+    elif "BTC" in inst_upper:
+        inst_key = "BTCUSD"
+        def_price = prices.get("BTC_REALTIME") or prices.get("BTC-USD", 95000.0)
+        def_atr = prices.get("BTC_ATR_M30", 650.0)
+    else:
+        inst_key = "XAUUSD"
+        def_price = prices.get("XAUUSD_REALTIME") or prices.get("GC=F", 3975.0)
+        def_atr = prices.get("ATR_M30", 10.80)
+
     if price is None:
-        price = prices.get("GC=F", 3975.0)
-    atr_val = prices.get("ATR_M30", 10.80)
+        price = def_price
+    atr_val = def_atr
 
     # Robust parsing for horizon and z (handles strings like 'intraday', 'undefined', numeric)
     h_str = str(horizon).lower()
@@ -882,7 +896,16 @@ def get_monte_carlo(horizon: str = "1", z: str = "0.0", price: float = None, eve
     except Exception:
         z_val = -1.18 if str(event_type).lower() == "astar" else 0.0
 
-    return quant_model.run_monte_carlo(current_price=price, z_shock=z_val, horizon_days=h_days, n_paths=n_paths, event_type=event_type, atr_m30=atr_val, min_confidence=min_confidence)
+    return quant_model.run_monte_carlo(
+        current_price=price,
+        z_shock=z_val,
+        horizon_days=h_days,
+        n_paths=n_paths,
+        event_type=event_type,
+        atr_m30=atr_val,
+        min_confidence=min_confidence,
+        instrument=inst_key
+    )
 
 @app.get("/api/pdf-distribution")
 def get_pdf_distribution(event_type: str = "cpi"):
@@ -1446,22 +1469,22 @@ def get_liquidity_heatmap(instrument: str = "BTCUSD"):
     inst_upper = (instrument or "BTCUSD").upper()
     if inst_upper in ["EURUSD", "EUR"]:
         inst_key = "EURUSD"
-        price = prices.get("EURUSD=X", 1.08500)
+        price = prices.get("EURUSD_REALTIME") or prices.get("EURUSD=X", 1.08500)
         atr_val = prices.get("EURUSD_ATR_M30", 0.00120)
-        sh = prices.get("EURUSD_SESSION_HIGH", price + 0.0030)
-        sl = prices.get("EURUSD_SESSION_LOW", price - 0.0030)
+        sh = prices.get("EURUSD_SESSION_HIGH") or (price + 0.0030)
+        sl = prices.get("EURUSD_SESSION_LOW") or (price - 0.0030)
     elif inst_upper in ["BTCUSD", "BTC", "BITCOIN"]:
         inst_key = "BTCUSD"
-        price = prices.get("BTC-USD", 91500.0)
+        price = prices.get("BTC_REALTIME") or prices.get("BTC-USD", 91500.0)
         atr_val = prices.get("BTC_ATR_M30", 450.0)
-        sh = prices.get("BTC_SESSION_HIGH", price + 1200.0)
-        sl = prices.get("BTC_SESSION_LOW", price - 1200.0)
+        sh = prices.get("BTC_SESSION_HIGH") or (price + 1200.0)
+        sl = prices.get("BTC_SESSION_LOW") or (price - 1200.0)
     else:
         inst_key = "XAUUSD"
-        price = prices.get("GC=F", 3975.0)
+        price = prices.get("XAUUSD_REALTIME") or prices.get("GC=F", 3975.0)
         atr_val = prices.get("ATR_M30", 10.50)
-        sh = prices.get("SESSION_HIGH", price + 25.0)
-        sl = prices.get("SESSION_LOW", price - 25.0)
+        sh = prices.get("SESSION_HIGH") or (price + 25.0)
+        sl = prices.get("SESSION_LOW") or (price - 25.0)
 
     # Volume Profile: 24 sample segments around session
     n_sample_bars = 24
@@ -1473,7 +1496,7 @@ def get_liquidity_heatmap(instrument: str = "BTCUSD"):
     sample_vols = np.abs(rng.normal(1000, 300, n_sample_bars)) + 100
 
     vol_profile = quant_model.compute_volume_profile(
-        highs=sample_highs, lows=sample_lows, closes=sample_closes, volumes=sample_vols, n_bins=50
+        highs=sample_highs, lows=sample_lows, closes=sample_closes, volumes=sample_vols, n_bins=50, instrument=inst_key
     )
     liq_heat = quant_model.compute_synthetic_liquidation_heatmap(
         current_price=price, highs=[sh, float(np.max(sample_highs))], lows=[sl, float(np.min(sample_lows))], atr_val=atr_val, instrument=inst_key
@@ -1486,8 +1509,11 @@ def get_liquidity_heatmap(instrument: str = "BTCUSD"):
         instrument=inst_key
     )
 
+    spec = quant_model.get_instrument_spec(inst_key)
     return {
         "instrument": inst_key,
+        "symbol": inst_key,
+        "price_decimals": spec.get("price_decimals", 2),
         "current_price": price,
         "atr_m30": atr_val,
         "session_high": sh,

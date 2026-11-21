@@ -963,29 +963,32 @@ def predict_garch_shock_dispersion(event_type="cpi", survey_sd=0.075, vix_val=19
 
 _GARCH_90D_CACHE = {}
 
-def calculate_garch_90d_volatility(event_type="cpi"):
+def calculate_garch_90d_volatility(event_type="cpi", instrument="XAUUSD"):
     """
     90-Day Bollerslev (1986) GARCH(1,1) Volatility Engine:
     Fits sigma_t^2 = omega + alpha * eps_{t-1}^2 + beta * sigma_{t-1}^2 via Variance-Targeted MLE
-    on authentic Gold (GC=F) daily returns.
+    on authentic instrument daily returns (Gold GC=F, EURUSD=X, BTC-USD).
     Extracts the 90-trading-day conditional volatility trajectory, 10-day rolling realized volatility,
     long-run unconditional volatility (sigma_LR), event-specific release shock markers,
     forward term-structure volatility forecast (T+1d to T+10d), and Engle (1982) ARCH LM diagnostic test.
     """
     import time
     ev = (event_type or "cpi").lower()
+    inst = (instrument or "XAUUSD").upper()
+    c_key = (ev, inst)
     now_ts = time.time()
-    cache_entry = _GARCH_90D_CACHE.get(ev)
+    cache_entry = _GARCH_90D_CACHE.get(c_key)
     if cache_entry and (now_ts - cache_entry["ts"] < 300.0):
         return cache_entry["val"]
 
+    yf_sym = "EURUSD=X" if "EUR" in inst else ("BTC-USD" if "BTC" in inst else "GC=F")
     try:
         import yfinance as yf
-        df = yf.download("GC=F", period="1y", interval="1d", progress=False, auto_adjust=False, threads=False)["Close"].dropna()
-        gc_close = df["GC=F"] if "GC=F" in df else df
+        df = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=False, threads=False)["Close"].dropna()
+        gc_close = df[yf_sym] if yf_sym in df else df
         rets = (np.log(gc_close / gc_close.shift(1)) * 100.0).dropna()
         if len(rets) < 60:
-            raise ValueError("Insufficient Yahoo daily return rows")
+            raise ValueError(f"Insufficient Yahoo daily return rows for {yf_sym}")
     except Exception:
         import os
         hist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "cpi_historical.json")
@@ -1134,7 +1137,7 @@ def calculate_garch_90d_volatility(event_type="cpi"):
         "event_markers": markers,
         "series": series
     }
-    _GARCH_90D_CACHE[ev] = {"ts": now_ts, "val": res}
+    _GARCH_90D_CACHE[c_key] = {"ts": now_ts, "val": res}
     return res
 _INTRADAY_CACHE = {"ts": 0.0, "closes": None}
 
@@ -1630,11 +1633,13 @@ def compute_dfa_hurst(returns, min_window=8, max_window=64):
     }
 
 
-def compute_volume_profile(highs, lows, closes, volumes, n_bins=50):
+def compute_volume_profile(highs, lows, closes, volumes, n_bins=50, instrument="BTCUSD"):
     """
     Pillar 1: 50-Bin Volume Profile with Point of Control (POC) and 70% Value Area (VAH/VAL).
-    Identifies institutional high volume nodes and liquidity voids.
+    Identifies institutional high volume nodes and liquidity voids. Multi-asset decimal precision.
     """
+    spec = get_instrument_spec(instrument)
+    price_dec = spec.get("price_decimals", 2)
     hi = np.asarray(highs, dtype=float)
     lo = np.asarray(lows, dtype=float)
     cl = np.asarray(closes, dtype=float)
@@ -1644,7 +1649,7 @@ def compute_volume_profile(highs, lows, closes, volumes, n_bins=50):
     p_max = float(np.max(hi)) if len(hi) > 0 else 0.0
     if p_max <= p_min or len(cl) == 0:
         last_p = float(cl[-1]) if len(cl) > 0 else 100.0
-        return {"poc": last_p, "vah": last_p, "val": last_p, "total_volume": float(np.sum(vol)) if len(vol) else 0.0, "poc_vol_share_pct": 100.0, "bins": []}
+        return {"poc": round(last_p, price_dec), "vah": round(last_p, price_dec), "val": round(last_p, price_dec), "total_volume": float(np.sum(vol)) if len(vol) else 0.0, "poc_vol_share_pct": 100.0, "bins": [], "price_decimals": price_dec}
 
     bins = np.linspace(p_min, p_max, n_bins + 1)
     bin_centers = 0.5 * (bins[:-1] + bins[1:])
@@ -1686,7 +1691,7 @@ def compute_volume_profile(highs, lows, closes, volumes, n_bins=50):
     max_b_vol = max(1e-4, float(np.max(bin_vols)))
     for k in range(n_bins):
         rendered_bins.append({
-            "price": round(float(bin_centers[k]), 2),
+            "price": round(float(bin_centers[k]), price_dec),
             "volume": round(float(bin_vols[k]), 1),
             "intensity": round(float(bin_vols[k] / max_b_vol), 3),
             "is_poc": bool(k == poc_idx),
@@ -1694,12 +1699,13 @@ def compute_volume_profile(highs, lows, closes, volumes, n_bins=50):
         })
 
     return {
-        "poc": round(poc_px, 2),
-        "vah": round(vah_px, 2),
-        "val": round(val_px, 2),
+        "poc": round(poc_px, price_dec),
+        "vah": round(vah_px, price_dec),
+        "val": round(val_px, price_dec),
         "total_volume": round(total_v, 2),
         "poc_vol_share_pct": round(float(bin_vols[poc_idx] / max(1e-4, total_v)) * 100.0, 2),
-        "bins": rendered_bins
+        "bins": rendered_bins,
+        "price_decimals": price_dec
     }
 
 
@@ -1712,7 +1718,8 @@ def compute_synthetic_liquidation_heatmap(current_price, highs, lows, atr_val, i
     spec = get_instrument_spec(instrument)
     price_dec = spec.get("price_decimals", 2)
     cur = float(current_price)
-    atr = max(1.0 if instrument == "BTCUSD" else 0.5, float(atr_val))
+    min_fl = spec.get("min_risk_floor", 0.0001) if instrument == "EURUSD" else (0.25 if instrument == "XAUUSD" else 1.0)
+    atr = max(min_fl, float(atr_val))
 
     hi = np.asarray(highs[-30:] if len(highs) >= 30 else highs, dtype=float)
     lo = np.asarray(lows[-30:] if len(lows) >= 30 else lows, dtype=float)
@@ -4700,15 +4707,21 @@ def _get_event_confidence_profile(event_type="cpi"):
 _MC_RESULT_CACHE = {}
 
 
-def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=10000, event_type="cpi", atr_m30=12.50, min_confidence=95):
+def run_monte_carlo(current_price=None, z_shock=0.0, horizon_days=1, n_paths=10000, event_type="cpi", atr_m30=None, min_confidence=95, instrument="XAUUSD"):
     """
     Coupled Black-Scholes Stochastic Volatility Rate-of-Change (dSigma/dt) + Kou (2002) Jump-Diffusion SDE:
     - Evolves correlated (S_t, sigma_t) paths anchored to live GLD ATM IV, 3Y ^GVZ mean-reversion (kappa, theta),
-      vol-of-vol clustering (xi), and price-vol correlation (rho).
+      vol-of-vol clustering (xi), and price-vol correlation (rho). Multi-asset calibrated (XAUUSD, EURUSD, BTCUSD).
     - Evaluates exact First-Passage P(Profit) vs P(Loss) and Expected Payoff (bps) from current_price.
     - Applies Zero-Luck 80%-99% Hypothesis Gate to determine BUY / SELL / STAND ASIDE.
     """
     ev_key = (event_type or "cpi").lower()
+    spec = get_instrument_spec(instrument)
+    sym = spec.get("symbol", "XAUUSD")
+    price_dec = spec.get("price_decimals", 2)
+    cur_p = float(current_price) if (current_price is not None and float(current_price) > 0) else spec.get("default_price", 4000.0)
+    atr = float(atr_m30) if (atr_m30 is not None and float(atr_m30) > 0) else spec.get("default_atr_m30", 10.0)
+
     try:
         h_days = max(0.1, float(horizon_days))
     except Exception:
@@ -4718,7 +4731,7 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     except Exception:
         z_flt = 0.0
 
-    c_key = (ev_key, round(h_days, 3), round(z_flt, 3), round(float(current_price), 2), round(float(atr_m30), 2), int(n_paths), int(min_confidence))
+    c_key = (sym, ev_key, round(h_days, 3), round(z_flt, 3), round(cur_p, price_dec), round(atr, price_dec), int(n_paths), int(min_confidence))
     now_mc = time.time()
     cached_mc = _MC_RESULT_CACHE.get(c_key)
     if cached_mc and (now_mc - cached_mc["ts"] < 5.0):
@@ -4734,8 +4747,14 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     ev = (event_type or "cpi").lower()
     if ev in ["daily", "astar"]:
         d_ols = _get_daily_cross_asset_ols()
-        beta_jump = -0.0040
-        emp_daily_vol = (d_ols["gold_daily_sd_pct"] / 100.0) * 0.72
+        base_daily_sd = spec.get("daily_sd_pct", 1.15)
+        emp_daily_vol = (base_daily_sd / 100.0) * 0.72
+        if sym == "EURUSD":
+            beta_jump = -0.0015
+        elif sym == "BTCUSD":
+            beta_jump = -0.0060
+        else:
+            beta_jump = -0.0040
     else:
         cal = _get_calibrated_event_params(ev)
         # Macro sensitivity: direct OLS -> 2SLS -> Bayesian shrinkage
@@ -4749,7 +4768,7 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         emp_daily_vol = max(0.006, (cal["empirical_gold_sd_pct"] / 100.0) * 0.75)
 
     # Dynamic coupling with Bollerslev (1986) GARCH(1,1) conditional volatility
-    garch_vol = calculate_garch_90d_volatility(ev)
+    garch_vol = calculate_garch_90d_volatility(ev, instrument=sym)
     garch_sum = garch_vol.get("summary", {})
     live_garch_ann = float(garch_sum.get("current_garch_ann_pct", 29.78)) / 100.0
     lr_garch_ann = float(garch_sum.get("long_run_unconditional_vol_pct", 28.37)) / 100.0
@@ -4769,15 +4788,15 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
 
     paths = np.zeros((n_paths, steps + 1))
     vol_paths = np.zeros((n_paths, steps + 1))
-    paths[:, 0] = current_price
+    paths[:, 0] = cur_p
     vol_paths[:, 0] = iv_0
 
     # Symmetric jump amplitudes at z=0 (no artificial negative drift bias)
     # Directional jump skew activates only when beta_jump != 0
     dir_sign = -1.0 if beta_jump < 0 else (1.0 if beta_jump > 0 else 0.0)
     p_up = float(1.0 / (1.0 + np.exp(-0.45 * dir_sign * float(z_shock)))) if dir_sign != 0.0 else 0.50
-    mean_up_jump = 0.0065
-    mean_down_jump = 0.0065
+    mean_up_jump = spec.get("kou_mean_up_jump", 0.0065)
+    mean_down_jump = spec.get("kou_mean_down_jump", 0.0065)
     eta1 = 1.0 / mean_up_jump
     eta2 = 1.0 / mean_down_jump
     kappa_j = (p_up * eta1 / max(1.0001, eta1 - 1.0)) + ((1.0 - p_up) * eta2 / (eta2 + 1.0)) - 1.0
@@ -4831,15 +4850,16 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     p_pos = float(np.mean(terminal_rets > 0) * 100.0)
     p_neg = float(np.mean(terminal_rets < 0) * 100.0)
 
-    sl_dist = max(4.0, 0.70 * float(atr_m30))
-    tp1_dist = max(10.0, 1.75 * float(atr_m30))
-    tp2_dist = max(16.0, 2.80 * float(atr_m30))
+    min_fl = spec.get("min_risk_floor", 0.50)
+    sl_dist = max(min_fl, 0.70 * atr)
+    tp1_dist = max(min_fl * 2.2, 1.75 * atr)
+    tp2_dist = max(min_fl * 3.5, 2.80 * atr)
+    spread_usd = spec.get("spread_usd", 0.35)
     sub = paths[:, 1:]
 
     def _fp_eval(tp_lvl, sl_lvl, is_buy_dir):
         p0 = paths[:, :-1]
         p1 = paths[:, 1:]
-        spread_usd = 0.35
         eff_tp = (tp_lvl + 0.5 * spread_usd) if is_buy_dir else (tp_lvl - 0.5 * spread_usd)
         eff_sl = (sl_lvl + 0.5 * spread_usd) if is_buy_dir else (sl_lvl - 0.5 * spread_usd)
         var_mat = np.maximum(1e-8, step_vols ** 2)
@@ -4896,11 +4916,11 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         decided = int(np.sum(win_m)) + int(np.sum(loss_m))
         dec_win = round((int(np.sum(win_m)) / max(1, decided)) * 100.0, 1)
         ev_usd = (p_prof / 100.0) * tp1_dist - (p_los / 100.0) * sl_dist
-        ev_bps = round((ev_usd / max(1.0, current_price)) * 10000.0, 1)
+        ev_bps = round((ev_usd / max(1e-4, cur_p)) * 10000.0, 1)
         return p_prof, p_los, dec_win, ev_bps
 
-    buy_tp1, buy_sl, buy_tp2 = round(current_price + tp1_dist, 2), round(current_price - sl_dist, 2), round(current_price + tp2_dist, 2)
-    sell_tp1, sell_sl, sell_tp2 = round(current_price - tp1_dist, 2), round(current_price + sl_dist, 2), round(current_price - tp2_dist, 2)
+    buy_tp1, buy_sl, buy_tp2 = round(cur_p + tp1_dist, price_dec), round(cur_p - sl_dist, price_dec), round(cur_p + tp2_dist, price_dec)
+    sell_tp1, sell_sl, sell_tp2 = round(cur_p - tp1_dist, price_dec), round(cur_p + sl_dist, price_dec), round(cur_p - tp2_dist, price_dec)
     pb_prof, pb_loss, pb_dec, ev_buy = _fp_eval(buy_tp1, buy_sl, True)
     ps_prof, ps_loss, ps_dec, ev_sell = _fp_eval(sell_tp1, sell_sl, False)
 
@@ -4917,10 +4937,12 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     best_dir = "BUY" if best_is_buy else "SELL"
 
     has_dir_edge = direct_pass and (abs(float(z_shock)) >= 0.20) and (best_ev_bps > 0.0) and (best_dec_win >= 50.0)
+    p_pfx = "" if sym == "EURUSD" else "$"
+    fmt_p = f"{cur_p:.{price_dec}f}"
     if has_dir_edge:
         decision = best_dir
         conf_lbl = f"{conf_prof['direct_max_conf']}% CURATED PASS"
-        decision_headline = f"{decision} XAUUSD // {conf_lbl}"
+        decision_headline = f"{decision} {sym} // {conf_lbl}"
         decision_reason = f"Direct {ev.upper()} passes {conf_prof['direct_max_conf']}% (<= {100-min_confidence}% luck risk) + BS Stoch-Vol EV={best_ev_bps:+.1f}bps (P_profit={best_p_prof}% vs P_loss={best_p_loss}%)."
     elif wave2_pass and not direct_pass:
         decision = "STAND ASIDE"
@@ -4935,20 +4957,20 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
 
     if best_is_buy:
         rec_ticket = {
-            "action": f"{decision} XAUUSD @ ${current_price:.2f}" if decision == "BUY" else f"CANDIDATE BUY (GATED) @ ${current_price:.2f}",
-            "entry_zone": f"${round(current_price - 0.15*atr_m30, 2):.2f} - ${round(current_price + 0.15*atr_m30, 2):.2f}",
-            "stop_loss": f"${buy_sl:.2f}",
-            "target": f"${buy_tp1:.2f}",
-            "target_2": f"${buy_tp2:.2f}",
+            "action": f"{decision} {sym} @ {p_pfx}{fmt_p}" if decision == "BUY" else f"CANDIDATE BUY (GATED) @ {p_pfx}{fmt_p}",
+            "entry_zone": f"{p_pfx}{round(cur_p - 0.15*atr, price_dec):.{price_dec}f} - {p_pfx}{round(cur_p + 0.15*atr, price_dec):.{price_dec}f}",
+            "stop_loss": f"{p_pfx}{buy_sl:.{price_dec}f}",
+            "target": f"{p_pfx}{buy_tp1:.{price_dec}f}",
+            "target_2": f"{p_pfx}{buy_tp2:.{price_dec}f}",
             "risk_reward_ratio": "1:2.50"
         }
     else:
         rec_ticket = {
-            "action": f"{decision} XAUUSD @ ${current_price:.2f}" if decision == "SELL" else f"CANDIDATE SELL (GATED) @ ${current_price:.2f}",
-            "entry_zone": f"${round(current_price - 0.15*atr_m30, 2):.2f} - ${round(current_price + 0.15*atr_m30, 2):.2f}",
-            "stop_loss": f"${sell_sl:.2f}",
-            "target": f"${sell_tp1:.2f}",
-            "target_2": f"${sell_tp2:.2f}",
+            "action": f"{decision} {sym} @ {p_pfx}{fmt_p}" if decision == "SELL" else f"CANDIDATE SELL (GATED) @ {p_pfx}{fmt_p}",
+            "entry_zone": f"{p_pfx}{round(cur_p - 0.15*atr, price_dec):.{price_dec}f} - {p_pfx}{round(cur_p + 0.15*atr, price_dec):.{price_dec}f}",
+            "stop_loss": f"{p_pfx}{sell_sl:.{price_dec}f}",
+            "target": f"{p_pfx}{sell_tp1:.{price_dec}f}",
+            "target_2": f"{p_pfx}{sell_tp2:.{price_dec}f}",
             "risk_reward_ratio": "1:2.50"
         }
 
@@ -4974,30 +4996,40 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
     if h_days == 1:
         time_labels = [f"T+{i}h" for i in range(steps + 1)]
         time_labels[0] = "T0 (08:30)"
+    elif h_days < 1:
+        total_hrs = int(round(h_days * 24))
+        time_labels = [f"T+{int(round(i * total_hrs / steps))}h" for i in range(steps + 1)]
+        time_labels[0] = "T0"
+        time_labels[-1] = f"T+{total_hrs}h"
     else:
         time_labels = [f"D{(i * h_days) / steps:.1f}" for i in range(steps + 1)]
         time_labels[0] = "D0 (T0)"
         time_labels[-1] = f"D{h_days:.1f}"
     mc_se_terminal = np.std(paths[:, -1]) / np.sqrt(n_paths)
-    mc_moe_95 = round(float(1.96 * mc_se_terminal), 2)
+    mc_moe_95 = round(float(1.96 * mc_se_terminal), price_dec)
 
     res_mc = {
         "event_type": event_type,
+        "instrument": sym,
+        "symbol": sym,
+        "price_decimals": price_dec,
+        "currency_prefix": p_pfx,
+        "unit": spec.get("unit", ""),
         "horizon_days": h_days,
         "steps": steps,
         "z_shock": round(float(z_shock), 2),
         "n_paths": n_paths,
-        "current_price": current_price,
+        "current_price": round(cur_p, price_dec),
         "mc_moe_terminal_dollars": mc_moe_95,
         "timesteps": time_labels,
         "percentiles": {
-            "p5": [round(float(v), 2) for v in p5],
-            "p25": [round(float(v), 2) for v in p25],
-            "p50": [round(float(v), 2) for v in p50],
-            "p75": [round(float(v), 2) for v in p75],
-            "p95": [round(float(v), 2) for v in p95]
+            "p5": [round(float(v), price_dec) for v in p5],
+            "p25": [round(float(v), price_dec) for v in p25],
+            "p50": [round(float(v), price_dec) for v in p50],
+            "p75": [round(float(v), price_dec) for v in p75],
+            "p95": [round(float(v), price_dec) for v in p95]
         },
-        "sample_traces": [[round(float(v), 2) for v in trace] for trace in sample_traces],
+        "sample_traces": [[round(float(v), price_dec) for v in trace] for trace in sample_traces],
         "bs_stoch_vol": {
             "iv_start_pct": round(iv_0 * 100.0, 2),
             "iv_terminal_median_pct": round(vol_end_med, 2),
@@ -5029,8 +5061,8 @@ def run_monte_carlo(current_price=4069.40, z_shock=0.0, horizon_days=1, n_paths=
         "metrics": {
             "p_positive_return_pct": round(p_pos, 2),
             "p_negative_return_pct": round(p_neg, 2),
-            "expected_terminal_price": round(float(np.mean(paths[:, -1])), 2),
-            "median_terminal_price": round(float(p50[-1]), 2),
+            "expected_terminal_price": round(float(np.mean(paths[:, -1])), price_dec),
+            "median_terminal_price": round(float(p50[-1]), price_dec),
             "var_95_pct": round(var_95, 2),
             "cvar_95_pct": round(cvar_95, 2),
             "tail_beyond_1sd_pct": round(tail_1sd, 1),
