@@ -136,7 +136,7 @@ class TestAStarSetupEngine(unittest.TestCase):
 
         intra = qm.calculate_daily_a_star_setup(horizon="intraday", n_paths=1000)
         self.assertEqual(intra["horizon"], "intraday")
-        self.assertEqual(intra["time_to_live"]["max_validity_minutes"], 240)
+        self.assertEqual(intra["time_to_live"]["max_validity_minutes"], 480)
         self.assertIn("Intraday", intra["execution_timeframe"])
 
         swing = qm.calculate_daily_a_star_setup(horizon="swing", n_paths=1000)

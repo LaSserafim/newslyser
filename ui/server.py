@@ -363,8 +363,8 @@ def get_live_ticks(include_astar: bool = False, horizon: str = "daily"):
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
         h_key = (horizon or "daily").lower()
-        ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
-        created_epoch, _ = get_or_create_setup_epoch(h_key, ttl_map.get(h_key, 5400))
+        ttl_map = {"scalping": 3600, "intraday": 28800, "daily": 64800, "swing": 432000, "news": 3600}
+        created_epoch, _ = get_or_create_setup_epoch(h_key, ttl_map.get(h_key, 64800))
         res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(
             current_price=current_gold, atr_m30=atr_val, dxy_val=dxy, us10y_val=us10y, us2y_val=us2y,
             wti_val=prices.get("CL=F", 86.0), vix_val=prices.get("VIX"), n_paths=10000,
@@ -484,8 +484,8 @@ def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: st
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
     h_key = (horizon or "daily").lower()
-    ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
-    ttl_sec = ttl_map.get(h_key, 5400)
+    ttl_map = {"scalping": 3600, "intraday": 28800, "daily": 64800, "swing": 432000, "news": 3600}
+    ttl_sec = ttl_map.get(h_key, 64800)
     epoch_name = f"{h_key}_{inst_key.lower()}"
     created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_sec)
     return quant_model.calculate_daily_a_star_setup(

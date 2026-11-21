@@ -434,6 +434,65 @@ class TestBtcAStarEngine(unittest.TestCase):
         self.assertAlmostEqual(shield_scalp["evt_distance_usd"], shield_d1["evt_distance_usd"] * 0.25, delta=1.0)
         self.assertGreater(shield_scalp["evt_sl_price"], shield_d1["evt_sl_price"]) # Scalping stop is tighter to entry
 
+    def test_prop_firm_100_pip_shield_and_telegram(self):
+        """Verifies Prop Firm 100-Pip Defense Rule, Expanded Lifespan (18h/8h/60m), and Telegram Engine."""
+        import telegram_bot
+
+        # 1. Check EURUSD Scalp Prop Firm Compliance
+        eur_scalp = qm.calculate_daily_a_star_setup(current_price=1.08500, atr_m30=0.0012, horizon="scalping", instrument="EURUSD")
+        self.assertIn("prop_firm_defense", eur_scalp)
+        p_def = eur_scalp["prop_firm_defense"]
+        self.assertEqual(p_def["max_drawdown_pips_limit"], 100.0)
+        self.assertLessEqual(p_def["sl_pips"], p_def["sl_pips_ceiling"])
+        self.assertTrue(p_def["is_compliant"])
+        self.assertGreaterEqual(p_def["consecutive_losses_absorbed"], 4)
+        self.assertIn("prop_firm_100_pip_shield", eur_scalp["gate_checks"])
+        self.assertEqual(eur_scalp["gate_checks"]["prop_firm_100_pip_shield"]["status"], "PASS")
+
+        # 2. Check Gold Scalp Prop Firm Compliance
+        gold_scalp = qm.calculate_daily_a_star_setup(current_price=4036.0, atr_m30=12.5, horizon="scalping", instrument="XAUUSD")
+        g_def = gold_scalp["prop_firm_defense"]
+        self.assertLessEqual(g_def["sl_pips_ceiling"], 300.0)
+
+        # 3. Check Expanded TTL Lifespans
+        ttl_scalp = qm.calculate_time_to_live_status("scalping")
+        ttl_intraday = qm.calculate_time_to_live_status("intraday")
+        ttl_daily = qm.calculate_time_to_live_status("daily")
+        self.assertEqual(ttl_scalp["max_validity_seconds"], 3600)
+        self.assertEqual(ttl_intraday["max_validity_seconds"], 28800)  # 8 hours
+        self.assertEqual(ttl_daily["max_validity_seconds"], 64800)     # 18 hours
+
+        # 4. Telegram Formatter
+        mock_setup = {
+            "setup_grade": "A* GRADE (SCALPING)",
+            "is_a_star": True,
+            "action": "BAYESIAN PROBABILITY LONG",
+            "optimal_entry": 1.08500,
+            "stop_loss": 1.08350,
+            "take_profit_1": 1.08800,
+            "take_profit_2": 1.09000,
+            "risk_reward_ratio": 2.0,
+            "safe_lot_size": 0.25,
+            "target_risk_usd": 35.0,
+            "required_margin": 13.55,
+            "setup_created_epoch": 1795276000,
+            "prop_firm_defense": {
+                "sl_pips": 15.0,
+                "remaining_pips_buffer": 85.0,
+                "consecutive_losses_absorbed": 6,
+                "is_compliant": True
+            },
+            "gate_checks": {
+                "vpin_order_flow_gate": {"status": "PASS"},
+                "hawkes_cascade_firewall": {"status": "PASS"},
+                "dfa_hurst_persistence": {"status": "PASS"}
+            }
+        }
+        card = telegram_bot.format_trade_alert(mock_setup, instrument="EURUSD", horizon="scalping")
+        self.assertIn("NEWSLYSER // A* PROP SCALP ALERT", card)
+        self.assertIn("PROP FIRM 100-PIP DEFENSE", card)
+        self.assertIn("15.0 pips", card)
+
 
 if __name__ == "__main__":
     unittest.main()

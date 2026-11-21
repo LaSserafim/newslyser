@@ -22,6 +22,7 @@ import yfinance as yf
 
 import quant_model
 import data_pipeline
+import telegram_bot
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -119,11 +120,45 @@ def _background_cache_refresher():
         _prewarm_market_data_caches()
 
 
+def _background_telegram_monitor():
+    """Background worker: evaluates active scalping & intraday A* setups and dispatches Telegram alerts."""
+    import time
+    time.sleep(15)  # Initial grace period after startup
+    while True:
+        try:
+            live = fetch_live_macro_data()
+            prices = live.get("prices", {}) if isinstance(live, dict) else {}
+            for inst in ("EURUSD", "BTCUSD", "XAUUSD"):
+                for hz in ("scalping", "intraday"):
+                    try:
+                        cur_px = prices.get(f"{inst}_PRICE")
+                        if not cur_px:
+                            if inst == "EURUSD": cur_px = prices.get("EURUSD=X", 1.0850)
+                            elif inst == "BTCUSD": cur_px = prices.get("BTC-USD", 91500.0)
+                            else: cur_px = prices.get("GC=F", 4036.0)
+
+                        atr_val = prices.get(f"{inst}_ATR_M30", 0.0012 if inst == "EURUSD" else (1000.0 if inst == "BTCUSD" else 12.5))
+                        st = quant_model.calculate_daily_a_star_setup(
+                            current_price=cur_px,
+                            atr_m30=atr_val,
+                            horizon=hz,
+                            instrument=inst
+                        )
+                        if st.get("is_a_star"):
+                            telegram_bot.dispatch_a_star_alert(st, instrument=inst, horizon=hz)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        time.sleep(60)
+
+
 @app.on_event("startup")
 def on_app_startup():
     import threading
     threading.Thread(target=_prewarm_market_data_caches, daemon=True).start()
     threading.Thread(target=_background_cache_refresher, daemon=True).start()
+    threading.Thread(target=_background_telegram_monitor, daemon=True).start()
 
 
 def fetch_live_quotes():
@@ -587,8 +622,8 @@ def get_live_ticks(include_astar: bool = False, instrument: str = "XAUUSD", hori
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
         h_key = (horizon or "daily").lower()
-        ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
-        ttl_sec = ttl_map.get(h_key, 5400)
+        ttl_map = {"scalping": 3600, "intraday": 28800, "daily": 64800, "swing": 432000, "news": 3600}
+        ttl_sec = ttl_map.get(h_key, 64800)
         epoch_name = f"{h_key}_{inst_key.lower()}"
         created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_sec)
         res["daily_a_star"] = quant_model.calculate_daily_a_star_setup(
@@ -711,9 +746,9 @@ def add_setup_to_running_list(payload: dict):
         dxy = prices.get("DX-Y.NYB", 102.24)
         us10y = prices.get("^TNX", 5.00)
         us2y = prices.get("ZT=F", 4.75)
-        ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
+        ttl_map = {"scalping": 3600, "intraday": 28800, "daily": 64800, "swing": 432000, "news": 3600}
         epoch_name = f"{h_key}_{target_asset.lower()}"
-        created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_map.get(h_key, 5400))
+        created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_map.get(h_key, 64800))
         so_key = "EURUSD_SESSION_OPEN" if target_asset == "EURUSD" else ("BTC_SESSION_OPEN" if target_asset == "BTCUSD" else "SESSION_OPEN")
         sh_key = "EURUSD_SESSION_HIGH" if target_asset == "EURUSD" else ("BTC_SESSION_HIGH" if target_asset == "BTCUSD" else "SESSION_HIGH")
         sl_key = "EURUSD_SESSION_LOW" if target_asset == "EURUSD" else ("BTC_SESSION_LOW" if target_asset == "BTCUSD" else "SESSION_LOW")
@@ -931,10 +966,10 @@ def get_high_impact_calendar():
     return data
 
 @app.get("/api/daily-a-star")
-def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: str = "XAUUSD"):
+def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: str = None, symbol: str = None):
     live = fetch_live_macro_data()
     prices = live.get("prices", {})
-    inst_upper = (instrument or "XAUUSD").upper()
+    inst_upper = (symbol or instrument or "XAUUSD").upper()
     if inst_upper in ["EURUSD", "EUR"]:
         inst_key = "EURUSD"
         if price is None:
@@ -966,8 +1001,8 @@ def get_daily_a_star(price: float = None, horizon: str = "daily", instrument: st
     us10y = prices.get("^TNX", 5.00)
     us2y = prices.get("ZT=F", 4.75)
     h_key = (horizon or "daily").lower()
-    ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 5400, "swing": 432000, "news": 3600}
-    ttl_sec = ttl_map.get(h_key, 5400)
+    ttl_map = {"scalping": 3600, "intraday": 28800, "daily": 64800, "swing": 432000, "news": 3600}
+    ttl_sec = ttl_map.get(h_key, 64800)
     epoch_name = f"{h_key}_{inst_key.lower()}"
     created_epoch, _ = get_or_create_setup_epoch(epoch_name, ttl_sec)
     return quant_model.calculate_daily_a_star_setup(
@@ -1299,8 +1334,8 @@ def reset_setup_session(event_type: str = "all", horizon: str = None):
     now_ts = int(time.time())
     ttl_map = {
         "scalping": 3600,
-        "intraday": 14400,
-        "daily": 5400,
+        "intraday": 28800,
+        "daily": 64800,
         "swing": 432000,
         "news": 3600,
         "cpi": 3600,
@@ -1324,7 +1359,7 @@ def reset_setup_session(event_type: str = "all", horizon: str = None):
 
     mgr = quant_model.SetupLifecycleManager()
     for k in keys_to_reset:
-        ttl = ttl_map.get(k, 5400)
+        ttl = ttl_map.get(k, 64800)
         epochs[k] = {"created_at": now_ts, "expires_at": now_ts + ttl}
         if hasattr(mgr, "force_reset_horizon"):
             mgr.force_reset_horizon(k)
@@ -1345,6 +1380,37 @@ def reset_setup_session(event_type: str = "all", horizon: str = None):
         "created_at_epoch": now_ts,
         "reset_horizons": keys_to_reset
     }
+
+@app.get("/api/telegram/status")
+def get_telegram_status():
+    token, chat_id = telegram_bot.get_telegram_credentials()
+    history = telegram_bot._load_alert_history()
+    return {
+        "is_configured": bool(token and chat_id),
+        "bot_username": "Newlyser_bot",
+        "chat_id": chat_id,
+        "recent_alerts_count": len(history),
+        "recent_alerts": list(history.values())[-5:]
+    }
+
+@app.post("/api/telegram/test-alert")
+def send_telegram_test_alert(instrument: str = "EURUSD", horizon: str = "scalping"):
+    live = fetch_live_macro_data()
+    prices = live.get("prices", {}) if isinstance(live, dict) else {}
+    inst_key = quant_model.get_instrument_spec(instrument)["symbol"]
+    if inst_key == "EURUSD": cur_px = prices.get("EURUSD=X", 1.0850)
+    elif inst_key == "BTCUSD": cur_px = prices.get("BTC-USD", 91500.0)
+    else: cur_px = prices.get("GC=F", 4036.0)
+
+    atr_val = prices.get(f"{inst_key}_ATR_M30", 0.0012 if inst_key == "EURUSD" else (1000.0 if inst_key == "BTCUSD" else 12.5))
+    st = quant_model.calculate_daily_a_star_setup(
+        current_price=cur_px,
+        atr_m30=atr_val,
+        horizon=horizon,
+        instrument=inst_key
+    )
+    ok, msg = telegram_bot.dispatch_a_star_alert(st, instrument=inst_key, horizon=horizon, force=True)
+    return {"status": "SUCCESS" if ok else "ERROR", "message": msg, "instrument": inst_key, "horizon": horizon}
 
 @app.get("/api/state")
 def get_state():

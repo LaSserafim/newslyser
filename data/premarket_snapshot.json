@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-11-21 05:53:36 UTC",
+  "generated_at_utc": "2026-11-21 11:33:58 UTC",
   "snapshot_policy": "FROZEN_MACRO_CONDITION (UPDATES ONLY ON STARTUP / SYNC LIVE / OFFICIAL RELEASE)",
   "daily_cross_asset_ols": {
     "n": 504,
@@ -81,7 +81,7 @@
     "gold_daily_sd_pct": 1.5861
   },
   "quant_8_snapshot": {
-    "generated_at_utc": "2026-11-21 05:53:34 UTC",
+    "generated_at_utc": "2026-11-21 11:33:55 UTC",
     "har_rv_vol": {
       "n": 715,
       "oos_n": 595,
@@ -184,13 +184,13 @@
     },
     "microstructure_flow": {
       "n_m5_bars": 13637,
-      "vpin_now": 0.517,
+      "vpin_now": 0.525,
       "vpin_toxic_gate": false,
-      "vpin_to_30m_vol_beta": 0.1617,
+      "vpin_to_30m_vol_beta": 0.1616,
       "vpin_to_30m_vol_t": 6.84,
       "vpin_to_30m_vol_p": 0.0,
-      "kyle_to_30m_vol_beta": -0.0937,
-      "kyle_to_30m_vol_t": -4.32,
+      "kyle_to_30m_vol_beta": -0.0942,
+      "kyle_to_30m_vol_t": -4.35,
       "kyle_to_30m_vol_p": 0.0,
       "ofi_to_next5m_beta": -0.0019,
       "ofi_to_next5m_t": -1.46,

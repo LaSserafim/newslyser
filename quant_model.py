@@ -1233,15 +1233,27 @@ def calculate_time_to_live_status(event_type="daily", setup_created_epoch=None, 
     Prevents page-refresh reset loops: once expires_at_epoch passes,
     the setup remains permanently EXPIRED until explicitly reset or a new session begins.
     Validity windows:
-      - CPI: 60 minutes (3,600s)
+      - CPI / PPI: 60 minutes (3,600s)
       - FOMC: 120 minutes (7,200s)
       - NFP: 90 minutes (5,400s)
-      - PPI: 60 minutes (3,600s)
-      - Daily A*: 90 minutes (5,400s)
+      - Scalping: 60 minutes (3,600s)
+      - Intraday: 480 minutes / 8 hours (28,800s session duration)
+      - Daily A*: 1,080 minutes / 18 hours (64,800s session lifespan)
+      - Swing: 7,200 minutes / 5 days (432,000s)
     """
     import time
-    ttl_map = {"cpi": 60 * 60, "fomc": 120 * 60, "nfp": 90 * 60, "ppi": 60 * 60, "scalping": 60 * 60, "daily": 90 * 60, "intraday": 240 * 60, "swing": 7200 * 60, "news": 60 * 60}
-    max_ttl_seconds = ttl_map.get(event_type.lower(), 90 * 60)
+    ttl_map = {
+        "cpi": 60 * 60,
+        "fomc": 120 * 60,
+        "nfp": 90 * 60,
+        "ppi": 60 * 60,
+        "scalping": 60 * 60,
+        "daily": 18 * 3600,
+        "intraday": 8 * 3600,
+        "swing": 5 * 86400,
+        "news": 60 * 60
+    }
+    max_ttl_seconds = ttl_map.get(event_type.lower(), 18 * 3600)
     
     now_ts = int(current_epoch) if current_epoch else int(time.time())
     
@@ -1893,7 +1905,7 @@ class SetupLifecycleManager:
         tp2_val = self._parse_price(payload.get("take_profit_2"), cur_p + default_tp2_offset if direction == "BUY" else cur_p - default_tp2_offset)
         lot_val = float(payload.get("recommended_lot") or payload.get("recommended_lot_size_1000_equity") or 0.01)
 
-        ttl_map = {"scalping": 3600, "intraday": 14400, "daily": 86400, "swing": 432000, "news": 3600}
+        ttl_map = {"scalping": 3600, "intraday": 28800, "daily": 64800, "swing": 432000, "news": 3600}
         ttl_sec = ttl_map.get(h_key, 14400)
         rand_suffix = random.randint(10, 99)
         setup_id = f"TRD-{h_key.upper()[:5]}-{time.strftime('%Y%m%d')}-{now_ts % 10000:04d}-{rand_suffix}"
@@ -4009,25 +4021,55 @@ def calculate_daily_a_star_setup(
         instrument=inst_key
     )
 
+    risk_dist_dollars = max(min_risk, abs(mid_entry - sl_val))
+    contract_val = spec["contract"]
+    risk_per_lot = risk_dist_dollars * contract_val
+
+    # Prop Firm 100-Pip Defense Shield Calculation
+    pip_size = float(spec.get("pip", 0.0001 if inst_key == "EURUSD" else (0.10 if inst_key == "XAUUSD" else 1.0)))
+    sl_pips = round(risk_dist_dollars / pip_size, 1) if pip_size > 0 else 0.0
+
+    # Horizon-based prop firm ceilings protecting the 100-pip max loss limit:
+    if h_mode == "scalping":
+        max_allowed_sl_pips = 25.0 if inst_key == "EURUSD" else (300.0 if inst_key == "XAUUSD" else 1200.0)
+    elif h_mode == "intraday":
+        max_allowed_sl_pips = 45.0 if inst_key == "EURUSD" else (500.0 if inst_key == "XAUUSD" else 2500.0)
+    elif h_mode == "daily":
+        max_allowed_sl_pips = 80.0 if inst_key == "EURUSD" else (750.0 if inst_key == "XAUUSD" else 5000.0)
+    else:  # swing / news
+        max_allowed_sl_pips = 100.0 if inst_key == "EURUSD" else (1000.0 if inst_key == "XAUUSD" else 10000.0)
+
+    prop_firm_sl_ok = bool(sl_pips <= max_allowed_sl_pips)
+    pips_pct_of_limit = round((sl_pips / 100.0) * 100.0, 1)
+    rem_pips_buffer = round(max(0.0, 100.0 - sl_pips), 1)
+    losses_absorbed = int(100.0 // max(1.0, sl_pips))
+
+    prop_firm_defense = {
+        "max_drawdown_pips_limit": 100.0,
+        "sl_pips": sl_pips,
+        "sl_pips_ceiling": max_allowed_sl_pips,
+        "consumed_pips_pct": pips_pct_of_limit,
+        "remaining_pips_buffer": rem_pips_buffer,
+        "consecutive_losses_absorbed": losses_absorbed,
+        "is_compliant": bool(prop_firm_sl_ok),
+        "verdict": f"PASS ({sl_pips:.1f} pips consumes {pips_pct_of_limit:.1f}% of 100-pip cushion)" if prop_firm_sl_ok else f"BLOCKED (SL {sl_pips:.1f} pips > {max_allowed_sl_pips:.1f} pips ceiling)"
+    }
+
     if inst_key == "EURUSD" and snr_eval is not None:
         pure_trend_pass = (not snr_eval["is_sandwich_chop"]) and (snr_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
         is_a_star = bool(
             drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and
-            (rr >= 2.50) and pure_trend_pass and hawkes_ok and hurst_ok
+            (rr >= 2.50) and pure_trend_pass and hawkes_ok and hurst_ok and prop_firm_sl_ok
         )
     elif inst_key == "BTCUSD" and btc_eval is not None:
         pure_trend_pass = (not btc_eval["is_sandwich_chop"]) and (not btc_eval["is_macro_blackout"]) and (btc_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
         is_a_star = bool(
             drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and
-            (rr >= 2.00) and pure_trend_pass and hawkes_ok and hurst_ok
+            (rr >= 2.00) and pure_trend_pass and hawkes_ok and hurst_ok and prop_firm_sl_ok
         )
     else:
-        is_a_star = bool(drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0) and hawkes_ok and hurst_ok)
+        is_a_star = bool(drift_ok and exhaustion_ok and vrp_ok and har_calm_ok and ev_ok and vpin_ok and (rr >= 1.0) and hawkes_ok and hurst_ok and prop_firm_sl_ok)
     grade = f"A* GRADE ({conviction_str})" if is_a_star else ("B-GRADE (PARTIAL REGIME)" if total_confluence >= 70.0 else "C-GRADE (NO EDGE / STAND ASIDE)")
-
-    risk_dist_dollars = max(min_risk, abs(mid_entry - sl_val))
-    contract_val = spec["contract"]
-    risk_per_lot = risk_dist_dollars * contract_val
 
     # Specialized for $20,000 USD account with 1:200 leverage and maximum 1.0% risk:
     account_equity = 20000.0
@@ -4052,7 +4094,8 @@ def calculate_daily_a_star_setup(
         "calculative_risk_reward": {"status": "VALID" if rr >= min_rr_threshold else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} (Max 1% of $20k) | Margin ${req_margin} (1:{standard_leverage})"},
         "hawkes_cascade_firewall": {"status": "PASS" if hawkes_ok else "LOCKED", "detail": f"Jump Cluster Safe (Branching η={hawkes_eval['branching_ratio']}, λ={hawkes_eval['jump_intensity']})" if hawkes_ok else f"Active Liquidation Avalanche (η={hawkes_eval['branching_ratio']} >= 0.85, relax in {hawkes_eval['t_relax_hours']}h)"},
         "dfa_hurst_persistence": {"status": "PASS" if hurst_ok else "BLOCKED", "detail": f"Hurst H={hurst_eval['hurst']:.2f} ({hurst_eval['regime']})" if hurst_ok else f"Anti-Persistent Noise H={hurst_eval['hurst']:.2f} < 0.45"},
-        "evt_cvar_stop_shield": {"status": "PASS", "detail": f"99% CVaR Shield at ${evt_shield['evt_sl_price']:.{price_dec}f} (ES_99={evt_shield['es_99_pct']}%, VaR_99={evt_shield['var_99_pct']}%)"}
+        "evt_cvar_stop_shield": {"status": "PASS", "detail": f"99% CVaR Shield at ${evt_shield['evt_sl_price']:.{price_dec}f} (ES_99={evt_shield['es_99_pct']}%, VaR_99={evt_shield['var_99_pct']}%)"},
+        "prop_firm_100_pip_shield": {"status": "PASS" if prop_firm_sl_ok else "BLOCKED", "detail": f"SL {sl_pips:.1f} pips ({pips_pct_of_limit:.1f}% of 100-pip limit) | {losses_absorbed} consecutive losses absorbable" if prop_firm_sl_ok else f"SL {sl_pips:.1f} pips exceeds {h_mode.upper()} prop limit of {max_allowed_sl_pips:.1f} pips (protecting 100-pip ceiling)"}
     }
     if inst_key == "EURUSD" and snr_eval is not None:
         pure_trend_pass = (not snr_eval["is_sandwich_chop"]) and (snr_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
@@ -4084,6 +4127,7 @@ def calculate_daily_a_star_setup(
         tp_reason = "Targets cancelled."
     elif not is_a_star:
         unmet = []
+        if not prop_firm_sl_ok: unmet.append(f"PROP FIRM SL CEILING EXCEEDED ({sl_pips:.1f} pips > {max_allowed_sl_pips:.1f} max)")
         if not exhaustion_ok: unmet.append(exhaustion_reason)
         if not drift_ok: unmet.append(f"|{z_label}|={abs(z_eff):.2f} UNMET")
         if not vrp_ok: unmet.append(f"VRP={vrp_ann:+.1f}% <= 0")
@@ -4267,6 +4311,8 @@ def calculate_daily_a_star_setup(
     return {
         "horizon": h_mode,
         "horizon_strategy_notes": horizon_strategy_notes,
+        "prop_firm_defense": prop_firm_defense,
+        "gate_checks": gate_checks,
         "instrument": spec["name"],
         "symbol": inst_key,
         "contract_size": contract_val,

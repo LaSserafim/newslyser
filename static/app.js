@@ -1984,6 +1984,26 @@ function applyAstarData(aStar) {
     stratBanner.style.background = isCore ? "#0c0a05" : "#021014";
   }
 
+  // Prop Firm 100-Pip Defense Shield & Telegram Status
+  const propDef = aStar.prop_firm_defense || {};
+  const propStatusEl = document.getElementById("ast-prop-status");
+  const propCushionEl = document.getElementById("ast-prop-cushion");
+  const propImpactEl = document.getElementById("ast-prop-impact");
+  if (propStatusEl) {
+    if (propDef.is_compliant !== undefined) {
+      propStatusEl.innerText = propDef.is_compliant 
+        ? `PASS (${propDef.sl_pips} Pips SL)` 
+        : `BLOCKED (${propDef.sl_pips} Pips > ${propDef.sl_pips_ceiling} Max)`;
+      propStatusEl.style.color = propDef.is_compliant ? "#00ff88" : "#ff3333";
+    }
+  }
+  if (propCushionEl && propDef.consecutive_losses_absorbed !== undefined) {
+    propCushionEl.innerText = `${propDef.consecutive_losses_absorbed} Losses Buffer (${propDef.remaining_pips_buffer} Pips Rem.)`;
+  }
+  if (propImpactEl && propDef.consumed_pips_pct !== undefined) {
+    propImpactEl.innerText = `${propDef.consumed_pips_pct}% of 100 Pips`;
+  }
+
   if (document.getElementById("astar-entry")) document.getElementById("astar-entry").innerText = ticket.entry_zone || "--";
   if (document.getElementById("astar-sl")) document.getElementById("astar-sl").innerText = ticket.stop_loss || "--";
   if (document.getElementById("astar-tp1")) document.getElementById("astar-tp1").innerText = ticket.take_profit_1 || "--";
@@ -2750,6 +2770,22 @@ function initAutoRefreshLoop() {
       console.warn("Reset setup session failed:", e);
     }
     setTimeout(() => { b.innerText = "FORCE RE-EVALUATE SESSION <GO>"; }, 800);
+  });
+  document.getElementById("btn-telegram-ping")?.addEventListener("click", async () => {
+    const b = document.getElementById("btn-telegram-ping");
+    b.innerText = "SENDING...";
+    const asset = window._CURRENT_ASTAR_ASSET || "EURUSD";
+    const h = (EVENT_STATE.astar && EVENT_STATE.astar.horizon) || "scalping";
+    try {
+      const resp = await fetch(`/api/telegram/test-alert?instrument=${asset}&horizon=${h}`, { method: "POST" });
+      const res = await resp.json();
+      b.innerText = res.status === "SUCCESS" ? "SENT ✓" : "ERROR";
+      setTimeout(() => { b.innerText = "TEST PING"; }, 2500);
+    } catch (e) {
+      console.warn("Telegram ping failed:", e);
+      b.innerText = "FAILED";
+      setTimeout(() => { b.innerText = "TEST PING"; }, 2500);
+    }
   });
 
   document.getElementById("btn-add-astar-running")?.addEventListener("click", async () => {
