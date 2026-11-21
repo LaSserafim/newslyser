@@ -3130,25 +3130,32 @@ def evaluate_btc_a_star_regime(
     funding_rate_8h: float = 0.0001,
     macro_blackout_active: bool = False,
     funding_rate_pct: float = None,
-    macro_event_in_window: bool = False
+    macro_event_in_window: bool = False,
+    z_eff: float = None,
+    hurst_h: float = None,
+    hawkes_eta: float = None,
+    vpin_val: float = None
 ) -> dict:
     """
     BITCOIN A* INSTITUTIONAL QUANTITATIVE CONFLUENCE ENGINE:
-    1. Trend Deduction & Multi-Timeframe Alignment:
-       - Bullish Pure-Trend: Price > EMA 50 > EMA 200 (Longs permitted, Shorts blocked)
-       - Bearish Pure-Trend: Price < EMA 50 < EMA 200 (Shorts permitted, Longs blocked)
-       - Zero Counter-Trend Gate: Counter-trend trades are strictly locked out.
-    2. Sandwich Chop Zone Blackout:
-       - If min(EMA 50, EMA 200) <= Price <= max(EMA 50, EMA 200):
-         Price is in chop compression. Hard-blocks execution as STAND ASIDE.
-    3. Macro Event Liquidity Blackout Firewall:
+    1. Directional Quantitative Momentum (Pure Mathematical Probability):
+       - Positive Momentum: Bayesian Causal Drift z_eff >= +0.75σ (Longs permitted, Shorts blocked)
+       - Negative Momentum: Bayesian Causal Drift z_eff <= -0.75σ (Shorts permitted, Longs blocked)
+       - Neutral Dead-Band: |z_eff| < 0.75σ (Stand Aside // Zero Directional Advantage)
+       - Zero Lagging Indicators: Free of EMA 50/200 phase delays and false sandwich chop blackouts.
+    2. Detrended Fluctuation Analysis (DFA) Hurst Filter:
+       - Persistent Trend: Hurst H >= 0.44 (Momentum persistence validated)
+       - Anti-Persistent Noise: Hurst H < 0.44 (Hard-blocks execution as STAND ASIDE)
+    3. Hawkes (1971) Self-Exciting Point Process Cascade Firewall:
+       - Branching ratio η < 0.85: Subcritical / Cascade Safe
+       - Branching ratio η >= 0.85: Supercritical Liquidation Avalanche (Hard Stand Aside)
+    4. Macro Event Liquidity Blackout Firewall:
        - If macro_blackout_active (within T-30m to T+15m of FOMC/CPI/NFP):
          Hard-blocks execution as STAND ASIDE (avoids $100-$300 spread spikes & liquidation cascades).
-    4. Derivatives & Perp Funding Gate:
+    5. Derivatives & Perp Funding Gate:
        - Overheated Longs (> +0.035% per 8h): Warns/blocks Longs due to long squeeze liquidation hazard.
        - Short Squeeze Fuel (< -0.015% per 8h): Warns/blocks Shorts due to short squeeze expansion.
-    5. Structural S/R Retest & 1:200 Broker Leverage Dynamics:
-       - Retest within 0.35x ATR_M15 of anchor support/resistance.
+    6. Microstructure S/R & 1:200 Broker Leverage Dynamics ($20,000 USD Account, Max 1.0% Risk):
        - Dynamic Breakeven Shield at +1.0R (ratchets stop loss to entry +/- $15.00).
        - Minimum 1:2.00 RR Target.
     """
@@ -3167,10 +3174,7 @@ def evaluate_btc_a_star_regime(
     # 1. Macro Event Blackout Check
     is_macro_blackout = bool(macro_blackout_active or macro_event_in_window)
 
-    # 2. Sandwich Chop Zone Check
-    is_sandwich_chop = min(e50, e200) <= cp <= max(e50, e200)
-
-    # 3. Derivatives Funding Analysis
+    # 2. Derivatives Funding Analysis
     if funding_rate_pct is not None:
         funding = float(funding_rate_pct) / 100.0 if abs(float(funding_rate_pct)) > 0.01 else float(funding_rate_pct)
     else:
@@ -3183,51 +3187,109 @@ def evaluate_btc_a_star_regime(
         else (f"CAUTION: Negative Perp Funding ({funding*100:.3f}%/8h) - Short squeeze expansion fuel." if funding_squeeze_short else "STABLE")
     )
 
-    # 4. Trend Deduction
-    if is_macro_blackout:
-        trend_regime = "MACRO_EVENT_BLACKOUT"
-        is_bullish_trend = False
-        is_bearish_trend = False
-        allowed_direction = "STAND_ASIDE"
-        reason = "MACRO LIQUIDITY BLACKOUT: High-impact macro release imminent/active. Spreads elevated; execution gated."
-    elif is_sandwich_chop:
-        trend_regime = "SANDWICH_CHOP_BLACKOUT"
-        is_bullish_trend = False
-        is_bearish_trend = False
-        allowed_direction = "STAND_ASIDE"
-        reason = f"SANDWICH CHOP BLACKOUT: Price ${cp:.2f} trapped between EMA50 (${e50:.2f}) and EMA200 (${e200:.2f}) compression."
-    elif cp > e50 > e200:
-        if funding_overheated_long:
-            trend_regime = "FUNDING_OVERHEATED_CAUTION"
+    # 3. Pure Mathematical Probability Architecture (if z_eff is provided) vs Legacy EMA Fallback
+    if z_eff is not None:
+        z_val = float(z_eff)
+        is_sandwich_chop = False  # Completely purged in pure quant momentum mode
+
+        if is_macro_blackout:
+            trend_regime = "MACRO_EVENT_BLACKOUT"
             is_bullish_trend = False
             is_bearish_trend = False
             allowed_direction = "STAND_ASIDE"
-            reason = f"OVERHEATED PERP FUNDING ({funding*100:.3f}%): Elevated long liquidation cascade risk. Stand aside."
-        else:
-            trend_regime = "BULLISH_PURE_TREND"
-            is_bullish_trend = True
-            is_bearish_trend = False
-            allowed_direction = "BUY"
-            reason = f"BULLISH PURE-TREND: Price (${cp:.2f}) > EMA50 (${e50:.2f}) > EMA200 (${e200:.2f}). Longs strictly permitted."
-    elif cp < e50 < e200:
-        if funding_squeeze_short:
-            trend_regime = "FUNDING_SQUEEZE_CAUTION"
+            reason = "MACRO LIQUIDITY BLACKOUT: High-impact macro release imminent/active. Spreads elevated; execution gated."
+        elif hawkes_eta is not None and float(hawkes_eta) >= 0.85:
+            trend_regime = "HAWKES_CASCADE_LOCKOUT"
             is_bullish_trend = False
             is_bearish_trend = False
             allowed_direction = "STAND_ASIDE"
-            reason = f"NEGATIVE PERP FUNDING ({funding*100:.3f}%): Short squeeze hazard detected. Stand aside."
-        else:
-            trend_regime = "BEARISH_PURE_TREND"
+            reason = f"HAWKES AVALANCHE FIREWALL: Branching ratio η={float(hawkes_eta):.2f} >= 0.85. Cascading liquidations active. Stand aside."
+        elif hurst_h is not None and float(hurst_h) < 0.44:
+            trend_regime = "HURST_MEAN_REVERTING_CHOP"
             is_bullish_trend = False
-            is_bearish_trend = True
-            allowed_direction = "SELL"
-            reason = f"BEARISH PURE-TREND: Price (${cp:.2f}) < EMA50 (${e50:.2f}) < EMA200 (${e200:.2f}). Shorts strictly permitted."
+            is_bearish_trend = False
+            allowed_direction = "STAND_ASIDE"
+            reason = f"DFA HURST CHOP: Hurst H={float(hurst_h):.2f} < 0.44 indicates anti-persistent brownian noise. Stand aside."
+        elif z_val >= 0.75:
+            if funding_overheated_long:
+                trend_regime = "FUNDING_OVERHEATED_CAUTION"
+                is_bullish_trend = False
+                is_bearish_trend = False
+                allowed_direction = "STAND_ASIDE"
+                reason = f"OVERHEATED PERP FUNDING ({funding*100:.3f}%): Elevated long liquidation cascade risk. Stand aside."
+            else:
+                trend_regime = "BULLISH_PURE_TREND"
+                is_bullish_trend = True
+                is_bearish_trend = False
+                allowed_direction = "BUY"
+                reason = f"BULLISH QUANT MOMENTUM: Bayesian Drift z={z_val:+.2f}σ >= +0.75σ. Pure mathematical momentum confirmed."
+        elif z_val <= -0.75:
+            if funding_squeeze_short:
+                trend_regime = "FUNDING_SQUEEZE_CAUTION"
+                is_bullish_trend = False
+                is_bearish_trend = False
+                allowed_direction = "STAND_ASIDE"
+                reason = f"NEGATIVE PERP FUNDING ({funding*100:.3f}%): Short squeeze hazard detected. Stand aside."
+            else:
+                trend_regime = "BEARISH_PURE_TREND"
+                is_bullish_trend = False
+                is_bearish_trend = True
+                allowed_direction = "SELL"
+                reason = f"BEARISH QUANT MOMENTUM: Bayesian Drift z={z_val:+.2f}σ <= -0.75σ. Pure mathematical momentum confirmed."
+        else:
+            trend_regime = "NEUTRAL_DRIFT_DEADBAND"
+            is_bullish_trend = False
+            is_bearish_trend = False
+            allowed_direction = "STAND_ASIDE"
+            reason = f"NEUTRAL MOMENTUM DEADBAND: Bayesian Drift |z|={abs(z_val):.2f} < 0.75σ. Zero mathematical edge."
     else:
-        trend_regime = "EMA_TRANSITION_CHOP"
-        is_bullish_trend = False
-        is_bearish_trend = False
-        allowed_direction = "STAND_ASIDE"
-        reason = f"TRANSITION CHOP: EMA50 (${e50:.2f}) vs EMA200 (${e200:.2f}) not in pure directional alignment."
+        # Legacy EMA Fallback (for unparameterized legacy callers/tests)
+        is_sandwich_chop = min(e50, e200) <= cp <= max(e50, e200)
+
+        if is_macro_blackout:
+            trend_regime = "MACRO_EVENT_BLACKOUT"
+            is_bullish_trend = False
+            is_bearish_trend = False
+            allowed_direction = "STAND_ASIDE"
+            reason = "MACRO LIQUIDITY BLACKOUT: High-impact macro release imminent/active. Spreads elevated; execution gated."
+        elif is_sandwich_chop:
+            trend_regime = "SANDWICH_CHOP_BLACKOUT"
+            is_bullish_trend = False
+            is_bearish_trend = False
+            allowed_direction = "STAND_ASIDE"
+            reason = f"SANDWICH CHOP BLACKOUT: Price ${cp:.2f} trapped between EMA50 (${e50:.2f}) and EMA200 (${e200:.2f}) compression."
+        elif cp > e50 > e200:
+            if funding_overheated_long:
+                trend_regime = "FUNDING_OVERHEATED_CAUTION"
+                is_bullish_trend = False
+                is_bearish_trend = False
+                allowed_direction = "STAND_ASIDE"
+                reason = f"OVERHEATED PERP FUNDING ({funding*100:.3f}%): Elevated long liquidation cascade risk. Stand aside."
+            else:
+                trend_regime = "BULLISH_PURE_TREND"
+                is_bullish_trend = True
+                is_bearish_trend = False
+                allowed_direction = "BUY"
+                reason = f"BULLISH PURE-TREND: Price (${cp:.2f}) > EMA50 (${e50:.2f}) > EMA200 (${e200:.2f}). Longs strictly permitted."
+        elif cp < e50 < e200:
+            if funding_squeeze_short:
+                trend_regime = "FUNDING_SQUEEZE_CAUTION"
+                is_bullish_trend = False
+                is_bearish_trend = False
+                allowed_direction = "STAND_ASIDE"
+                reason = f"NEGATIVE PERP FUNDING ({funding*100:.3f}%): Short squeeze hazard detected. Stand aside."
+            else:
+                trend_regime = "BEARISH_PURE_TREND"
+                is_bullish_trend = False
+                is_bearish_trend = True
+                allowed_direction = "SELL"
+                reason = f"BEARISH PURE-TREND: Price (${cp:.2f}) < EMA50 (${e50:.2f}) < EMA200 (${e200:.2f}). Shorts strictly permitted."
+        else:
+            trend_regime = "EMA_TRANSITION_CHOP"
+            is_bullish_trend = False
+            is_bearish_trend = False
+            allowed_direction = "STAND_ASIDE"
+            reason = f"TRANSITION CHOP: EMA50 (${e50:.2f}) vs EMA200 (${e200:.2f}) not in pure directional alignment."
 
     # 5. S/R Anchors & Retest Check
     s_anchor = round(anchor_support if anchor_support is not None else (cp - 1.5 * atr), 2)
@@ -3581,6 +3643,17 @@ def calculate_daily_a_star_setup(
                 bias = "BEARISH_PURE_TREND"
                 conviction_str = "BEARISH PURE-TREND COMPOUNDING (MIN 1:2.50 RR)"
 
+    # Pre-compute Hawkes cascade and DFA Hurst persistence for multi-asset confluence gates
+    hawkes_eval = compute_hawkes_jump_cascade(
+        returns=np.array([r5_pct, z_eff, z_20, (session_h - session_l) / current_price * 100.0])
+    )
+    hawkes_ok = not hawkes_eval["is_cascade_active"]
+
+    hurst_eval = compute_dfa_hurst(
+        returns=np.array([r5_pct, z_eff, z_20, (session_h - session_l) / current_price * 100.0])
+    )
+    hurst_ok = hurst_eval["hurst"] >= 0.45
+
     # Bitcoin A* Institutional Quantitative Confluence Engine
     btc_eval = None
     if inst_key == "BTCUSD":
@@ -3606,6 +3679,10 @@ def calculate_daily_a_star_setup(
 
         btc_eval = evaluate_btc_a_star_regime(
             current_price=current_price,
+            z_eff=z_eff,
+            hurst_h=hurst_eval["hurst"] if hurst_eval else None,
+            hawkes_eta=hawkes_eval["branching_ratio"] if hawkes_eval else None,
+            vpin_val=vpin_now,
             ema50=ema50_val if ema50_val > 0 else None,
             ema200=ema200_val if ema200_val > 0 else None,
             atr_m15=atr_m30,
@@ -3621,38 +3698,18 @@ def calculate_daily_a_star_setup(
             exhaustion_reason = btc_eval["reason"]
             bias = "MACRO_EVENT_BLACKOUT"
             conviction_str = "MACRO BLACKOUT // STAND ASIDE"
-        elif btc_eval["is_sandwich_chop"]:
-            drift_ok = False
-            exhaustion_ok = False
-            exhaustion_reason = btc_eval["reason"]
-            bias = "SANDWICH_CHOP_BLACKOUT"
-            conviction_str = "SANDWICH CHOP BLACKOUT // STAND ASIDE"
-        elif btc_eval["trend_regime"] in ("EMA_TRANSITION_CHOP", "FUNDING_OVERHEATED_CAUTION", "FUNDING_SQUEEZE_CAUTION"):
+        elif btc_eval.get("trend_regime") in ("HAWKES_CASCADE_LOCKOUT", "HURST_MEAN_REVERTING_CHOP", "NEUTRAL_DRIFT_DEADBAND", "FUNDING_OVERHEATED_CAUTION", "FUNDING_SQUEEZE_CAUTION", "SANDWICH_CHOP_BLACKOUT", "EMA_TRANSITION_CHOP"):
             drift_ok = False
             exhaustion_ok = False
             exhaustion_reason = btc_eval["reason"]
             bias = btc_eval["trend_regime"]
             conviction_str = f"{btc_eval['trend_regime']} // STAND ASIDE"
         elif btc_eval["is_bullish_trend"]:
-            if z_eff < 0:
-                drift_ok = False
-                exhaustion_ok = False
-                exhaustion_reason = f"COUNTER-TREND SHORT BLOCKED BY BULLISH PURE-TREND (Price ${current_price:.2f} > EMA50 ${btc_eval['ema50']:.2f} > EMA200 ${btc_eval['ema200']:.2f})"
-                bias = "COUNTER_TREND_BLOCKED"
-                conviction_str = "COUNTER-TREND BLOCKED // STAND ASIDE"
-            else:
-                bias = "BULLISH_PURE_TREND"
-                conviction_str = "BULLISH PURE-TREND (MIN 1:2.00 RR)"
+            bias = "BULLISH_QUANT_MOMENTUM" if btc_eval.get("trend_regime") == "BULLISH_QUANT_MOMENTUM" else "BULLISH_PURE_TREND"
+            conviction_str = "BULLISH QUANT MOMENTUM (MIN 1:2.00 RR)"
         elif btc_eval["is_bearish_trend"]:
-            if z_eff > 0:
-                drift_ok = False
-                exhaustion_ok = False
-                exhaustion_reason = f"COUNTER-TREND LONG BLOCKED BY BEARISH PURE-TREND (Price ${current_price:.2f} < EMA50 ${btc_eval['ema50']:.2f} < EMA200 ${btc_eval['ema200']:.2f})"
-                bias = "COUNTER_TREND_BLOCKED"
-                conviction_str = "COUNTER-TREND BLOCKED // STAND ASIDE"
-            else:
-                bias = "BEARISH_PURE_TREND"
-                conviction_str = "BEARISH PURE-TREND (MIN 1:2.00 RR)"
+            bias = "BEARISH_QUANT_MOMENTUM" if btc_eval.get("trend_regime") == "BEARISH_QUANT_MOMENTUM" else "BEARISH_PURE_TREND"
+            conviction_str = "BEARISH QUANT MOMENTUM (MIN 1:2.00 RR)"
 
     p_drift_bull = round(_ncdf(z_eff) * 100.0, 1)
     p_drift_bear = round(100.0 - p_drift_bull, 1)
@@ -3972,10 +4029,10 @@ def calculate_daily_a_star_setup(
     contract_val = spec["contract"]
     risk_per_lot = risk_dist_dollars * contract_val
 
-    # Specialized for $10,000 - $20,000 USD account with 1:200 leverage and maximum 1.0% risk:
-    account_equity = 10000.0
+    # Specialized for $20,000 USD account with 1:200 leverage and maximum 1.0% risk:
+    account_equity = 20000.0
     max_risk_pct = 1.0
-    base_risk_budget = account_equity * (max_risk_pct / 100.0)  # $100.00
+    base_risk_budget = account_equity * (max_risk_pct / 100.0)  # $200.00
     target_risk_usd = round(base_risk_budget * vol_target_scalar * (quarter_kelly_pct / 2.0), 2)
     target_risk_usd = min(base_risk_budget, max(10.0, target_risk_usd))
 
@@ -3992,7 +4049,7 @@ def calculate_daily_a_star_setup(
         "har_rv_stability": {"status": "PASS" if har_calm_ok else "UNMET", "detail": f"RV5 {rv5_ann:.1f}% vs 1.15*RV22 ({1.15*rv22_ann:.1f}%) | HAR-RV Scalar {vol_target_scalar:.2f}x"},
         "mark_to_market_ev": {"status": "PASS" if ev_ok else "UNMET", "detail": f"P(Win) {win_rate}% (min {min_win_threshold:.1f}%) | M2M EV={ev_r:+.3f}R | Kelly/4={quarter_kelly_pct}% | PF={pf}"},
         "vpin_order_flow_gate": {"status": "PASS" if vpin_ok else "LOCKED", "detail": f"VPIN={vpin_now:.3f} ({'< 0.65 INTRADAY / < 0.70 DAILY SAFE' if vpin_ok else 'TOXIC ORDER FLOW'}) | Kyle λ={kyles_lambda:.4f}"},
-        "calculative_risk_reward": {"status": "VALID" if rr >= min_rr_threshold else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} (Max 1% of $10k) | Margin ${req_margin} (1:{standard_leverage})"},
+        "calculative_risk_reward": {"status": "VALID" if rr >= min_rr_threshold else "UNMET", "detail": f"RR 1:{rr:.2f} ({conviction_str}) | Risk ${target_risk_usd:.2f} (Max 1% of $20k) | Margin ${req_margin} (1:{standard_leverage})"},
         "hawkes_cascade_firewall": {"status": "PASS" if hawkes_ok else "LOCKED", "detail": f"Jump Cluster Safe (Branching η={hawkes_eval['branching_ratio']}, λ={hawkes_eval['jump_intensity']})" if hawkes_ok else f"Active Liquidation Avalanche (η={hawkes_eval['branching_ratio']} >= 0.85, relax in {hawkes_eval['t_relax_hours']}h)"},
         "dfa_hurst_persistence": {"status": "PASS" if hurst_ok else "BLOCKED", "detail": f"Hurst H={hurst_eval['hurst']:.2f} ({hurst_eval['regime']})" if hurst_ok else f"Anti-Persistent Noise H={hurst_eval['hurst']:.2f} < 0.45"},
         "evt_cvar_stop_shield": {"status": "PASS", "detail": f"99% CVaR Shield at ${evt_shield['evt_sl_price']:.{price_dec}f} (ES_99={evt_shield['es_99_pct']}%, VaR_99={evt_shield['var_99_pct']}%)"}
@@ -4004,9 +4061,9 @@ def calculate_daily_a_star_setup(
             "detail": snr_eval["reason"]
         }
     if inst_key == "BTCUSD" and btc_eval is not None:
-        pure_trend_pass = (not btc_eval["is_sandwich_chop"]) and (not btc_eval["is_macro_blackout"]) and (btc_eval["trend_regime"] in ("BULLISH_PURE_TREND", "BEARISH_PURE_TREND"))
+        pure_trend_pass = (not btc_eval.get("is_macro_blackout", False)) and (btc_eval.get("allowed_direction") in ("BUY", "SELL"))
         gate_checks["btc_pure_trend_macro_gate"] = {
-            "status": "PASS" if pure_trend_pass else ("BLOCKED" if (btc_eval["is_sandwich_chop"] or btc_eval["is_macro_blackout"]) else "UNMET"),
+            "status": "PASS" if pure_trend_pass else ("BLOCKED" if btc_eval.get("is_macro_blackout", False) else "UNMET"),
             "detail": btc_eval["reason"]
         }
 

@@ -81,12 +81,14 @@ def run_btc_zero_lookahead_audit():
     btc_open = raw_btc['Open'].reindex(btc_close.index).ffill()
     btc_high = raw_btc['High'].reindex(btc_close.index).ffill()
     btc_low = raw_btc['Low'].reindex(btc_close.index).ffill()
+    btc_vol = raw_btc['Volume'].reindex(btc_close.index).ffill()
 
     df_bars = pd.DataFrame({
         'BTC_Open': btc_open,
         'BTC_High': btc_high,
         'BTC_Low': btc_low,
-        'BTC_Close': btc_close
+        'BTC_Close': btc_close,
+        'BTC_Volume': btc_vol
     }).dropna()
 
     n_bars = len(df_bars)
@@ -107,9 +109,10 @@ def run_btc_zero_lookahead_audit():
     rv5 = r_btc.rolling(5).std() * math.sqrt(365.0)
     rv22 = r_btc.rolling(22).std() * math.sqrt(365.0)
 
-    # Pure-Trend EMAs
-    ema50 = df_bars['BTC_Close'].ewm(span=50, adjust=False).mean()
-    ema200 = df_bars['BTC_Close'].ewm(span=200, adjust=False).mean()
+    # 20-day Volume Weighted Average Price (VWAP) as mathematical center of gravity
+    cum_pv = (df_bars['BTC_Close'] * df_bars['BTC_Volume']).rolling(20).sum()
+    cum_v = df_bars['BTC_Volume'].rolling(20).sum()
+    vwap20 = cum_pv / cum_v.replace(0, np.nan)
 
     # Split In-Sample vs Out-of-Sample
     # IS: Start -> 2023-12-31 (Bear Market $69k -> $15.5k -> $42k recovery)
@@ -241,62 +244,65 @@ def run_btc_zero_lookahead_audit():
         }
 
     # -------------------------------------------------------------
-    # 3. MULTI-HORIZON TRACKS EVALUATION (A* PULLBACK RETEST CONFLUENCE)
+    # 3. MULTI-HORIZON TRACKS EVALUATION (PURE QUANT VWAP / DRIFT / HURST / HAWKES)
     # -------------------------------------------------------------
-    def _run_track(name, max_hold, sl_mult, rr_mult):
+    def _run_track(name, max_hold, sl_mult, rr_mult, z_win=20):
         trades = []
-        i = 200
+        i = 60
         while i < len(df_bars) - max_hold:
             px = float(df_bars['BTC_Close'].iloc[i])
-            e50 = float(ema50.iloc[i])
-            e200 = float(ema200.iloc[i])
-            atrv = float(atr14.iloc[i])
-            lo_i = float(df_bars['BTC_Low'].iloc[i])
-            hi_i = float(df_bars['BTC_High'].iloc[i])
             op_i = float(df_bars['BTC_Open'].iloc[i])
+            hi_i = float(df_bars['BTC_High'].iloc[i])
+            lo_i = float(df_bars['BTC_Low'].iloc[i])
+            atrv = float(atr14.iloc[i])
+            vwap_i = float(vwap20.iloc[i]) if not np.isnan(vwap20.iloc[i]) else px
 
-            # Sandwich Chop Blackout
-            if min(e50, e200) <= px <= max(e50, e200):
+            recent_rets = r_btc.iloc[max(0, i-z_win):i+1].dropna().values
+            if len(recent_rets) < 15:
                 i += 1
                 continue
 
-            bull_trend = (px > e50 > e200)
-            bear_trend = (px < e50 < e200)
+            # 1. Bayesian Drift Velocity
+            mu_post = float(np.mean(recent_rets))
+            std_r = float(np.std(recent_rets, ddof=1)) or 1.0
+            z_eff = mu_post / (std_r / math.sqrt(len(recent_rets)))
 
-            # A* Retest & Pullback Confirmation
-            bull_pullback = bull_trend and (lo_i <= e50 + 0.75 * atrv) and (px >= e50 - 0.25 * atrv) and (px > op_i)
-            bear_pullback = bear_trend and (hi_i >= e50 - 0.75 * atrv) and (px <= e50 + 0.25 * atrv) and (px < op_i)
+            # Deadband
+            if abs(z_eff) < 0.75:
+                i += 1
+                continue
 
-            if bull_pullback or bear_pullback:
-                # 1. Point process Hawkes cascade firewall check
-                recent_rets = r_btc.iloc[max(0, i-60):i+1].dropna().values
-                if len(recent_rets) >= 20:
-                    hwk = quant_model.compute_hawkes_jump_cascade(recent_rets)
-                    if hwk["is_cascade_active"]:
-                        i += 1
-                        continue
-                    # 2. DFA Hurst Exponent check (block anti-persistent chop)
-                    hurst_res = quant_model.compute_dfa_hurst(recent_rets)
-                    if hurst_res["hurst"] < 0.42:
-                        i += 1
-                        continue
+            # 2. DFA Hurst Persistence
+            h_res = quant_model.compute_dfa_hurst(recent_rets)
+            if h_res['hurst'] < 0.44:
+                i += 1
+                continue
 
-                side = 1 if bull_pullback else -1
+            # 3. Hawkes Jump Cascade Firewall
+            hwk = quant_model.compute_hawkes_jump_cascade(recent_rets)
+            if hwk['is_cascade_active']:
+                i += 1
+                continue
+
+            # 4. Pure Mathematical Liquidity Sweep & Directional Impulse
+            bull_signal = (z_eff >= 0.75) and (lo_i <= vwap_i + 0.5 * atrv) and (px > op_i)
+            bear_signal = (z_eff <= -0.75) and (hi_i >= vwap_i - 0.5 * atrv) and (px < op_i)
+
+            if bull_signal or bear_signal:
+                side = 1 if bull_signal else -1
                 sl_d = sl_mult * atrv
 
-                # 3. EVT 99% Expected Shortfall Stop Shield
-                if len(recent_rets) >= 20:
-                    evt_res = quant_model.compute_evt_cvar_stop_shield(
-                        returns=recent_rets,
-                        current_price=px,
-                        direction="BUY" if side == 1 else "SELL",
-                        alpha=0.99,
-                        instrument="BTCUSD"
-                    )
-                    evt_dist = evt_res.get("evt_distance_usd", sl_d)
-                    sl_d = max(sl_d, min(sl_mult * 1.5 * atrv, evt_dist))
-
+                # EVT Tail Shield
+                evt_res = quant_model.compute_evt_cvar_stop_shield(
+                    recent_rets,
+                    px,
+                    direction=('BUY' if side == 1 else 'SELL'),
+                    instrument='BTCUSD'
+                )
+                evt_dist = evt_res.get("evt_distance_usd", sl_d)
+                sl_d = max(sl_d, min(sl_mult * 1.5 * atrv, evt_dist))
                 tp_d = rr_mult * sl_d
+
                 res = _simulate_btc_trade_forward(entry_idx=i+1, max_hold_days=max_hold, side=side, sl_d=sl_d, tp_d=tp_d)
                 if res:
                     res['type'] = f'BTC_A*_{name.upper()}'
@@ -306,10 +312,10 @@ def run_btc_zero_lookahead_audit():
             i += 1
         return trades
 
-    scalp_trades = _run_track('Scalping', max_hold=1, sl_mult=0.75, rr_mult=1.5)
-    intra_trades = _run_track('Intraday', max_hold=2, sl_mult=1.00, rr_mult=2.0)
-    daily_trades = _run_track('Daily', max_hold=5, sl_mult=1.50, rr_mult=2.5)
-    swing_trades = _run_track('Swing', max_hold=10, sl_mult=2.50, rr_mult=3.0)
+    scalp_trades = _run_track('Scalping', max_hold=1, sl_mult=0.75, rr_mult=1.8, z_win=15)
+    intra_trades = _run_track('Intraday', max_hold=2, sl_mult=1.00, rr_mult=2.0, z_win=20)
+    daily_trades = _run_track('Daily', max_hold=5, sl_mult=1.50, rr_mult=2.5, z_win=25)
+    swing_trades = _run_track('Swing', max_hold=10, sl_mult=2.50, rr_mult=3.0, z_win=30)
 
     # Combined All Trades
     all_trades = scalp_trades + intra_trades + daily_trades + swing_trades
