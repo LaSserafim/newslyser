@@ -168,6 +168,10 @@ def compute_custom_sizing(setup, instrument="EURUSD"):
     # Broker step = 0.01 lot. Floor to 2 decimals to NEVER exceed max_loss_usd!
     lot_size = max(0.01, math.floor(exact_lots * 100.0) / 100.0)
 
+    # Hard mathematical ceiling: ensure actual loss never exceeds max_loss_usd
+    while lot_size > 0.01 and round(lot_size * loss_per_lot, 2) > max_loss_usd:
+        lot_size = round(lot_size - 0.01, 2)
+
     max_cap = 5.00 if spec["symbol"] == "EURUSD" else (0.50 if spec["symbol"] == "XAUUSD" else 0.20)
     lot_size = min(max_cap, lot_size)
 
@@ -263,6 +267,7 @@ def format_trade_alert(setup, instrument="EURUSD", horizon="scalping", title_pre
             f"• VPIN: <code>{html.escape(str(vpin_status))}</code> | Hawkes: <code>{html.escape(str(hawkes_status))}</code> | Hurst: <code>{html.escape(str(hurst_status))}</code>\n"
             f"• Confluence Score: <b>{score}/100</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ <b>RULE:</b> Strictly ONE position (max ${max_loss_usd:.2f} risk). DO NOT STACK or re-enter.\n"
             f"⏰ <i>Live verified feed. Enter limit order on broker.</i>"
         )
         return text
@@ -361,9 +366,19 @@ def dispatch_a_star_alert(setup, instrument="EURUSD", horizon="scalping", force=
     created_epoch = setup.get("setup_created_epoch") or setup.get("epoch", int(time.time()))
     alert_key = f"{str(instrument).upper()}_{str(horizon).lower()}_{created_epoch}"
 
+    now_ts = int(time.time())
     history = _load_alert_history()
-    if not force and alert_key in history:
-        return False, f"Already alerted for {alert_key}"
+    if not force:
+        if alert_key in history:
+            return False, f"Already alerted for {alert_key}"
+        # Anti-spam cooldown: enforce minimum 1800s (30m) between alerts for the same instrument & horizon
+        inst_clean = str(instrument).upper()
+        hz_clean = str(horizon).lower()
+        for k, v in history.items():
+            if v.get("instrument") == inst_clean and v.get("horizon") == hz_clean:
+                last_ts = v.get("timestamp", 0)
+                if (now_ts - last_ts) < 1800:
+                    return False, f"Cooldown active: {inst_clean} {hz_clean} alerted {now_ts - last_ts}s ago (< 1800s)"
 
     msg = format_trade_alert(setup, instrument=instrument, horizon=horizon, title_prefix="A* PROP SCALP ALERT")
     ok, err = send_telegram_message(msg, reply_markup=get_main_reply_keyboard())

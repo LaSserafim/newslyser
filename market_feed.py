@@ -383,4 +383,13 @@ def get_live_market_setup(instrument="EURUSD", horizon="scalping"):
     setup["take_profit_1"] = tp_p
     setup["take_profit_2"] = round(entry_p + 1.5 * (tp_p - entry_p), price_dec) if tp_p != entry_p else tp_p
 
+    # Inject persistent setup epoch to ensure consistent lifecycle across Telegram & API
+    try:
+        from app import get_or_create_setup_epoch
+        c_ep, exp_ep = get_or_create_setup_epoch(f"{horizon}_{inst_key.lower()}")
+        setup["setup_created_epoch"] = c_ep
+        setup["setup_expires_epoch"] = exp_ep
+    except Exception:
+        pass
+
     return setup, inst_key, prices

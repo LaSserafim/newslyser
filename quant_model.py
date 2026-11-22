@@ -3500,17 +3500,22 @@ def calculate_daily_a_star_setup(
         z_eff = z_m15_1h if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else z_20
         mu_eff = mu_m15_post if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else mu_daily_post
         z_label = "z_m15(1H)" if intra_reg.get("source") == "YAHOO_INTRADAY_LIVE" else "z20"
-        # Counter-trend guard: minor pullbacks (<2.0σ) against D1 are blocked; extreme squeezes (>=2.0σ) permitted as thrust scalps
-        counter_d1 = (z_eff * z_20 < 0.0) if (abs(z_20) >= 0.50 and abs(z_eff) < 2.0) else False
+        # Counter-trend guard: minor pullbacks (<2.5σ) against D1 are blocked
+        counter_d1 = (z_eff * z_20 < 0.0) if (abs(z_20) >= 0.50 and abs(z_eff) < 2.50) else False
+        # Squeeze exhaustion / mean-reversion lockout: NEVER chase after a 3.5σ terminal capitulation wick
+        is_exhausted = abs(z_eff) >= 3.50
         if counter_d1:
             exhaustion_ok = False
             exhaustion_reason = f"COUNTER-TREND SCALP AGAINST D1 MACRO (M15 {z_eff:+.2f}σ vs D1 {z_20:+.2f}σ) — BLOCKED"
-        drift_ok = (abs(z_eff) >= 0.85) and (not counter_d1)
+        elif is_exhausted:
+            exhaustion_ok = False
+            exhaustion_reason = f"TERMINAL IMPULSE EXHAUSTION (M15 {z_eff:+.2f}σ >= 3.50σ) — MEAN REVERSION RISK, DO NOT CHASE"
+        drift_ok = (abs(z_eff) >= 0.85) and (not counter_d1) and (not is_exhausted)
         vpin_now = float(m5_flow.get("vpin_now", 0.44))
         vpin_ok = (vpin_now < 0.60)
         conviction_str = (
             f"EXTREME LIVE SQUEEZE {'BUY' if z_eff > 0 else 'SELL'} MOMENTUM (1:1.75 RR THRUST)"
-            if (z_eff * z_20 < 0.0 and abs(z_eff) >= 2.0) else "SCALPING MOMENTUM (1:1.75 RR QUICK HARVEST)"
+            if (z_eff * z_20 < 0.0 and 2.50 <= abs(z_eff) < 3.50) else "SCALPING MOMENTUM (1:1.75 RR QUICK HARVEST)"
         )
         timeframe_label = f"Scalping Horizon (Live M5/M15) + {n_paths:,}-Path SDE"
         exec_tf_label = "Scalping Horizon (0.25 / 0.38 / 0.50 ATR_D1)"
